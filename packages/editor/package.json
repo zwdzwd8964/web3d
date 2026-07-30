@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
-    "build": "node -e \"console.log('[@w3/editor] no sources yet — T-060..T-072, T-090..T-093 not started')\"",
+    "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",

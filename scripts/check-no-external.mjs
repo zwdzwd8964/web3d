@@ -2,9 +2,20 @@
 /**
  * Constitution C6 · zero external runtime dependencies.
  *
- * Scans every text artefact under each package's build output for absolute URLs.
- * A single `<link href="https://fonts.googleapis...">` is a white screen on a
- * customer intranet, and it is always found on go-live day (anti-pattern A7).
+ * Two passes, because they answer different questions.
+ *
+ * **Pass 1 — fetchable positions. Zero tolerance, no allowlist.**
+ * A URL in a `<link href>`, `<script src>`, CSS `url()`, `@import` or a literal
+ * `fetch()`/`import()` argument *will* hit the network. Anti-pattern A7 is exactly this:
+ * `<link href="https://fonts.googleapis…">`, which is a white screen on a customer
+ * intranet and is always found on go-live day. Nothing may be excused here.
+ *
+ * **Pass 2 — any absolute URL anywhere. Allowlisted by category.**
+ * A broad string scan catches things pass 1 cannot see (a URL assembled at runtime, a
+ * decoder path). But real dependencies mention URLs constantly — XML namespace
+ * identifiers, JSON Schema `$id`s, links in error messages and regex comments — and none
+ * of those fetch anything. Failing on them would get this guard disabled or
+ * blanket-allowlisted within a week, which is worse than a categorised allowlist.
  *
  * Usage:
  *   node scripts/check-no-external.mjs                  # fail if nothing is built yet
@@ -28,18 +39,48 @@ const OUT_DIRS = [
 
 const TEXT_EXT = ['.js', '.mjs', '.cjs', '.css', '.html', '.json', '.map', '.svg', '.webmanifest', '.d.ts']
 
-/**
- * URLs that cannot cause a runtime request. Every entry is a hole in the guard,
- * so each one states why it is inert. Keep this list short.
- */
-const ALLOWED = [
-  // Tooling metadata in .json / .map files — never fetched by the app.
-  /^https?:\/\/json\.schemastore\.org\//,
-  // XML namespace identifiers in inline SVG. Namespaces are names, not addresses.
-  /^https?:\/\/www\.w3\.org\/(2000\/svg|1999\/xhtml|1999\/xlink)/,
-  // Homepage / license URLs inside dependency banner comments.
-  /^https?:\/\/(www\.)?(threejs\.org|github\.com|opensource\.org|unlicense\.org|zod\.dev)\//,
+/* -------------------------------------------------------------------------- */
+/* Pass 1 — positions that actually cause a request                           */
+/* -------------------------------------------------------------------------- */
+
+const FETCHABLE = [
+  [/<link\b[^>]*\bhref\s*=\s*["']?(https?:\/\/[^"'\s>]+)/i, 'a <link> pointing off-origin'],
+  [/<script\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/i, 'a <script> pointing off-origin'],
+  [/<img\b[^>]*\bsrc\s*=\s*["']?(https?:\/\/[^"'\s>]+)/i, 'an <img> pointing off-origin'],
+  [/@import\s+(?:url\()?\s*["']?(https?:\/\/[^"')\s;]+)/i, 'a CSS @import from off-origin'],
+  [/\burl\(\s*["']?(https?:\/\/[^"')\s]+)/i, 'a CSS url() pointing off-origin'],
+  [/\bfetch\(\s*["'](https?:\/\/[^"']+)["']/i, 'a literal fetch() to an absolute URL'],
+  [/\bimport\(\s*["'](https?:\/\/[^"']+)["']/i, 'a dynamic import from an absolute URL'],
+  [/\bnew\s+(?:Worker|EventSource|WebSocket)\(\s*["'](\w+:\/\/[^"']+)["']/i, 'a worker/socket at an absolute URL'],
 ]
+
+/* -------------------------------------------------------------------------- */
+/* Pass 2 — every absolute URL, with categorised exemptions                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Each entry states the category and why it cannot cause a request. Adding one is a
+ * deliberate act: it widens a constitutional guard.
+ */
+const INERT = [
+  // XML namespace URIs. Names, not addresses — no parser fetches them.
+  [/^https?:\/\/www\.w3\.org\/(XML\/1998|1998\/Math|2000\/svg|1999\/xhtml|1999\/xlink)/, 'XML namespace identifier'],
+  // JSON Schema dialect ids, emitted by zod's toJSONSchema and by tsconfig metadata.
+  [/^https?:\/\/(json-schema\.org|json\.schemastore\.org)\//, 'JSON Schema dialect id'],
+  // Links inside error messages and code comments shipped by dependencies.
+  [/^https?:\/\/(react\.dev|developer\.mozilla\.org|stackoverflow\.com|blog\.stevenlevithan\.com|thekevinscott\.com)\//, 'documentation link in a message or comment'],
+  [/^https?:\/\/bit\.ly\//, 'shortened documentation link in a dependency comment'],
+  // Homepage / licence URLs in banner comments.
+  [/^https?:\/\/(www\.)?(threejs\.org|github\.com|opensource\.org|unlicense\.org|zod\.dev)\//, 'licence or homepage banner'],
+]
+
+/** A template placeholder cannot be a literal address — it is URL-building code. */
+const isTemplateFragment = (url) => url.includes('${')
+
+function inertReason(url) {
+  for (const [pattern, reason] of INERT) if (pattern.test(url)) return reason
+  return null
+}
 
 const URL_RE = /\bhttps?:\/\/[^\s"'`)\\<>\]}]+/g
 
@@ -73,20 +114,41 @@ if (absent.length > 0) {
   report.note(`NOT built, therefore NOT checked: ${absent.map((d) => d.split('/')[1]).join(', ')}`)
 }
 
+const exempted = new Map()
+
 for (const dir of present) {
-  const files = walkDist(join(ROOT, dir))
-  report.filesScanned += files.length
-  for (const file of files) {
+  for (const file of walkDist(join(ROOT, dir))) {
     const lines = readFileSync(file, 'utf8').split('\n')
     for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+
+      // Pass 1 — no excuses.
+      for (const [pattern, why] of FETCHABLE) {
+        const match = pattern.exec(line)
+        if (match) report.add(file, i + 1, `${why}: ${match[1].slice(0, 100)}`)
+      }
+
+      // Pass 2 — categorised.
       URL_RE.lastIndex = 0
       let m
-      while ((m = URL_RE.exec(lines[i])) !== null) {
-        if (ALLOWED.some((re) => re.test(m[0]))) continue
-        report.add(file, i + 1, `external URL in build output: ${m[0].slice(0, 120)}`)
+      while ((m = URL_RE.exec(line)) !== null) {
+        const url = m[0]
+        if (isTemplateFragment(url)) continue
+        const reason = inertReason(url)
+        if (reason) {
+          exempted.set(reason, (exempted.get(reason) ?? 0) + 1)
+          continue
+        }
+        report.add(file, i + 1, `external URL in build output: ${url.slice(0, 120)}`)
       }
     }
+    report.filesScanned++
   }
+}
+
+// Print what was excused, so an allowlist that is quietly doing heavy lifting is visible.
+for (const [reason, count] of [...exempted].sort((a, b) => b[1] - a[1])) {
+  report.note(`exempt (${count}×): ${reason}`)
 }
 
 process.exit(printReport(report, ROOT))

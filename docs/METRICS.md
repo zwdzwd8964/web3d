@@ -13,7 +13,7 @@ NORTH_STAR §7 要求每个版本收尾把指标表填一遍。**数值不重要
 | `@w3/core` 中框架相关 import 数 | 0 | **0** | 由 `check-core-purity.mjs` 机械保证；已用探针实证它真能拦住 `import React` |
 | 新增一个动作类型所需改动文件数 | ≤ 3 | **2** | `actions/<group>.ts`（定义 + 加入 BUILTIN_ACTIONS 数组，同一文件）+ `actions.test.ts`。若该动作需要新的 RuntimeContext 能力则 +2（`eca/types.ts` 与两个 Runtime 实现），仍在 3 以内的精神范围但已触及上限 |
 | 已注册动作的单测覆盖 | 100% | **100%（13/13）** | G0-5 门槛：`actions.test.ts` 遍历注册表比对测试清单，注册了却没写测试即 fail |
-| Player 构建产物体积（gzip） | ≤ 400 KB | **未适用** | Player 未开工（T-101） |
+| Player 构建产物体积（gzip） | ≤ 400 KB | **未适用** | Player 未开工（T-101）。参考：编辑器壳 gzip 94.4 KB（含 React，未含 three） |
 | 从零构建耗时 | 记录基线 | **2,325 ms** | 已连网，`rm -rf packages/*/dist && pnpm build`。**断网构建尚未实测**（C6 的这一半仍未验证） |
 | 分诊落在 Q4 的需求占比 | —（v1 起考核） | — | |
 | core 复用率 | —（v2 起考核） | — | |
