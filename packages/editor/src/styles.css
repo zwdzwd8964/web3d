@@ -630,3 +630,62 @@ code {
   opacity: 0.45;
   font-style: italic;
 }
+
+/* --- save state ------------------------------------------------------------ */
+
+.savestate {
+  font-size: 11px;
+  color: var(--dim);
+  min-width: 44px;
+}
+
+.savestate--error {
+  color: var(--warn);
+}
+
+.savestate--saved {
+  color: var(--ok);
+}
+
+/* --- modal, inline rename --------------------------------------------------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 55%);
+}
+
+.modal__body {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 45%);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tbtn--danger {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.tree-row__rename {
+  flex: 1;
+  min-width: 0;
+  background: var(--raise);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: inherit;
+  font: inherit;
+  padding: 0 4px;
+}

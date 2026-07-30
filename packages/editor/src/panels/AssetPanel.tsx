@@ -1,9 +1,9 @@
 import type { AuditFinding } from '@w3/schema'
-import { AssetLoader, createMemoryResolver, formatBytes } from '@w3/core'
-import { MemoryProvider } from '@w3/storage'
+import { formatBytes } from '@w3/core'
 import { useRef, useState } from 'react'
-import { applyImport, importModel, summarizeImport } from '../lib/import-flow.js'
+import { applyImport, importModel, placeInstance, summarizeImport } from '../lib/import-flow.js'
 import type { ImportProgress, ImportResult } from '../lib/import-flow.js'
+import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 
 /**
@@ -18,11 +18,10 @@ import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.j
  * dialog: "已迁移 N 项 / 需确认 M 项 / 失效 K 项", with the orphans listed for re-pointing.
  */
 
-// v0 keeps assets in memory until project persistence lands with the storage wiring.
-const storage = new MemoryProvider()
-const loader = new AssetLoader({ resolver: createMemoryResolver(new Map()) })
-
 export function AssetPanel() {
+  // One session for the whole editor. A second storage/loader pair lived here once, and
+  // the result was an import that reported success everywhere except the viewport.
+  const { storage, loader } = useProject()
   const doc = useDocumentSelector((s) => s.doc)
   const { commit } = useDocumentActions()
 
@@ -48,6 +47,19 @@ export function AssetPanel() {
       setPending(result)
     } catch (cause) {
       setProgress(null)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const addInstance = async (assetId: string, name: string) => {
+    setError(null)
+    try {
+      const nodes = await placeInstance({ doc, assetId, loader })
+      // One undo entry for the whole placement, not one per node.
+      commit(`放置实例 ${name}`, (draft) => {
+        draft.nodes.push(...nodes.map((n) => ({ ...n })))
+      })
+    } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
@@ -106,6 +118,14 @@ export function AssetPanel() {
               <span className="num">{formatBytes(asset.stats.bytes)}</span>
               <span className="num">{asset.stats.tris.toLocaleString('en-US')} 面</span>
               {asset.audit && <AuditBadge findings={asset.audit.findings} />}
+              <button
+                type="button"
+                className="tbtn"
+                title="在场景中再放一份该资产的实例"
+                onClick={() => void addInstance(asset.id, asset.name)}
+              >
+                放置实例
+              </button>
               <button
                 type="button"
                 className="tbtn"

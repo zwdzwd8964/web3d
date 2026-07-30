@@ -1,7 +1,8 @@
 import type { Transform } from '@w3/schema'
-import { Gizmo, SceneRuntime, buildSamplePumpGlb, createMemoryResolver } from '@w3/core'
+import { DomHotspotRenderer, Gizmo, SceneRuntime } from '@w3/core'
 import type { GizmoMode, GizmoSpace } from '@w3/core'
 import { useEffect, useRef, useState } from 'react'
+import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
 import { setActiveRuntime } from './runtime-registry.js'
 
@@ -18,12 +19,13 @@ import { setActiveRuntime } from './runtime-registry.js'
  */
 
 export function Viewport() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const runtimeRef = useRef<SceneRuntime | null>(null)
   const gizmoRef = useRef<Gizmo | null>(null)
 
+  const session = useProject()
   const store = useDocumentStore()
   const { previewStart, preview, previewCommit, toggleSelection, clearSelection } = useDocumentActions()
   const selection = useDocumentSelector((s) => s.selection)
@@ -50,21 +52,38 @@ export function Viewport() {
   // Mount once. The document is read from the store rather than passed as a prop so a
   // document change never remounts the renderer — that would drop the GPU context.
   useEffect(() => {
-    const canvas = canvasRef.current
     const host = hostRef.current
-    if (!canvas || !host) return
+    const overlay = overlayRef.current
+    if (!host || !overlay) return
 
-    // Filled below, before `load`. The map is mutable on purpose so the runtime can be
-    // constructed synchronously while the sample asset is still being generated.
-    const files = new Map<string, ArrayBuffer>()
+    // The canvas is created here rather than rendered by React on purpose.
+    //
+    // StrictMode mounts, unmounts and remounts every effect in development. Our cleanup
+    // disposes the WebGLRenderer, which force-loses the GL context — and with a
+    // JSX-rendered canvas the second mount got the SAME DOM element, now holding a dead
+    // context. The observable symptom was `CONTEXT_LOST_WEBGL` on every cold start. A
+    // fresh element per mount makes the double-invoke harmless, which is the point of
+    // the double-invoke.
+    const canvas = document.createElement('canvas')
+    canvas.className = 'viewport__canvas'
+    host.insertBefore(canvas, overlay)
+    canvasRef.current = canvas
 
     const runtime = new SceneRuntime(store.getState().doc, {
       canvas,
-      // Project assets arrive from StorageProvider once project loading lands; the
-      // sample document is served its own generated GLB so the editor is never dead on
-      // arrival.
-      resolver: createMemoryResolver(files),
+      // One resolver for the whole editor, shared with the asset panel's importer. Two
+      // of them is how "the tree grew but the viewport stayed empty" happened.
+      resolver: session.resolver,
       mode: 'edit',
+      hotspotRenderer: new DomHotspotRenderer({
+        container: overlay,
+        // Edit mode selects; it does not fire rules (ECA_SPEC §7). Clicking a marker
+        // selects the node it is anchored to, which is what you want when placing them.
+        onActivate: (hotspotId) => {
+          const hotspot = store.getState().doc.hotspots.find((h) => h.id === hotspotId)
+          if (hotspot) toggleSelection(hotspot.anchor.nodeId, false)
+        },
+      }),
       onLog: (level, message) => {
         if (level !== 'debug') console.warn(`[runtime] ${message}`)
       },
@@ -90,17 +109,7 @@ export function Viewport() {
 
     let cancelled = false
     void (async () => {
-      const doc = store.getState().doc
-      const sampleAsset = doc.assets[0]
-      if (sampleAsset) {
-        try {
-          files.set(sampleAsset.url, await buildSamplePumpGlb())
-        } catch (error) {
-          console.warn('[viewport] 示例资产生成失败，场景将以占位节点显示', error)
-        }
-      }
-      if (cancelled) return
-      await runtime.load(doc)
+      await runtime.load(store.getState().doc)
       if (cancelled) return
       setReady(true)
     })()
@@ -114,9 +123,11 @@ export function Viewport() {
       resize.disconnect()
       gizmo.dispose()
       runtime.dispose()
+      canvas.remove()
       setActiveRuntime(null)
       runtimeRef.current = null
       gizmoRef.current = null
+      canvasRef.current = null
     }
     // Mount-only on purpose; everything else is pushed in through refs and the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,6 +150,8 @@ export function Viewport() {
   useEffect(() => {
     const canvas = canvasRef.current
     const host = hostRef.current
+    // `ready` is in the dependency list so this re-runs once the mount effect has created
+    // the canvas; on the first pass there is nothing to bind to yet.
     if (!canvas || !host) return
 
     let dragging: { x: number; y: number; button: number } | null = null
@@ -197,11 +210,11 @@ export function Viewport() {
       canvas.removeEventListener('wheel', wheel)
       canvas.removeEventListener('contextmenu', contextMenu)
     }
-  }, [store, toggleSelection, clearSelection])
+  }, [store, toggleSelection, clearSelection, ready])
 
   return (
     <div className="viewport" ref={hostRef}>
-      <canvas className="viewport__canvas" ref={canvasRef} />
+      {/* The canvas is inserted before this overlay by the mount effect. */}
       <div className="viewport__overlay" ref={overlayRef} />
       <div className="viewport__tools">
         <div className="seg">

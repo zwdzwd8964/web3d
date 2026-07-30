@@ -72,11 +72,43 @@ export function createRuntimeBridge(options: RuntimeBridgeOptions): RuntimeBridg
  * D1: patches go to `applyPatch`, never `load`. Dragging a gizmo emits a patch per
  * frame, and rebuilding the scene on each one drops the frame rate to unusable.
  * The fallback counter is surfaced so the E2E run can assert it stayed at zero.
+ *
+ * One commit is not synchronous, though: an import adds an asset, and the nodes it brings
+ * cannot be materialised until the bytes are parsed. So a batch that touches `/assets`
+ * goes through a queue — `ensureAssets` first, then the patches. Everything else takes
+ * the synchronous fast path, because a gizmo drag must not be pushed onto a microtask
+ * queue behind an import that happened to still be loading.
  */
 export function createPatchForwarder(getRuntime: () => SceneRuntime | null) {
+  // Serialises the slow path. Without it, two imports in quick succession could apply
+  // their node patches in the order their assets finished parsing rather than the order
+  // the user made them, and the second import's nodes would land against the first
+  // import's document.
+  let queue: Promise<void> = Promise.resolve()
+  let queued = 0
+
   return (patches: Parameters<SceneRuntime['applyPatch']>[0], next: SceneDocument, prev: SceneDocument) => {
     const runtime = getRuntime()
     if (!runtime) return
-    runtime.applyPatch(patches, next, prev)
+
+    const touchesAssets = patches.some((patch) => patch.path[0] === 'assets')
+    if (!touchesAssets && queued === 0) {
+      runtime.applyPatch(patches, next, prev)
+      return
+    }
+
+    queued++
+    queue = queue
+      .then(async () => {
+        const live = getRuntime()
+        if (!live) return
+        if (touchesAssets) await live.ensureAssets(next)
+        live.applyPatch(patches, next, prev)
+      })
+      .finally(() => {
+        // Back to the fast path once the queue drains: one import must not make every
+        // later edit asynchronous for the rest of the session.
+        queued--
+      })
   }
 }

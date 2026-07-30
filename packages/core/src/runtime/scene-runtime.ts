@@ -97,6 +97,7 @@ export class SceneRuntime implements RuntimeContext {
       materials: this.materials,
       highlights: this.highlights,
       rebuild: (doc) => this.rebuild(doc),
+      applyMeta: (doc) => this.applyBackground(doc),
       log: (level, message, data) => this.log(level, message, data),
     })
 
@@ -157,17 +158,37 @@ export class SceneRuntime implements RuntimeContext {
   /** Builds the scene graph and loads every model asset the document references. */
   async load(doc: SceneDocument): Promise<void> {
     this.document = doc
+    await this.ensureAssets(doc)
+    this.graph.setAssetSource(this.loader)
+    this.rebuild(doc)
+    this.camera.frameAll()
+  }
+
+  /**
+   * Loads any model asset the document names that the loader does not already hold.
+   *
+   * Split out of `load` because an import adds an asset to a document that is otherwise
+   * unchanged: the nodes it brings can be added incrementally (D1), but only once their
+   * bytes are in hand — and getting them is async while `applyPatch` is not. The host
+   * awaits this first; `createPatchForwarder` does that automatically.
+   *
+   * @returns the ids that were newly loaded, so a caller can tell whether anything moved.
+   */
+  async ensureAssets(doc: SceneDocument): Promise<string[]> {
+    const loaded: string[] = []
     for (const asset of doc.assets) {
-      if (asset.type !== 'model') continue
+      if (asset.type !== 'model' || this.loader.has(asset.id)) continue
       try {
         await this.loader.load(asset)
+        loaded.push(asset.id)
       } catch (error) {
         this.log('error', `资产加载失败：${asset.name}`, error)
       }
     }
+    // Idempotent, and required on the first call: the graph materialises geometry through
+    // this source, and a graph built before it was set holds only placeholders.
     this.graph.setAssetSource(this.loader)
-    this.rebuild(doc)
-    this.camera.frameAll()
+    return loaded
   }
 
   private rebuild(doc: SceneDocument): void {

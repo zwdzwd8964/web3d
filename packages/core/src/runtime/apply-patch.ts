@@ -30,6 +30,8 @@ export interface PatchApplierTargets {
   readonly highlights?: HighlightLayer
   /** Called when a patch cannot be handled incrementally. */
   readonly rebuild: (doc: SceneDocument) => void
+  /** Re-reads `doc.meta` — background colour, mostly. */
+  readonly applyMeta?: (doc: SceneDocument) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -83,14 +85,31 @@ export class PatchApplier {
         return this.applyNodePatch(patch, indexRaw, rest, next, prev)
       case 'materials':
         return this.applyMaterialPatch(patch, indexRaw, rest, next)
-      // Collections with no renderer-side representation: the ECA engine reads them
-      // straight from the document, so there is nothing to update here.
+      case 'meta':
+        // Background and unit/up-axis live here. Re-reading the whole meta block is
+        // cheaper than the switch that would tell them apart.
+        this.targets.applyMeta?.(next)
+        return true
+      case 'assets':
+        // Asset BYTES are loaded asynchronously and therefore cannot be handled from a
+        // synchronous patch. The host is responsible for awaiting `ensureAssets` BEFORE
+        // handing these patches over — `createPatchForwarder` does exactly that. By the
+        // time we get here the loader already has them, and the node patches that follow
+        // in the same batch materialise the geometry.
+        return true
+      // Collections with no renderer-side representation: the ECA engine and the hotspot
+      // projector read them straight from the document, so there is nothing to mirror.
       case 'rules':
       case 'variables':
+      case 'viewpoints':
+      case 'animations':
+      case 'hotspots':
       case 'pages':
       case 'flows':
       case 'media':
       case 'name':
+      case 'schemaVersion':
+      case 'id':
         return true
       default:
         return false
@@ -106,8 +125,14 @@ export class PatchApplier {
   ): boolean {
     const { graph, materials } = this.targets
 
-    // `/nodes` wholesale — an import or an undo of one. Nothing incremental to do.
-    if (indexRaw === undefined) return false
+    // `/nodes` wholesale. Immer emits this whenever the array is REPLACED rather than
+    // mutated — `draft.nodes = draft.nodes.filter(...)` is the common way to write a
+    // delete, and an import that appends can produce it too. Falling back to a full
+    // rebuild here made `fullRebuildCount` non-zero on three ordinary operations
+    // (import / save viewpoint / delete node), which destroys its value as D1's alarm.
+    // Diffing the two lists is strictly more work than the fallback in the worst case and
+    // dramatically less in every real one.
+    if (indexRaw === undefined) return this.reconcileNodes(next, prev)
 
     const index = Number(indexRaw)
     if (!Number.isInteger(index)) return false
@@ -187,6 +212,47 @@ export class PatchApplier {
     const def: MaterialDef | undefined = next.materials[index]
     if (!def) return false
     this.targets.materials.updateDefinition(def, next, this.targets.graph)
+    return true
+  }
+
+  /**
+   * Brings the scene graph in line with `next.nodes` without rebuilding it.
+   *
+   * Adds run parent-first: `graph.addNode` refuses a node whose parent is not in the
+   * graph yet, and an import hands us a whole subtree at once. Removes run first so an
+   * id that was deleted and re-added in one commit does not collide.
+   */
+  private reconcileNodes(next: SceneDocument, prev: SceneDocument): boolean {
+    const { graph } = this.targets
+    const before = new Map(prev.nodes.map((n) => [n.id, n]))
+    const after = new Map(next.nodes.map((n) => [n.id, n]))
+
+    for (const id of before.keys()) {
+      // removeNode drops the whole subtree, so a child removed alongside its parent is
+      // already gone by the time we reach it — not an error.
+      if (!after.has(id)) graph.removeNode(id)
+    }
+
+    const pending = next.nodes.filter((n) => !before.has(n.id))
+    let guard = pending.length + 1
+    while (pending.length > 0 && guard-- > 0) {
+      const remaining: typeof pending = []
+      for (const node of pending) {
+        if (graph.addNode(node) === null && !graph.objectFor(node.id)) remaining.push(node)
+      }
+      // No progress this pass means the rest are unreachable — a parent chain pointing at
+      // a node that does not exist. Report it rather than looping.
+      if (remaining.length === pending.length) return false
+      pending.length = 0
+      pending.push(...remaining)
+    }
+    if (pending.length > 0) return false
+
+    for (const node of next.nodes) {
+      if (before.get(node.id) === node) continue // untouched by this commit
+      if (!before.has(node.id)) continue // freshly added above, already current
+      if (!this.resyncNode(node.id, next)) return false
+    }
     return true
   }
 

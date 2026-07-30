@@ -8,6 +8,7 @@ import { HistoryPanel } from './panels/HistoryPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
 import { ViewpointPanel } from './panels/ViewpointPanel.js'
+import { useAutoSave } from './project/useAutoSave.js'
 import { useDocumentActions, useDocumentSelector } from './store/StoreContext.js'
 import { Viewport } from './viewport/Viewport.js'
 import { fullRebuildCount } from './viewport/runtime-registry.js'
@@ -89,6 +90,7 @@ function TopBar() {
       <button type="button" className="tbtn" onClick={redo} disabled={!canRedo} title="Ctrl+Y">
         重做
       </button>
+      <SaveControl />
       <div className="topbar__spacer" />
       <div className="seg">
         <button type="button" aria-pressed="true">
@@ -102,6 +104,41 @@ function TopBar() {
       </div>
     </header>
   )
+}
+
+/**
+ * The save button and its state.
+ *
+ * The state is shown rather than assumed. Autosave that gives no feedback is
+ * indistinguishable from no autosave — the user refreshes, finds their work gone, and has
+ * no way to know whether it was ever written.
+ */
+function SaveControl() {
+  const { state, error, saveNow } = useAutoSave()
+  return (
+    <>
+      <button
+        type="button"
+        className="tbtn"
+        onClick={saveNow}
+        title="Ctrl+S · 编辑后也会自动保存"
+        disabled={state === 'saving'}
+      >
+        保存
+      </button>
+      <span className={`savestate savestate--${state}`} title={error ?? undefined}>
+        {SAVE_LABELS[state]}
+      </span>
+    </>
+  )
+}
+
+const SAVE_LABELS: Record<ReturnType<typeof useAutoSave>['state'], string> = {
+  idle: '',
+  pending: '待保存',
+  saving: '保存中…',
+  saved: '已保存',
+  error: '保存失败',
 }
 
 function BottomDock() {

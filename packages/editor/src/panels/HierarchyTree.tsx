@@ -25,6 +25,8 @@ export function HierarchyTree() {
   const { commit, select, toggleSelection } = useDocumentActions()
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<RemoveRequest | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<(DropTarget & { ok: boolean }) | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -74,7 +76,7 @@ export function HierarchyTree() {
     })
   }
 
-  const remove = (nodeId: string) => {
+  const askRemove = (nodeId: string) => {
     const index = buildIndex(doc)
     const affected = describeReferences(index, nodeId)
     const subtree = getSubtreeIds(doc, nodeId)
@@ -86,9 +88,20 @@ export function HierarchyTree() {
       : subtree.length > 1
         ? `将同时删除「${name}」及其 ${subtree.length - 1} 个子对象。确认？`
         : `确认删除「${name}」？`
-    if (!globalThis.confirm(question)) return
-    commit(`删除 ${name}`, (draft) => {
-      draft.nodes = draft.nodes.filter((n) => !subtree.includes(n.id))
+    setConfirming({ nodeId, name, question, subtree })
+  }
+
+  const doRemove = (request: RemoveRequest) => {
+    setConfirming(null)
+    commit(`删除 ${request.name}`, (draft) => {
+      // Spliced in place rather than `draft.nodes = filter(...)`. Immer describes a
+      // reassignment as one patch replacing the WHOLE array, which the renderer then has
+      // to diff — D1's `fullRebuildCount` used to go up by one on every delete because of
+      // this line. Removing by index emits one `remove` patch per node, which the patch
+      // applier maps straight onto `graph.removeNode`.
+      for (let i = draft.nodes.length - 1; i >= 0; i--) {
+        if (request.subtree.includes(draft.nodes[i]!.id)) draft.nodes.splice(i, 1)
+      }
     })
   }
 
@@ -145,10 +158,7 @@ export function HierarchyTree() {
                     onDrop()
                   }}
                   onClick={(event) => onRowClick(row.node.id, event)}
-                  onDoubleClick={() => {
-                    const name = globalThis.prompt('重命名', row.node.name)
-                    if (name !== null) rename(row.node.id, name)
-                  }}
+                  onDoubleClick={() => setRenaming(row.node.id)}
                 >
                   <button
                     type="button"
@@ -168,7 +178,31 @@ export function HierarchyTree() {
                       ⚠
                     </span>
                   )}
-                  <span className="tree-row__name">{row.node.name}</span>
+                  {/* T-063 asks for INLINE rename. A native prompt() blocks the main
+                      thread, cannot be styled, and drops a Windows dialog into the middle
+                      of a dark self-drawn UI. */}
+                  {renaming === row.node.id ? (
+                    <input
+                      className="tree-row__rename"
+                      defaultValue={row.node.name}
+                      autoFocus
+                      onClick={(event) => event.stopPropagation()}
+                      onBlur={(event) => {
+                        rename(row.node.id, event.currentTarget.value)
+                        setRenaming(null)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                        else if (event.key === 'Escape') {
+                          // Reset first so the blur handler writes the original back.
+                          event.currentTarget.value = row.node.name
+                          event.currentTarget.blur()
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="tree-row__name">{row.node.name}</span>
+                  )}
 
                   <button
                     type="button"
@@ -206,7 +240,7 @@ export function HierarchyTree() {
                     title="删除"
                     onClick={(event) => {
                       event.stopPropagation()
-                      remove(row.node.id)
+                      askRemove(row.node.id)
                     }}
                   >
                     ✕
@@ -220,7 +254,56 @@ export function HierarchyTree() {
       {dropTarget && !dropTarget.ok && (
         <div className="panel__note panel__note--warn">{describeRejection(doc, dragging, dropTarget)}</div>
       )}
+
+      {confirming && (
+        <ConfirmDialog
+          question={confirming.question}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => doRemove(confirming)}
+        />
+      )}
     </aside>
+  )
+}
+
+interface RemoveRequest {
+  readonly nodeId: string
+  readonly name: string
+  readonly question: string
+  readonly subtree: readonly string[]
+}
+
+/**
+ * The in-app replacement for `confirm()`.
+ *
+ * The sentence it shows — 「阀盖」被 1 个动画、1 个热点、1 条规则 引用，删除后这些引用会
+ * 失效 — is the most useful thing the editor says, and it deserves better than a native
+ * dialog that blocks the main thread, cannot be styled to match, and needs special
+ * handling to drive from an E2E run.
+ */
+function ConfirmDialog({
+  question,
+  onConfirm,
+  onCancel,
+}: {
+  question: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="modal" role="dialog" aria-modal="true" onClick={onCancel}>
+      <div className="modal__body" onClick={(event) => event.stopPropagation()}>
+        <p>{question}</p>
+        <div className="modal__actions">
+          <button type="button" className="tbtn" onClick={onCancel} autoFocus>
+            取消
+          </button>
+          <button type="button" className="tbtn tbtn--danger" onClick={onConfirm}>
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

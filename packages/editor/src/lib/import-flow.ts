@@ -79,8 +79,20 @@ export async function importModel(options: ImportOptions): Promise<ImportResult>
   })
 
   if (existing) {
-    // Same bytes, already recorded: nothing to store, nothing to instantiate.
-    return { asset: existing, audit, nodes: [], deduplicated: true, hash }
+    // Same bytes, already recorded. D4's deduplication is about STORAGE, not about
+    // instances: the user who drags the same file in twice wants a second copy in the
+    // scene, and returning zero nodes here was read — correctly — as "the tool cannot
+    // place more than one object". The blob is reused; the nodes are new.
+    report('instantiating', '正在建立场景节点…')
+    const reused = await loader.parse(existing.id, file.bytes)
+    const { nodes } = instantiate(reused.scene, {
+      assetId: existing.id,
+      rootMatrix: normalization.matrix,
+      newId,
+      existingIds: collectAllIds(doc),
+    })
+    report('done', '导入完成')
+    return { asset: existing, audit, nodes, deduplicated: true, hash }
   }
 
   report('storing', '正在写入存储…')
@@ -146,6 +158,36 @@ export function summarizeImport(result: ImportResult): string {
     const migrated = result.remap.exact.length + result.remap.byName.length + result.remap.byPathScore.length
     return `已迁移 ${migrated} 项 / 需确认 ${result.remap.ambiguous.length} 项 / 失效 ${result.remap.orphaned.length} 项`
   }
-  if (result.deduplicated) return '该文件已在库中，直接复用，未重复占用存储'
+  if (result.deduplicated) {
+    return `该文件已在库中，复用已有资产未重复占用存储；新增 ${result.nodes.length} 个对象`
+  }
   return `新增 ${result.nodes.length} 个对象`
+}
+
+/**
+ * Places another instance of an asset already in the document.
+ *
+ * The same work an import does after the health check, without the file: this is the
+ * explicit form of "put another one of those in the scene", which previously had no entry
+ * point at all.
+ */
+export async function placeInstance(options: {
+  readonly doc: SceneDocument
+  readonly assetId: string
+  readonly loader: AssetLoader
+  readonly newId?: IdFactory
+}): Promise<readonly Node[]> {
+  const { doc, assetId, loader } = options
+  const asset = doc.assets.find((a) => a.id === assetId)
+  if (!asset) throw new Error(`文档中没有这个资产：${assetId}`)
+
+  const loaded = loader.get(assetId) ?? (await loader.load(asset))
+  // No rootMatrix: the asset was normalised when it was first imported, and applying the
+  // conversion a second time would place the copy at a different scale from the original.
+  const { nodes } = instantiate(loaded.scene, {
+    assetId,
+    newId: options.newId ?? defaultIdFactory,
+    existingIds: collectAllIds(doc),
+  })
+  return nodes
 }
