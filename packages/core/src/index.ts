@@ -10,4 +10,5 @@
  */
 
 export * from './eca.js'
+export * from './assets/index.js'
 export * from './runtime/index.js'

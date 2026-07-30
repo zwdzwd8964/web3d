@@ -7,11 +7,14 @@
  */
 
 export * from './animator/tween.js'
+export * from './loader.js'
 export * from './apply-patch.js'
 export * from './camera-controller.js'
 export * from './easing.js'
 export * from './highlight.js'
+export * from './hotspot-layer.js'
 export * from './material-registry.js'
 export * from './picker.js'
+export * from './scene-runtime.js'
 export * from './scene-graph.js'
 export * from './types.js'

@@ -30,6 +30,7 @@ MVP_V0 §4《实测版本》表对应的实际安装结果。3D 相关依赖全�
 | @vitest/coverage-v8 | 4.1.10 | 根 (dev) | |
 | jsdom | 30.0.1 | @w3/editor (dev) | |
 | fake-indexeddb | 6.4.0 | @w3/storage (dev) | 人工批准（R1-Q3）。真实 IndexedDB 实现，非桩 |
+| @gltf-transform/core | 4.4.2 | @w3/core | §4 锁定选型。体检在 GPU 资源创建前跑；也用于测试中构造真 GLB |
 | pnpm | 11.12.0 | — | 工作区配置在 `pnpm-workspace.yaml`，不在 `.npmrc` |
 
 **未安装且已决定不装**：`@react-three/fiber`（ADR-0009）、UI 组件库（ADR-0010）。
@@ -50,9 +51,11 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 |---|---|---|---|
 | `IndexedDbProvider` 契约 | ✅ **已真实执行** | 经批准引入 `fake-indexeddb` | — |
 | IndexedDB 的配额、跨标签页锁、超大 blob | **未验证** | fake-indexeddb 不模拟这些 | 浏览器 E2E（T-112） |
-| `WebGLRenderer` 相关路径 | **未执行** | T-031/T-032 未实现，且需真实 GL | T-031 之后 + E2E |
+| `WebGLRenderer` 的实际绘制 | **未执行** | 需真实 GL 上下文 | 浏览器 E2E（T-112） |
+| GLB 加载 / 体检 / 实例化 | ✅ **已真实执行** | gltf-transform 在内存造真 GLB，GLTFLoader 在 Node 解析 | — |
+| SceneRuntime 组装与生命周期 | ✅ **已真实执行** | 渲染器可注入，除 GL 调用外全部跑到 | — |
+| Draco / KTX2 解码器实际加载 | **未执行** | 需浏览器 fetch 解码器 WASM | E2E |
 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测 | 需人工断网后跑 `pnpm build` |
-| `vendor/` 解码器实际加载 | **未执行** | 加载器（T-032）尚未实现 | T-032 之后 |
 | Player 体积预算 gzip ≤ 400KB | **未测量** | Player 尚未实现 | T-105 |
 | benchmark 实测（G0-7） | **未执行** | 需目标机器 | T-110 |
 
@@ -92,9 +95,11 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 
 TASK_BACKLOG 的勾选与耗时回填由人工执行。当前实现覆盖：
 
-- **完成**：T-001 ~ T-006、T-010 ~ T-018、T-020 ~ T-024、T-030、
-  T-033 ~ T-040、T-080 ~ T-087
-- **部分**：T-037（导入 clip 的 AnimationMixer 未接，补间部分已完成）
-- **未开工**：T-031、T-032（需 WebGL）、T-041（热点层，需 DOM）、
-  T-050 ~ T-054（资产管线）、T-060 ~ T-072（编辑器外壳与撤销）、
-  T-090 ~ T-093（规则编辑 UI）、T-100 ~ T-105（发布与播放器）、T-110 ~ T-114
+- **完成**：T-001 ~ T-006、T-010 ~ T-018、T-020 ~ T-024、
+  T-030 ~ T-036、T-038 ~ T-041、T-050 ~ T-052、T-080 ~ T-087
+- **部分**：T-037 —— 补间动画完整；**导入 clip 的 AnimationMixer 未接**，
+  `SceneRuntime.playAnimation` 遇到 `kind: 'imported'` 会记一条 warn 并立即 resolve，
+  不静默假装播放
+- **未开工**：T-053（缩略图，需离屏 GL）、T-054（导入编排，需编辑器 store）、
+  T-060 ~ T-072（编辑器外壳与撤销）、T-090 ~ T-093（规则编辑 UI）、
+  T-100 ~ T-105（发布与播放器）、T-110 ~ T-114（验收与文档）

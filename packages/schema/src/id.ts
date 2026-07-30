@@ -88,13 +88,30 @@ export interface IdFactory {
 
 export const defaultIdFactory: IdFactory = newId
 
-/** Deterministic ids for tests and fixtures: `nd_00000001`, `nd_00000002`, … */
+/**
+ * Deterministic ids for tests and fixtures: `nd_00000001`, `nd_00000002`, …
+ *
+ * Honours `existingIds` by skipping past anything taken. Without that it would be the
+ * one id source that can hand out a duplicate, which is precisely the case the caller
+ * passes the set to prevent.
+ */
 export function createSequentialIdFactory(start = 1): IdFactory {
   const counters = new Map<IdKind, number>()
-  return (kind) => {
-    const n = (counters.get(kind) ?? start - 1) + 1
+  return (kind, existingIds) => {
+    const taken =
+      existingIds === undefined
+        ? undefined
+        : existingIds instanceof Set
+          ? existingIds
+          : new Set(existingIds as readonly string[])
+    let n = counters.get(kind) ?? start - 1
+    let candidate: string
+    do {
+      n += 1
+      candidate = `${PREFIXES[kind]}_${String(n).padStart(ID_LENGTH, '0')}`
+    } while (taken?.has(candidate))
     counters.set(kind, n)
-    return `${PREFIXES[kind]}_${String(n).padStart(ID_LENGTH, '0')}`
+    return candidate
   }
 }
 

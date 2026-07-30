@@ -30,6 +30,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@gltf-transform/core": "4.4.2",
     "@w3/schema": "workspace:*",
     "three": "0.185.1"
   },
