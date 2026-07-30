@@ -593,3 +593,40 @@ code {
   font-size: 11px;
   color: var(--steel);
 }
+
+/* --- history --------------------------------------------------------------- */
+
+.history-list {
+  list-style: none;
+}
+
+.history-list__entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 3px 4px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.history-list__entry:hover {
+  background: var(--raise);
+}
+
+.history-list__label {
+  flex: 1;
+}
+
+.history-list__count {
+  color: var(--dim);
+}
+
+.history-list__redo .history-list__entry {
+  opacity: 0.45;
+  font-style: italic;
+}

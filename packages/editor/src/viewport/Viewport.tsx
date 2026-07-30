@@ -1,5 +1,5 @@
 import type { Transform } from '@w3/schema'
-import { Gizmo, SceneRuntime, createMemoryResolver } from '@w3/core'
+import { Gizmo, SceneRuntime, buildSamplePumpGlb, createMemoryResolver } from '@w3/core'
 import type { GizmoMode, GizmoSpace } from '@w3/core'
 import { useEffect, useRef, useState } from 'react'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
@@ -32,6 +32,21 @@ export function Viewport() {
   const [space, setSpace] = useState<GizmoSpace>('world')
   const [ready, setReady] = useState(false)
 
+  // Read inside the mount-only effect's callbacks, which would otherwise close over the
+  // value `mode` had at mount and label every drag "移动对象".
+  const modeRef = useRef<GizmoMode>(mode)
+  modeRef.current = mode
+
+  /**
+   * Set by the gizmo's own dragging-changed event.
+   *
+   * Checking `gizmo.isDragging` is not enough: TransformControls clears it during its
+   * pointerup handler, and whether that runs before or after ours is not defined. The
+   * observable symptom is a click-select firing as you release a gizmo handle, which
+   * changes the selection out from under the drag that just finished.
+   */
+  const gizmoDragging = useRef(false)
+
   // Mount once. The document is read from the store rather than passed as a prop so a
   // document change never remounts the renderer — that would drop the GPU context.
   useEffect(() => {
@@ -39,10 +54,16 @@ export function Viewport() {
     const host = hostRef.current
     if (!canvas || !host) return
 
+    // Filled below, before `load`. The map is mutable on purpose so the runtime can be
+    // constructed synchronously while the sample asset is still being generated.
+    const files = new Map<string, ArrayBuffer>()
+
     const runtime = new SceneRuntime(store.getState().doc, {
       canvas,
-      // Assets come from storage in T-066; until then the runtime builds placeholders.
-      resolver: createMemoryResolver(new Map()),
+      // Project assets arrive from StorageProvider once project loading lands; the
+      // sample document is served its own generated GLB so the editor is never dead on
+      // arrival.
+      resolver: createMemoryResolver(files),
       mode: 'edit',
       onLog: (level, message) => {
         if (level !== 'debug') console.warn(`[runtime] ${message}`)
@@ -59,18 +80,37 @@ export function Viewport() {
       onChange: (transforms: ReadonlyMap<string, Transform>) =>
         preview((draft) => writeTransforms(draft.nodes, transforms)),
       // D2 · one drag, one undo entry.
-      onEnd: () => previewCommit(mode === 'translate' ? '移动对象' : mode === 'rotate' ? '旋转对象' : '缩放对象'),
+      onEnd: () => previewCommit(LABELS[modeRef.current]),
+      onDraggingChanged: (dragging) => {
+        gizmoDragging.current = dragging
+      },
     })
     gizmoRef.current = gizmo
     runtime.scene.add(gizmo.helper, gizmo.proxyObject)
 
-    void runtime.load(store.getState().doc).then(() => setReady(true))
+    let cancelled = false
+    void (async () => {
+      const doc = store.getState().doc
+      const sampleAsset = doc.assets[0]
+      if (sampleAsset) {
+        try {
+          files.set(sampleAsset.url, await buildSamplePumpGlb())
+        } catch (error) {
+          console.warn('[viewport] 示例资产生成失败，场景将以占位节点显示', error)
+        }
+      }
+      if (cancelled) return
+      await runtime.load(doc)
+      if (cancelled) return
+      setReady(true)
+    })()
     runtime.start()
 
     const resize = new ResizeObserver(() => runtime.resize(host.clientWidth, host.clientHeight))
     resize.observe(host)
 
     return () => {
+      cancelled = true
       resize.disconnect()
       gizmo.dispose()
       runtime.dispose()
@@ -105,14 +145,14 @@ export function Viewport() {
     let moved = 0
 
     const down = (event: PointerEvent) => {
-      if (gizmoRef.current?.isDragging) return
+      if (gizmoDragging.current) return
       dragging = { x: event.clientX, y: event.clientY, button: event.button }
       moved = 0
       canvas.setPointerCapture(event.pointerId)
     }
     const move = (event: PointerEvent) => {
       const runtime = runtimeRef.current
-      if (!dragging || !runtime || gizmoRef.current?.isDragging) return
+      if (!dragging || !runtime || gizmoDragging.current) return
       const dx = event.clientX - dragging.x
       const dy = event.clientY - dragging.y
       moved += Math.abs(dx) + Math.abs(dy)
@@ -124,7 +164,7 @@ export function Viewport() {
       const runtime = runtimeRef.current
       canvas.releasePointerCapture(event.pointerId)
       // A drag is a camera move; only a still click is a selection.
-      if (dragging && moved < 4 && runtime && !gizmoRef.current?.isDragging) {
+      if (dragging && moved < 4 && runtime && !gizmoDragging.current) {
         const rect = canvas.getBoundingClientRect()
         const hit = runtime.picker.pick(
           event.clientX - rect.left,
@@ -185,6 +225,12 @@ export function Viewport() {
       </div>
     </div>
   )
+}
+
+const LABELS: Record<GizmoMode, string> = {
+  translate: '移动对象',
+  rotate: '旋转对象',
+  scale: '缩放对象',
 }
 
 /** Writes the gizmo's reported transforms onto the draft. */

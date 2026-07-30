@@ -52,6 +52,7 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | `IndexedDbProvider` 契约 | ✅ **已真实执行** | 经批准引入 `fake-indexeddb` | — |
 | IndexedDB 的配额、跨标签页锁、超大 blob | **未验证** | fake-indexeddb 不模拟这些 | 浏览器 E2E（T-112） |
 | `WebGLRenderer` 的实际绘制 | **未执行** | 需真实 GL 上下文 | 浏览器 E2E（T-112） |
+| 编辑器的实际交互（拖拽、gizmo 手感、布局） | **未执行** | 无浏览器环境 | 人工 `pnpm dev:editor` |
 | GLB 加载 / 体检 / 实例化 | ✅ **已真实执行** | gltf-transform 在内存造真 GLB，GLTFLoader 在 Node 解析 | — |
 | SceneRuntime 组装与生命周期 | ✅ **已真实执行** | 渲染器可注入，除 GL 调用外全部跑到 | — |
 | Draco / KTX2 解码器实际加载 | **未执行** | 需浏览器 fetch 解码器 WASM | E2E |
@@ -97,9 +98,7 @@ TASK_BACKLOG 的勾选与耗时回填由人工执行。当前实现覆盖：
 
 - **完成**：T-001 ~ T-006、T-010 ~ T-018、T-020 ~ T-024、T-060 ~ T-061、T-070、
   T-030 ~ T-036、T-038 ~ T-041、T-050 ~ T-052、T-080 ~ T-087
-- **部分**：T-037 —— 补间动画完整；**导入 clip 的 AnimationMixer 未接**，
-  `SceneRuntime.playAnimation` 遇到 `kind: 'imported'` 会记一条 warn 并立即 resolve，
-  不静默假装播放
-- **未开工**：T-053（缩略图，需离屏 GL）、T-054（导入编排）、T-062 ~ T-069、
-  T-071 ~ T-072、T-090 ~ T-093（规则编辑 UI）、
+- **T-037 已补齐**：导入 clip 经 `ClipPlayer` 播放。轨道按 `assetRef.objectName` 逐条
+  重绑到对应节点的 Object3D（改名不影响动画），Promise 语义与补间一致
+- **未开工**：T-053（缩略图，需离屏 GL）、T-090 ~ T-093（规则编辑 UI）、
   T-100 ~ T-105（发布与播放器）、T-110 ~ T-114（验收与文档）

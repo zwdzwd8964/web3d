@@ -20,5 +20,13 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: true,
   },
-  server: { port: 5180, host: '127.0.0.1' },
+  server: {
+    port: 5180,
+    host: '127.0.0.1',
+    // Dev-only. A Cloudflare quick tunnel serves the dev server from a random
+    // *.trycloudflare.com hostname, and Vite rejects Host headers it was not told
+    // about. This does NOT widen the bind address — the listener stays on loopback,
+    // so nothing is reachable unless a tunnel is deliberately running.
+    allowedHosts: ['.trycloudflare.com'],
+  },
 })

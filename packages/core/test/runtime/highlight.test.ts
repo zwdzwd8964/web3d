@@ -113,3 +113,38 @@ describe('HighlightLayer', () => {
     expect(createGoldenPathDocument().rules[0]!.then[1]!.params.preset).toBe('outline_amber')
   })
 })
+
+describe('the highlight survives the material being replaced under it', () => {
+  it('stays clearable after the node’s override is removed and re-applied', () => {
+    const doc = createGoldenPathDocument()
+    const defs = new Map(doc.materials.map((m) => [m.id, m]))
+    const before = snapshot(materialOf(IDS.cover))
+
+    highlights.set(IDS.cover, 'outline_amber')
+
+    // The user removes the override, then puts it back. MaterialRegistry disposes the
+    // clone the highlight snapshotted and mints a new one.
+    registry.applyToNode(IDS.cover, null, defs, graph)
+    registry.applyToNode(IDS.cover, doc.materials[0]!.id, defs, graph)
+
+    highlights.set(IDS.cover, 'outline_red')
+    highlights.set(IDS.cover, null)
+
+    // Without re-validating the snapshot, the restore writes to the disposed clone and
+    // the node stays lit with no way to turn it off.
+    expect(materialOf(IDS.cover).emissive.getHexString()).toBe('000000')
+    expect(highlights.isHighlighted(IDS.cover)).toBe(false)
+    void before
+  })
+
+  it('clearAll does not write to a material the node no longer uses', () => {
+    const doc = createGoldenPathDocument()
+    const defs = new Map(doc.materials.map((m) => [m.id, m]))
+    highlights.set(IDS.cover, 'outline_amber')
+    registry.applyToNode(IDS.cover, null, defs, graph)
+
+    expect(() => highlights.clearAll()).not.toThrow()
+    expect(highlights.activeNodeIds).toEqual([])
+    expect(materialOf(IDS.cover).emissive.getHexString()).toBe('000000')
+  })
+})

@@ -45,6 +45,24 @@ function fakeRenderer() {
 
 const canvas = () => ({ clientWidth: 800, clientHeight: 600 }) as HTMLCanvasElement
 
+/** The golden path document plus an imported clip pointing at its asset. */
+const withClip = (doc: SceneDocument): SceneDocument => ({
+  ...doc,
+  animations: [
+    ...doc.animations,
+    {
+      kind: 'imported',
+      id: 'anm_11111111',
+      name: '拆解',
+      assetId: doc.assets[0]!.id,
+      clipName: 'Disassemble',
+      speed: 1,
+      loop: false,
+      clampWhenFinished: true,
+    },
+  ],
+})
+
 /** Lets an async executor chain settle. Cheap, and far clearer than a magic number. */
 const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve()
@@ -342,29 +360,41 @@ describe('RuntimeContext behaviours', () => {
     runtime.dispose()
   })
 
-  it('says so plainly that imported clips are not wired yet, rather than silently doing nothing', async () => {
+  it('T-037 · plays an imported clip once its asset is loaded', async () => {
     const doc = createGoldenPathDocument()
-    const withImported: SceneDocument = {
-      ...doc,
-      animations: [
-        ...doc.animations,
-        {
-          kind: 'imported',
-          id: 'anm_11111111',
-          name: '拆解',
-          assetId: doc.assets[0]!.id,
-          clipName: 'Disassemble',
-          speed: 1,
-          loop: false,
-          clampWhenFinished: true,
-        },
-      ],
-    }
-    const logs: [LogLevel, string][] = []
-    const { runtime } = makeRuntime(withImported, logs)
+    const withImported = withClip(doc)
+    const bytes = await buildPumpGlb({ animationName: 'Disassemble', animationSeconds: 1 })
+    const { runtime } = makeRuntime(withImported, undefined, new Map([[doc.assets[0]!.url, bytes]]))
     await runtime.load(withImported)
-    await runtime.playAnimation('anm_11111111', {})
-    expect(logs.some(([, m]) => m.includes('T-037'))).toBe(true)
+
+    let settled = false
+    void runtime.playAnimation('anm_11111111', {}).then(() => {
+      settled = true
+    })
+
+    runtime.tick()
+    expect(runtime.isAnimationPlaying('anm_11111111')).toBe(true)
+
+    advanceClock(999)
+    runtime.tick()
+    await flush()
+    expect(settled).toBe(false)
+
+    advanceClock(1)
+    runtime.tick()
+    await flush()
+    expect(settled).toBe(true)
+    expect(runtime.isAnimationPlaying('anm_11111111')).toBe(false)
+    runtime.dispose()
+  })
+
+  it('warns when an imported clip names an asset that never loaded, rather than hanging', async () => {
+    const logs: [LogLevel, string][] = []
+    // Empty resolver: the asset never arrives.
+    const { runtime } = makeRuntime(withClip(createGoldenPathDocument()), logs)
+    await runtime.load(runtime.doc)
+    await expect(runtime.playAnimation('anm_11111111', {})).resolves.toBeUndefined()
+    expect(logs.some(([level, m]) => level === 'warn' && m.includes('尚未加载'))).toBe(true)
     runtime.dispose()
   })
 })

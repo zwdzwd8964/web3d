@@ -2,6 +2,7 @@ import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { AmbientLight, Color, DirectionalLight, GridHelper, Scene, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
+import { ClipPlayer } from './animator/clip.js'
 import { TweenPlayer } from './animator/tween.js'
 import { PatchApplier } from './apply-patch.js'
 import type { DocumentPatch } from './apply-patch.js'
@@ -52,6 +53,7 @@ export class SceneRuntime implements RuntimeContext {
   readonly camera: CameraController
   readonly picker: Picker
   readonly tweens: TweenPlayer
+  readonly clips: ClipPlayer
   readonly hotspots: HotspotProjector
   readonly loader: AssetLoader
   readonly patches: PatchApplier
@@ -85,6 +87,10 @@ export class SceneRuntime implements RuntimeContext {
     })
     this.tweens = new TweenPlayer(this.graph, {
       onAnimationEnd: (animationId, completed) => this.emit({ event: 'animationEnd', animationId, completed }),
+    })
+    this.clips = new ClipPlayer(this.graph, this.loader, {
+      onAnimationEnd: (animationId, completed) => this.emit({ event: 'animationEnd', animationId, completed }),
+      onWarn: (message) => this.log('warn', message),
     })
     this.patches = new PatchApplier({
       graph: this.graph,
@@ -202,6 +208,7 @@ export class SceneRuntime implements RuntimeContext {
   tick(): void {
     const now = this.now()
     this.tweens.update(now)
+    this.clips.update(now)
     this.camera.update(now)
     this.hotspotRenderer.update(
       this.hotspots.update(this.document, this.camera.camera, this.width, this.height),
@@ -225,6 +232,7 @@ export class SceneRuntime implements RuntimeContext {
     }
     this.waits.clear()
     this.tweens.stopAll()
+    this.clips.dispose()
     this.camera.dispose()
     this.highlights.clearAll()
     this.materials.dispose()
@@ -335,6 +343,7 @@ export class SceneRuntime implements RuntimeContext {
 
   resetScene(): void {
     this.tweens.stopAll()
+    this.clips.stopAll()
     this.highlights.clearAll()
     this.resetRuntimeState()
     this.graph.build(this.document)
@@ -360,22 +369,23 @@ export class SceneRuntime implements RuntimeContext {
     if (animation.kind === 'tween') {
       return this.tweens.play(animation as TweenAnimation, this.now(), options)
     }
-    // Imported clips need an AnimationMixer bound to the loaded asset — T-037.
-    this.log('warn', `导入动画「${animation.name}」的播放尚未接入（T-037）`)
-    return Promise.resolve()
+    return this.clips.play(animation, this.document, this.now(), options)
   }
 
   stopAnimation(id: string, options?: { reset?: boolean }): void {
     this.tweens.stop(id, options)
+    this.clips.stop(id, options)
   }
 
   seekAnimation(id: string, time: number): void {
     const animation = this.document.animations.find((a) => a.id === id)
-    if (animation?.kind === 'tween') this.tweens.seek(animation as TweenAnimation, time)
+    if (!animation) return
+    if (animation.kind === 'tween') this.tweens.seek(animation as TweenAnimation, time)
+    else this.clips.seek(animation, this.document, time)
   }
 
   isAnimationPlaying(id: string): boolean {
-    return this.tweens.isPlaying(id)
+    return this.tweens.isPlaying(id) || this.clips.isPlaying(id)
   }
 
   moveCamera(viewpointId: string, options: { duration?: number; signal?: AbortSignal }): Promise<void> {

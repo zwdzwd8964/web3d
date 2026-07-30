@@ -141,7 +141,8 @@ export class PatchApplier {
       case 'visible':
         return graph.setVisible(node.id, node.visible)
       case 'name':
-        return graph.setName(node.id, node.name)
+        graph.setName(node.id, node.name)
+        return true
       case 'parent':
         return graph.setParent(node.id, node.parent)
       case 'order':
@@ -153,7 +154,13 @@ export class PatchApplier {
       case 'overrides': {
         if (sub !== undefined && sub !== 'materialId') return false
         const defs = new Map(next.materials.map((m) => [m.id, m]))
-        return materials.applyToNode(node.id, node.overrides.materialId ?? null, defs, graph)
+        // The return value is deliberately ignored. `applyToNode` reports false when the
+        // node has no mesh (a grouping node) or the material id does not resolve — both
+        // are "nothing to render", not "unrecognised patch". Treating a no-op as a
+        // fallback would make fullRebuildCount fire on an ordinary edit, and a counter
+        // that cries wolf is worth nothing as the E2E's signal.
+        materials.applyToNode(node.id, node.overrides.materialId ?? null, defs, graph)
+        return true
       }
       case 'assetRef':
         // The asset changed under this node: its geometry has to be re-materialised, and

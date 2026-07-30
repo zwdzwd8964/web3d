@@ -4,6 +4,7 @@ import { Splitter } from './layout/Splitter.js'
 import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
+import { HistoryPanel } from './panels/HistoryPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
 import { ViewpointPanel } from './panels/ViewpointPanel.js'
@@ -18,7 +19,7 @@ import { fullRebuildCount } from './viewport/runtime-registry.js'
  * assets and rules along the bottom.
  */
 
-type BottomTab = 'assets' | 'material' | 'animation' | 'viewpoint'
+type BottomTab = 'assets' | 'material' | 'animation' | 'viewpoint' | 'history'
 
 export function App() {
   useShortcuts()
@@ -117,6 +118,7 @@ function BottomDock() {
               ['material', '材质'],
               ['animation', '动画'],
               ['viewpoint', '视点'],
+              ['history', '历史'],
             ] as const
           ).map(([id, label]) => (
             <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>
@@ -133,6 +135,7 @@ function BottomDock() {
         {tab === 'material' && <MaterialPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}
+        {tab === 'history' && <HistoryPanel />}
       </div>
     </section>
   )

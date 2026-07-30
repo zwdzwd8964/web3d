@@ -6,6 +6,7 @@
  * controller are all plain three.js object maths and are unit-tested in Node.
  */
 
+export * from './animator/clip.js'
 export * from './animator/tween.js'
 export * from './loader.js'
 export * from './apply-patch.js'

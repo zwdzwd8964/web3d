@@ -14,7 +14,9 @@ export interface BuildGlbOptions {
   readonly transportTranslation?: [number, number, number]
   readonly withTexture?: { width: number; height: number }
   readonly extraMaterials?: number
+  /** Adds a clip of this name that translates Body upward over `animationSeconds`. */
   readonly animationName?: string
+  readonly animationSeconds?: number
   /** Triangles per mesh. Default 1. */
   readonly trianglesPerMesh?: number
 }
@@ -64,7 +66,18 @@ export async function buildPumpGlb(options: BuildGlbOptions = {}): Promise<Array
   doc.createScene('Scene').addChild(root)
 
   if (options.animationName) {
-    doc.createAnimation(options.animationName)
+    // A real sampler + channel, not an empty Animation: the binding logic under test
+    // resolves track names, and a clip with no tracks would exercise none of it.
+    const seconds = options.animationSeconds ?? 1
+    const time = doc.createAccessor().setType('SCALAR').setArray(new Float32Array([0, seconds])).setBuffer(buffer)
+    const values = doc
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 0, 0, 1, 0]))
+      .setBuffer(buffer)
+    const sampler = doc.createAnimationSampler().setInput(time).setOutput(values).setInterpolation('LINEAR')
+    const channel = doc.createAnimationChannel().setTargetNode(body).setTargetPath('translation').setSampler(sampler)
+    doc.createAnimation(options.animationName).addSampler(sampler).addChannel(channel)
   }
 
   const bytes = await new WebIO().writeBinary(doc)

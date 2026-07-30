@@ -1,5 +1,5 @@
 import { Color } from 'three'
-import type { Material } from 'three'
+import type { Material, Mesh } from 'three'
 import type { MaterialRegistry } from './material-registry.js'
 import type { SceneGraph } from './scene-graph.js'
 
@@ -81,6 +81,13 @@ export class HighlightLayer {
     const material = this.materials.acquireWritable(nodeId, this.graph) as EmissiveMaterial | null
     if (!material || !(material.emissive instanceof Color)) return false
 
+    // The MaterialRegistry replaces a node's material whenever its override is removed
+    // and re-applied — the clone we snapshotted gets disposed and a fresh one takes its
+    // place. A stale snapshot would then restore onto the DEAD material, leaving the node
+    // lit with no way to turn it off. Drop it and snapshot the material actually bound.
+    const existing = this.active.get(nodeId)
+    if (existing && existing.material !== material) this.active.delete(nodeId)
+
     // Snapshot BEFORE the first write only. Re-highlighting with a different preset must
     // still restore to the pre-highlight state, not to the previous highlight.
     if (!this.active.has(nodeId)) {
@@ -101,11 +108,25 @@ export class HighlightLayer {
     const snapshot = this.active.get(nodeId)
     if (!snapshot) return false
     this.active.delete(nodeId)
+
+    // Same reason as above, from the other side: if the node no longer uses the material
+    // we snapshotted, restoring onto it would write to something nothing renders — and
+    // the material the node DOES use was cloned fresh from the source, so it carries no
+    // highlight to undo.
+    if (this.boundMaterial(nodeId) !== snapshot.material) return true
+
     const material = snapshot.material as EmissiveMaterial
     if (material.emissive instanceof Color) material.emissive.set(snapshot.emissive)
     material.emissiveIntensity = snapshot.emissiveIntensity
     material.needsUpdate = true
     return true
+  }
+
+  /** The material currently bound to a node, without cloning anything. */
+  private boundMaterial(nodeId: string): Material | null {
+    const mesh = this.graph.objectFor(nodeId) as Mesh | undefined
+    if (!mesh?.isMesh || Array.isArray(mesh.material)) return null
+    return mesh.material
   }
 
   clearAll(): void {
