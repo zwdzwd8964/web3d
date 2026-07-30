@@ -1,4 +1,4 @@
-import type { SceneDocument } from '@w3/schema'
+import type { Camera, SceneDocument } from '@w3/schema'
 import { EcaEngine } from '@w3/core'
 import type { SceneRuntime } from '@w3/core'
 import type { PreviewStore } from './preview-store.js'
@@ -25,6 +25,8 @@ import type { PreviewStore } from './preview-store.js'
 export class PreviewController {
   private engine: EcaEngine | null = null
   private detachRuntime: (() => void) | null = null
+  /** Where the user was looking before the preview started. */
+  private cameraBefore: Camera | null = null
 
   constructor(
     private readonly runtime: SceneRuntime,
@@ -37,6 +39,12 @@ export class PreviewController {
 
   enter(doc: SceneDocument): void {
     if (this.engine) return
+
+    // The camera is runtime state, not document state, so `resetScene` does not touch it
+    // — and a rule that calls moveCamera would otherwise leave the editor pointing
+    // somewhere the user never chose. Found by the golden-path E2E: after previewing the
+    // sample scene, the viewport came back showing a different view.
+    this.cameraBefore = this.runtime.camera.captureViewpoint()
 
     // Start from the document, not from whatever the editing session left behind — a
     // half-dragged gizmo or a selection highlight is not part of what the viewer sees.
@@ -73,6 +81,13 @@ export class PreviewController {
     engine?.detach()
 
     this.runtime.resetScene()
+    if (this.cameraBefore) {
+      // A synthetic viewpoint: `jumpTo` takes one because that is the shape the camera
+      // controller stores, not because this is a saved viewpoint. It is never written to
+      // the document.
+      this.runtime.camera.jumpTo({ id: 'vpt_preview', name: '预览前视角', camera: this.cameraBefore })
+      this.cameraBefore = null
+    }
     this.store.getState().setActive(false)
   }
 

@@ -104,6 +104,11 @@ export function createPatchForwarder(getRuntime: () => SceneRuntime | null) {
         if (!live) return
         if (touchesAssets) await live.ensureAssets(next)
         live.applyPatch(patches, next, prev)
+        // An import that adds nodes moves the camera to take them in. Without this the
+        // model lands wherever the exporter put its origin — often outside the current
+        // view — and the user gets the same "everything says it worked but I see no
+        // change" experience that made the empty-resolver bug so hard to spot.
+        if (touchesAssets && next.nodes.length > prev.nodes.length) live.camera.frameAll()
       })
       .finally(() => {
         // Back to the fast path once the queue drains: one import must not make every

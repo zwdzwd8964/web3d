@@ -275,3 +275,42 @@ describe('acquireWritable()', () => {
     expect(registry.acquireWritable('nd_99999999', graph)).toBeNull()
   })
 })
+
+describe('the graph being rebuilt under the registry', () => {
+  beforeEach(() => graph.build(createGoldenPathDocument()))
+
+  it('re-applies overrides onto the NEW meshes rather than the disposed ones', () => {
+    const doc = createGoldenPathDocument()
+    const withOverride = {
+      ...doc,
+      nodes: doc.nodes.map((n) => (n.id === IDS.cover ? { ...n, overrides: { materialId: doc.materials[0]!.id } } : n)),
+    }
+    registry.applyAll(withOverride, graph)
+    const applied = materialOf(IDS.cover).color.getHexString()
+
+    // Anything that calls `graph.build` again: resetScene, entering preview, and the D1
+    // full-rebuild fallback all do. The registry's per-node clones point at Object3Ds
+    // that no longer exist after this.
+    graph.build(withOverride)
+    registry.applyAll(withOverride, graph)
+
+    // Before the fix this read back the asset's own colour: `materialFor` returned the
+    // stale clone, wrote the parameters into it, and never attached it to the new mesh.
+    // Every material override vanished on any rebuild, with nothing logged.
+    expect(materialOf(IDS.cover).color.getHexString()).toBe(applied)
+  })
+
+  it('restoring after a rebuild puts back the new mesh own material, not the old mesh one', () => {
+    const doc = createGoldenPathDocument()
+    const defs = defsOf(doc.materials)
+    const original = materialOf(IDS.cover).color.getHexString()
+
+    registry.applyToNode(IDS.cover, doc.materials[0]!.id, defs, graph)
+    graph.build(doc)
+    registry.applyToNode(IDS.cover, doc.materials[0]!.id, defs, graph)
+    registry.applyToNode(IDS.cover, null, defs, graph)
+
+    expect(materialOf(IDS.cover).color.getHexString()).toBe(original)
+    expect(registry.isCloned(IDS.cover)).toBe(false)
+  })
+})

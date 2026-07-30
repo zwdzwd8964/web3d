@@ -48,7 +48,14 @@ export function useAutoSave(): { state: SaveState; error: string | null; saveNow
     })
     return () => {
       unsubscribe()
-      saver.dispose()
+      // NOT `saver.dispose()`. The saver's lifetime belongs to the session (the useMemo),
+      // not to this effect — and StrictMode runs effect cleanup once immediately after
+      // mount. Disposing here left the one memoised saver permanently dead, so nothing
+      // ever saved and the indicator sat at idle forever. Caught by the golden-path E2E,
+      // which is the only place StrictMode's double-invoke meets a real browser.
+      //
+      // Flushing instead means a genuine unmount still persists the pending edit.
+      void saver.flush()
     }
   }, [store, saver])
 

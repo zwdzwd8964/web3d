@@ -137,3 +137,29 @@ describe('AutoSaver', () => {
     vi.useRealTimers()
   })
 })
+
+describe('AutoSaver lifetime, as React StrictMode exercises it', () => {
+  it('keeps working after a subscribe/unsubscribe/subscribe cycle', async () => {
+    const doc = createGoldenPathDocument()
+    const save = vi.fn(async () => {})
+    const saver = new AutoSaver({ save, delayMs: 0 })
+
+    // StrictMode mounts the effect, tears it down, and mounts it again against the SAME
+    // memoised saver. Disposing on teardown killed autosave for the whole session — the
+    // indicator stayed at idle and nothing was ever written.
+    await saver.flush() // what the teardown does now
+    saver.schedule(doc)
+    await saver.flush()
+
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispose is still final, for a real teardown', async () => {
+    const save = vi.fn(async () => {})
+    const saver = new AutoSaver({ save, delayMs: 0 })
+    saver.dispose()
+    saver.schedule(createGoldenPathDocument())
+    await saver.flush()
+    expect(save).not.toHaveBeenCalled()
+  })
+})

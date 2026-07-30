@@ -22,3 +22,6 @@ Thumbs.db
 
 # Build/verify scratch output
 .tmp/
+
+e2e/test-results/
+e2e/playwright-report/

@@ -21,7 +21,9 @@
     "check:deps-direction": "node scripts/check-deps-direction.mjs",
     "check:constitution": "node scripts/check-constitution.mjs",
     "verify": "pnpm lint && pnpm check:constitution && pnpm typecheck && pnpm test",
-    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js --config tools/lint/eslint.config.js packages"
+    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js --config tools/lint/eslint.config.js packages",
+    "test:e2e": "pnpm -F @w3/e2e test:e2e",
+    "dev": "pnpm dev:editor"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

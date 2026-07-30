@@ -1,0 +1,14 @@
+{
+  "name": "@w3/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Golden-path browser tests (G0-1). Separate package so Playwright's browser download is not a dependency of building the engine.",
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@gltf-transform/core": "4.4.2"
+  }
+}

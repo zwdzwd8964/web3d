@@ -49,6 +49,17 @@ const SIDES = { front: FrontSide, back: BackSide, double: DoubleSide } as const
 interface OwnedClone {
   readonly material: Material
   readonly clonedFrom: Material
+  /**
+   * The mesh this clone is attached to.
+   *
+   * Recorded because `SceneGraph.build` replaces every Object3D, so a node id is NOT a
+   * stable handle on a mesh. Without this check the registry hands back a clone attached
+   * to a mesh that is no longer in the scene, writes the user's material parameters into
+   * it, and the mesh that IS in the scene keeps the asset's original — every material
+   * override silently disappearing on any rebuild. See the regression test in
+   * material-registry.test.ts.
+   */
+  readonly mesh: Mesh
 }
 
 export interface MaterialRegistryOptions {
@@ -58,7 +69,7 @@ export interface MaterialRegistryOptions {
 export class MaterialRegistry {
   private textures: TextureSource
   /** The material the asset originally gave a node, so an override can be undone. */
-  private sources = new Map<string, Material | Material[]>()
+  private sources = new Map<string, { readonly mesh: Mesh; readonly material: Material | Material[] }>()
   /** Clones this registry owns and must dispose. */
   private owned = new Map<string, OwnedClone>()
 
@@ -108,7 +119,7 @@ export class MaterialRegistry {
     const mesh = object as Mesh
     if (!mesh.isMesh) return false
 
-    if (!this.sources.has(nodeId)) this.sources.set(nodeId, mesh.material)
+    this.noteMesh(nodeId, mesh)
 
     if (materialId === null) {
       this.restore(nodeId, mesh)
@@ -143,8 +154,27 @@ export class MaterialRegistry {
     if (!object) return null
     const mesh = object as Mesh
     if (!mesh.isMesh) return null
-    if (!this.sources.has(nodeId)) this.sources.set(nodeId, mesh.material)
+    this.noteMesh(nodeId, mesh)
     return this.materialFor(nodeId, mesh, graph)
+  }
+
+  /**
+   * Reconciles the registry's bookkeeping with the mesh currently in the graph.
+   *
+   * Called before every read or write. When the graph has been rebuilt under us the node
+   * id still resolves, but to a different Object3D carrying a fresh copy of the asset's
+   * material — so both the recorded source and any clone are stale and must be dropped.
+   */
+  private noteMesh(nodeId: string, mesh: Mesh): void {
+    const recorded = this.sources.get(nodeId)
+    if (recorded?.mesh === mesh) return
+
+    const owned = this.owned.get(nodeId)
+    if (owned) {
+      this.owned.delete(nodeId)
+      owned.material.dispose()
+    }
+    this.sources.set(nodeId, { mesh, material: mesh.material })
   }
 
   /**
@@ -166,7 +196,8 @@ export class MaterialRegistry {
   private materialFor(nodeId: string, mesh: Mesh, graph: SceneGraph): Material {
     void graph
     const existing = this.owned.get(nodeId)
-    if (existing) return existing.material
+    // The mesh check is not belt and braces: see OwnedClone.mesh.
+    if (existing && existing.mesh === mesh) return existing.material
 
     const current = mesh.material
     if (Array.isArray(current)) {
@@ -178,7 +209,7 @@ export class MaterialRegistry {
     const clone = current.clone()
     clone.name = `${current.name || 'material'} (${nodeId})`
     mesh.material = clone
-    this.owned.set(nodeId, { material: clone, clonedFrom: current })
+    this.owned.set(nodeId, { material: clone, clonedFrom: current, mesh })
     return clone
   }
 
@@ -189,7 +220,9 @@ export class MaterialRegistry {
       this.owned.delete(nodeId)
       owned.material.dispose()
     }
-    if (source !== undefined) mesh.material = source
+    // Only restore a source recorded against THIS mesh; `noteMesh` guarantees it, but
+    // assigning another mesh's material here would be a silent cross-wire.
+    if (source && source.mesh === mesh) mesh.material = source.material
   }
 
   /** Drops every clone. Source materials belong to the asset cache, not to us. */
