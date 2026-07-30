@@ -1,28 +1,24 @@
-import type { Animation, TweenTarget } from './animations.js'
-import type { AssetRef } from './assets.js'
-import { CURRENT_SCHEMA_VERSION } from './document.js'
+import type { Animation, TweenTarget } from './animation.js'
+import { CURRENT_VERSION } from './document.js'
 import type { SceneDocument } from './document.js'
-import type { Action } from './eca/actions.js'
-import type { Condition } from './eca/conditions.js'
-import type { EventTrigger } from './eca/events.js'
-import type { ExecutionMode, ReentryPolicy, Rule } from './eca/rules.js'
-import type { Hotspot, Viewpoint } from './hotspots.js'
-import type { IdFactory } from './ids.js'
-import { createId } from './ids.js'
-import type { Material } from './materials.js'
-import { DEFAULT_MATERIAL_PARAMS } from './materials.js'
-import type { SceneNode } from './nodes.js'
+import type { Hotspot } from './hotspot.js'
+import type { IdFactory } from './id.js'
+import { defaultIdFactory } from './id.js'
+import type { Material, MaterialParams } from './material.js'
+import type { AssetRef, Node, NodeOverrides } from './node.js'
 import type { Easing, Transform, Vec3 } from './primitives.js'
-import { IDENTITY_TRANSFORM } from './primitives.js'
-import { DEFAULT_ENVIRONMENT } from './reserved.js'
-import type { Variable, VariableType, VariableValue } from './variables.js'
+import { ORDER_STEP, identityTransform } from './primitives.js'
+import type { Action, Condition, EventDescriptor, ExecutionMode, OnErrorMode, ReentryPolicy, Rule } from './rule.js'
+import { collectAllIds, getAppendOrder } from './selectors.js'
+import type { Variable, VariableType, VariableValue } from './variable.js'
+import type { Camera, Viewpoint } from './viewpoint.js'
 
 /**
- * Factories, with time and id generation injected.
+ * Factories, with id minting and the clock injected.
  *
- * Not a purity exercise: fixtures and parity traces have to be byte-identical across
- * runs, so `now` and `newId` are parameters everywhere. Production passes the real
- * clock; tests pass a fixed instant and a sequential id factory.
+ * Not a purity exercise: fixtures and parity traces must be byte-identical run to run,
+ * so `newId` and `now` are parameters everywhere. Production passes the real clock and
+ * the CSPRNG; tests pass a fixed instant and a sequential id factory.
  */
 
 export interface FactoryContext {
@@ -31,23 +27,24 @@ export interface FactoryContext {
 }
 
 export const defaultFactoryContext: FactoryContext = {
-  newId: createId,
+  newId: defaultIdFactory,
   now: () => new Date().toISOString(),
 }
 
+const ctxOf = (ctx?: FactoryContext) => ctx ?? defaultFactoryContext
+
 export interface CreateDocumentOptions {
   readonly name: string
-  readonly description?: string
   readonly unit?: 'm' | 'cm' | 'mm'
   readonly upAxis?: 'Y' | 'Z'
   readonly ctx?: FactoryContext
 }
 
 export function createEmptyDocument(options: CreateDocumentOptions): SceneDocument {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   const stamp = ctx.now()
   return {
-    schemaVersion: CURRENT_SCHEMA_VERSION,
+    schemaVersion: CURRENT_VERSION,
     projectId: ctx.newId('project'),
     name: options.name,
     meta: {
@@ -55,7 +52,7 @@ export function createEmptyDocument(options: CreateDocumentOptions): SceneDocume
       upAxis: options.upAxis ?? 'Y',
       createdAt: stamp,
       updatedAt: stamp,
-      description: options.description ?? '',
+      background: { type: 'color', color: '#1a1a1a' },
     },
     assets: [],
     nodes: [],
@@ -65,71 +62,86 @@ export function createEmptyDocument(options: CreateDocumentOptions): SceneDocume
     viewpoints: [],
     variables: [],
     rules: [],
-    environment: { ...DEFAULT_ENVIRONMENT },
     pages: [],
-    media: [],
     flows: [],
-    constraints: [],
+    media: [],
   }
 }
 
 export interface CreateNodeOptions {
   readonly name: string
   readonly parent?: string | null
+  readonly order?: number
   readonly assetRef?: AssetRef | null
   readonly transform?: Transform
   readonly visible?: boolean
   readonly locked?: boolean
-  readonly materialId?: string | null
+  readonly overrides?: NodeOverrides
   readonly ctx?: FactoryContext
 }
 
-export function createNode(options: CreateNodeOptions): SceneNode {
-  const ctx = options.ctx ?? defaultFactoryContext
+export function createNode(options: CreateNodeOptions): Node {
+  const ctx = ctxOf(options.ctx)
   return {
     id: ctx.newId('node'),
     name: options.name,
     parent: options.parent ?? null,
+    order: options.order ?? ORDER_STEP,
     assetRef: options.assetRef ?? null,
-    transform: options.transform ?? { ...IDENTITY_TRANSFORM, p: [...IDENTITY_TRANSFORM.p], r: [...IDENTITY_TRANSFORM.r], s: [...IDENTITY_TRANSFORM.s] },
+    transform: options.transform ?? identityTransform(),
     visible: options.visible ?? true,
     locked: options.locked ?? false,
-    overrides: { materialId: options.materialId ?? null },
+    overrides: options.overrides ?? {},
   }
+}
+
+/** Appends a node as the last child of `parent`, picking the next free `order`. */
+export function appendNode(doc: SceneDocument, options: CreateNodeOptions): Node {
+  const ctx = ctxOf(options.ctx)
+  return createNode({
+    ...options,
+    order: options.order ?? getAppendOrder(doc, options.parent ?? null),
+    ctx: { newId: (kind) => ctx.newId(kind, collectAllIds(doc)), now: ctx.now },
+  })
 }
 
 export function createMaterial(options: {
   name: string
-  params?: Partial<Material['params']>
+  base?: Material['base']
+  preset?: string
+  params?: MaterialParams
   ctx?: FactoryContext
 }): Material {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
     id: ctx.newId('material'),
     name: options.name,
-    base: null,
-    params: { ...DEFAULT_MATERIAL_PARAMS, ...options.params },
-    maps: {},
+    base: options.base ?? 'standard',
+    preset: options.preset ?? 'custom',
+    params: options.params ?? { maps: {} },
   }
 }
 
 export function createTweenAnimation(options: {
   name: string
   targets: TweenTarget[]
-  durationMs?: number
+  /** Seconds. */
+  duration?: number
   easing?: Easing
   loop?: boolean
+  yoyo?: boolean
   ctx?: FactoryContext
 }): Animation {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
+    kind: 'tween',
     id: ctx.newId('animation'),
     name: options.name,
-    kind: 'tween',
-    targets: options.targets,
-    durationMs: options.durationMs ?? 1000,
+    duration: options.duration ?? 1,
     easing: options.easing ?? 'easeInOutCubic',
     loop: options.loop ?? false,
+    yoyo: options.yoyo ?? false,
+    targets: options.targets,
   }
 }
 
@@ -137,19 +149,21 @@ export function createImportedAnimation(options: {
   name: string
   assetId: string
   clipName: string
-  loop?: boolean
   speed?: number
+  loop?: boolean
+  clampWhenFinished?: boolean
   ctx?: FactoryContext
 }): Animation {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
+    kind: 'imported',
     id: ctx.newId('animation'),
     name: options.name,
-    kind: 'imported',
     assetId: options.assetId,
     clipName: options.clipName,
-    loop: options.loop ?? false,
     speed: options.speed ?? 1,
+    loop: options.loop ?? false,
+    clampWhenFinished: options.clampWhenFinished ?? true,
   }
 }
 
@@ -157,21 +171,25 @@ export function createHotspot(options: {
   name: string
   nodeId: string
   offset?: Vec3
-  label?: string
   title?: string
-  body?: string
+  text?: string
   occlude?: boolean
+  visible?: boolean
+  fadeWithDistance?: boolean
+  marker?: Hotspot['style']['marker']
+  color?: string
   ctx?: FactoryContext
 }): Hotspot {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
     id: ctx.newId('hotspot'),
     name: options.name,
     anchor: { nodeId: options.nodeId, offset: options.offset ?? [0, 0, 0] },
     occlude: options.occlude ?? true,
-    visible: true,
-    label: options.label ?? options.name,
-    content: { type: 'panel', title: options.title ?? options.name, body: options.body ?? '' },
+    visible: options.visible ?? true,
+    fadeWithDistance: options.fadeWithDistance ?? false,
+    content: { type: 'panel', title: options.title ?? options.name, text: options.text ?? '' },
+    style: { marker: options.marker ?? 'dot', color: options.color ?? '#ffb020' },
   }
 }
 
@@ -179,21 +197,23 @@ export function createViewpoint(options: {
   name: string
   position: Vec3
   target: Vec3
-  fov?: number
-  near?: number
-  far?: number
+  camera?: Partial<Camera>
   ctx?: FactoryContext
 }): Viewpoint {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
     id: ctx.newId('viewpoint'),
     name: options.name,
     camera: {
+      kind: 'perspective',
       position: options.position,
       target: options.target,
-      fov: options.fov ?? 45,
-      near: options.near ?? 0.1,
-      far: options.far ?? 1000,
+      up: [0, 1, 0],
+      fov: 50,
+      zoom: 1,
+      near: 0.1,
+      far: 1000,
+      ...options.camera,
     },
   }
 }
@@ -203,41 +223,49 @@ export function createVariable(options: {
   name?: string
   type: VariableType
   default: VariableValue
+  options?: string[]
+  persist?: boolean
 }): Variable {
   return {
     id: options.id,
     name: options.name ?? options.id,
     type: options.type,
     default: options.default,
+    ...(options.options ? { options: options.options } : {}),
+    persist: options.persist ?? false,
   }
 }
 
 export function createRule(options: {
   name: string
-  when: EventTrigger
+  when: EventDescriptor
   then: Action[]
   if?: Condition[]
+  ifAny?: Condition[]
   mode?: ExecutionMode
   reentry?: ReentryPolicy
+  onError?: OnErrorMode
   enabled?: boolean
   ctx?: FactoryContext
 }): Rule {
-  const ctx = options.ctx ?? defaultFactoryContext
+  const ctx = ctxOf(options.ctx)
   return {
     id: ctx.newId('rule'),
     name: options.name,
     enabled: options.enabled ?? true,
     when: options.when,
     if: options.if ?? [],
+    ifAny: options.ifAny ?? [],
     mode: options.mode ?? 'sequence',
-    // D9 · restart is the default: it is the only policy that behaves sanely
-    // when a user impatiently clicks the same object three times.
+    // MVP_V0 D9 · restart is the only default that behaves sanely when an impatient
+    // user clicks the same object three times.
     reentry: options.reentry ?? 'restart',
+    onError: options.onError ?? 'abort',
     then: options.then,
   }
 }
 
-/** Stamps `meta.updatedAt`. Call on every persisted write, never on preview writes. */
+/** Stamps `meta.updatedAt`. Called on persisted writes, never on preview writes. */
 export function touch(doc: SceneDocument, ctx: FactoryContext = defaultFactoryContext): SceneDocument {
   return { ...doc, meta: { ...doc.meta, updatedAt: ctx.now() } }
 }

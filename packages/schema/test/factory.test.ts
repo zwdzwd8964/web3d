@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { CURRENT_SCHEMA_VERSION } from '../src/document.js'
+import { CURRENT_VERSION } from '../src/document.js'
 import {
+  appendNode,
   createEmptyDocument,
   createHotspot,
   createImportedAnimation,
@@ -13,54 +14,66 @@ import {
   defaultFactoryContext,
   touch,
 } from '../src/factory.js'
-import { createSequentialIdFactory } from '../src/ids.js'
-import { DEFAULT_MATERIAL_PARAMS } from '../src/materials.js'
-import { IDENTITY_TRANSFORM } from '../src/primitives.js'
-import { createGoldenPathDocument, createSampleFactoryContext } from '../src/samples.js'
-import { checkIntegrity } from '../src/integrity.js'
+import { createSequentialIdFactory } from '../src/id.js'
+import { checkIntegrity, hasErrors } from '../src/integrity.js'
+import { ORDER_STEP } from '../src/primitives.js'
+import {
+  collectAllIds,
+  getAncestors,
+  getAppendOrder,
+  getChildren,
+  getDescendants,
+  getDisplayPath,
+  getOrderBetween,
+  getSubtreeIds,
+  getUnreachableNodes,
+  renumberSiblings,
+  walkTree,
+  wouldCreateCycle,
+} from '../src/selectors.js'
+import { GOLDEN_PATH_IDS, createGoldenPathDocument } from '../src/samples.js'
 import { validate } from '../src/validate.js'
 
-const ctx = () => createSampleFactoryContext({ at: '2026-03-05T08:00:00.000Z' })
+/** T-014 · factories and selectors. */
 
-describe('document factories', () => {
-  it('creates an empty document that already validates', () => {
+const ctx = () => ({ newId: createSequentialIdFactory(), now: () => '2026-03-05T08:00:00.000Z' })
+
+describe('factories produce documents that validate', () => {
+  it('an empty document is already valid and internally consistent', () => {
     const doc = createEmptyDocument({ name: '空场景', ctx: ctx() })
     expect(validate(doc).ok).toBe(true)
-    expect(checkIntegrity(doc).ok).toBe(true)
-    expect(doc.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
+    expect(hasErrors(checkIntegrity(doc))).toBe(false)
+    expect(doc.schemaVersion).toBe(CURRENT_VERSION)
     expect(doc.meta.createdAt).toBe('2026-03-05T08:00:00.000Z')
     expect(doc.meta.updatedAt).toBe(doc.meta.createdAt)
+    expect(doc.meta.background).toEqual({ type: 'color', color: '#1a1a1a' })
   })
 
-  it('creates every reserved collection as an empty array, not undefined', () => {
+  it('creates every deferred collection as an empty array, not undefined', () => {
     const doc = createEmptyDocument({ name: 'x', ctx: ctx() })
-    expect(doc.pages).toEqual([])
-    expect(doc.media).toEqual([])
-    expect(doc.flows).toEqual([])
-    expect(doc.constraints).toEqual([])
+    expect([doc.pages, doc.flows, doc.media]).toEqual([[], [], []])
   })
 
-  it('honours unit / upAxis / description overrides and falls back sensibly', () => {
-    const custom = createEmptyDocument({ name: 'x', unit: 'mm', upAxis: 'Z', description: '说明', ctx: ctx() })
-    expect(custom.meta).toMatchObject({ unit: 'mm', upAxis: 'Z', description: '说明' })
-    const plain = createEmptyDocument({ name: 'x', ctx: ctx() })
-    expect(plain.meta).toMatchObject({ unit: 'm', upAxis: 'Y', description: '' })
+  it('honours unit / upAxis overrides and falls back to metres and Y-up', () => {
+    expect(createEmptyDocument({ name: 'x', unit: 'mm', upAxis: 'Z', ctx: ctx() }).meta).toMatchObject({
+      unit: 'mm',
+      upAxis: 'Z',
+    })
+    expect(createEmptyDocument({ name: 'x', ctx: ctx() }).meta).toMatchObject({ unit: 'm', upAxis: 'Y' })
   })
 
-  it('gives each new node an identity transform that is not shared between nodes', () => {
+  it('gives each new node its own identity transform', () => {
     const c = ctx()
     const a = createNode({ name: 'a', ctx: c })
     const b = createNode({ name: 'b', ctx: c })
-    expect(a.transform).toEqual(IDENTITY_TRANSFORM)
     a.transform.p[0] = 5
     expect(b.transform.p[0]).toBe(0)
-    expect(IDENTITY_TRANSFORM.p[0]).toBe(0)
   })
 
-  it('defaults a node to visible, unlocked, unparented, with no asset and no override', () => {
+  it('defaults a node to root, visible, unlocked, asset-less and un-overridden', () => {
     const n = createNode({ name: 'a', ctx: ctx() })
-    expect(n).toMatchObject({ parent: null, assetRef: null, visible: true, locked: false })
-    expect(n.overrides.materialId).toBeNull()
+    expect(n).toMatchObject({ parent: null, assetRef: null, visible: true, locked: false, order: ORDER_STEP })
+    expect(n.overrides).toEqual({})
   })
 
   it('accepts explicit node options', () => {
@@ -69,97 +82,75 @@ describe('document factories', () => {
     const child = createNode({
       name: 'c',
       parent: parent.id,
+      order: 4000,
       visible: false,
       locked: true,
-      materialId: 'mat_000009',
-      transform: { p: [1, 2, 3], r: [0, 0, 0, 1], s: [2, 2, 2] },
-      assetRef: { assetId: 'ast_000001', objectPath: 'A/B', objectName: 'B' },
+      overrides: { materialId: 'mat_00000009' },
+      assetRef: { assetId: 'ast_00000001', objectPath: 'A/B', objectName: 'B', missing: false },
       ctx: c,
     })
-    expect(child).toMatchObject({ parent: parent.id, visible: false, locked: true })
-    expect(child.overrides.materialId).toBe('mat_000009')
-    expect(child.transform.p).toEqual([1, 2, 3])
+    expect(child).toMatchObject({ parent: parent.id, order: 4000, visible: false, locked: true })
+    expect(child.overrides.materialId).toBe('mat_00000009')
   })
 
-  it('merges material params over the defaults', () => {
-    const m = createMaterial({ name: '钢', params: { roughness: 0.2 }, ctx: ctx() })
+  it('appendNode picks the next free order and avoids id collisions with the document', () => {
+    const doc = createGoldenPathDocument()
+    const added = appendNode(doc, { name: '新增件', parent: GOLDEN_PATH_IDS.nodePump })
+    expect(added.order).toBe(3000)
+    expect(collectAllIds(doc).has(added.id)).toBe(false)
+  })
+
+  it('creates materials with the standard base and an empty map set', () => {
+    const m = createMaterial({ name: '钢', params: { roughness: 0.2, maps: {} }, ctx: ctx() })
+    expect(m).toMatchObject({ base: 'standard', preset: 'custom' })
     expect(m.params.roughness).toBe(0.2)
-    expect(m.params.metalness).toBe(DEFAULT_MATERIAL_PARAMS.metalness)
-    expect(m.base).toBeNull()
-    expect(m.maps).toEqual({})
-    const bare = createMaterial({ name: '默认', ctx: ctx() })
-    expect(bare.params).toEqual(DEFAULT_MATERIAL_PARAMS)
+    expect(createMaterial({ name: '默认', ctx: ctx() }).params).toEqual({ maps: {} })
   })
 
-  it('creates both animation kinds with usable defaults', () => {
+  it('creates both animation kinds with the defaults SCHEMA_SPEC §6.2 states', () => {
     const c = ctx()
-    const tween = createTweenAnimation({ name: 't', targets: [{ nodeId: 'nd_000001', from: null, to: { p: [0, 1, 0] } }], ctx: c })
-    expect(tween).toMatchObject({ kind: 'tween', durationMs: 1000, easing: 'easeInOutCubic', loop: false })
+    const tween = createTweenAnimation({ name: 't', targets: [{ nodeId: 'nd_00000001', to: { p: [0, 1, 0] } }], ctx: c })
+    expect(tween).toMatchObject({ kind: 'tween', duration: 1, easing: 'easeInOutCubic', loop: false, yoyo: false })
 
-    const imported = createImportedAnimation({ name: 'i', assetId: 'ast_000001', clipName: 'Disassemble', ctx: c })
-    expect(imported).toMatchObject({ kind: 'imported', loop: false, speed: 1 })
-
-    const looped = createImportedAnimation({ name: 'i', assetId: 'ast_000001', clipName: 'Spin', loop: true, speed: 2, ctx: c })
-    expect(looped).toMatchObject({ loop: true, speed: 2 })
+    const imported = createImportedAnimation({ name: 'i', assetId: 'ast_00000001', clipName: 'Disassemble', ctx: c })
+    expect(imported).toMatchObject({ kind: 'imported', speed: 1, loop: false, clampWhenFinished: true })
   })
 
-  it('creates a hotspot that occludes by default and echoes its name into label/title', () => {
-    const h = createHotspot({ name: '步骤一', nodeId: 'nd_000001', ctx: ctx() })
-    expect(h).toMatchObject({ occlude: true, visible: true, label: '步骤一' })
-    expect(h.content).toEqual({ type: 'panel', title: '步骤一', body: '' })
-    expect(h.anchor.offset).toEqual([0, 0, 0])
-
-    const explicit = createHotspot({
-      name: 'n',
-      nodeId: 'nd_000001',
-      label: 'L',
-      title: 'T',
-      body: 'B',
-      offset: [0, 1, 0],
-      occlude: false,
-      ctx: ctx(),
-    })
-    expect(explicit).toMatchObject({ label: 'L', occlude: false })
-    expect(explicit.content).toEqual({ type: 'panel', title: 'T', body: 'B' })
+  it('creates a hotspot that occludes by default with a panel body', () => {
+    const h = createHotspot({ name: '步骤一', nodeId: 'nd_00000001', ctx: ctx() })
+    expect(h).toMatchObject({ occlude: true, visible: true, fadeWithDistance: false })
+    expect(h.content).toEqual({ type: 'panel', title: '步骤一', text: '' })
+    expect(h.style).toEqual({ marker: 'dot', color: '#ffb020' })
   })
 
-  it('creates a viewpoint with a sane default frustum', () => {
+  it('creates a viewpoint with the default frustum, overridable per field', () => {
     const v = createViewpoint({ name: '正视', position: [0, 1, 5], target: [0, 1, 0], ctx: ctx() })
-    expect(v.camera).toMatchObject({ fov: 45, near: 0.1, far: 1000 })
-    const custom = createViewpoint({ name: 'x', position: [0, 0, 1], target: [0, 0, 0], fov: 30, near: 1, far: 50, ctx: ctx() })
-    expect(custom.camera).toMatchObject({ fov: 30, near: 1, far: 50 })
+    expect(v.camera).toMatchObject({ kind: 'perspective', fov: 50, zoom: 1, near: 0.1, far: 1000, up: [0, 1, 0] })
+    const ortho = createViewpoint({
+      name: 'x',
+      position: [0, 0, 1],
+      target: [0, 0, 0],
+      camera: { kind: 'orthographic', zoom: 2 },
+      ctx: ctx(),
+    })
+    expect(ortho.camera).toMatchObject({ kind: 'orthographic', zoom: 2 })
   })
 
-  it('creates a variable whose name defaults to its id', () => {
+  it('creates a variable whose display name defaults to its id', () => {
     expect(createVariable({ id: 'step', type: 'number', default: 1 }).name).toBe('step')
-    expect(createVariable({ id: 'step', name: '步骤', type: 'number', default: 1 }).name).toBe('步骤')
+    expect(createVariable({ id: 'step', name: '步骤', type: 'number', default: 1 }).persist).toBe(false)
+    const mode = createVariable({ id: 'mode', type: 'enum', default: 'a', options: ['a', 'b'] })
+    expect(mode.options).toEqual(['a', 'b'])
   })
 
-  it('D9 · a new rule defaults to sequence + restart', () => {
-    const r = createRule({
-      name: 'r',
-      when: { event: 'sceneStart' },
-      then: [{ action: 'resetScene' }],
-      ctx: ctx(),
-    })
-    expect(r).toMatchObject({ mode: 'sequence', reentry: 'restart', enabled: true })
-    expect(r.if).toEqual([])
-
-    const explicit = createRule({
-      name: 'r',
-      when: { event: 'sceneStart' },
-      then: [{ action: 'resetScene' }],
-      mode: 'parallel',
-      reentry: 'queue',
-      enabled: false,
-      if: [{ op: 'eq', left: { var: 'step' }, right: { const: 1 } }],
-      ctx: ctx(),
-    })
-    expect(explicit).toMatchObject({ mode: 'parallel', reentry: 'queue', enabled: false })
-    expect(explicit.if).toHaveLength(1)
+  it('D9 · a new rule defaults to sequence + restart + abort-on-error', () => {
+    const rule = createRule({ name: 'r', when: { event: 'sceneReady' }, then: [{ action: 'resetScene', params: {} }], ctx: ctx() })
+    expect(rule).toMatchObject({ mode: 'sequence', reentry: 'restart', onError: 'abort', enabled: true })
+    expect(rule.if).toEqual([])
+    expect(rule.ifAny).toEqual([])
   })
 
-  it('touch() moves updatedAt without touching createdAt', () => {
+  it('touch() moves updatedAt and leaves createdAt alone', () => {
     const doc = createEmptyDocument({ name: 'x', ctx: ctx() })
     const later = touch(doc, { newId: createSequentialIdFactory(), now: () => '2026-04-01T00:00:00.000Z' })
     expect(later.meta.createdAt).toBe(doc.meta.createdAt)
@@ -167,23 +158,90 @@ describe('document factories', () => {
     expect(doc.meta.updatedAt).toBe(doc.meta.createdAt)
   })
 
-  it('falls back to the default context (real clock, random ids) when none is passed', () => {
+  it('falls back to the real clock and CSPRNG when no context is given', () => {
     const doc = createEmptyDocument({ name: 'x' })
-    expect(doc.projectId).toMatch(/^prj_[0-9a-z]{6,32}$/)
+    expect(doc.projectId).toMatch(/^prj_[0-9a-z]{8}$/)
     expect(Number.isNaN(Date.parse(doc.meta.createdAt))).toBe(false)
     expect(defaultFactoryContext.newId('node')).toMatch(/^nd_/)
-    expect(touch(doc).meta.updatedAt.length).toBeGreaterThan(0)
+    expect(validate(doc).ok).toBe(true)
+  })
+})
+
+describe('selectors', () => {
+  const doc = createGoldenPathDocument()
+
+  it('reads the hierarchy in order', () => {
+    expect(getChildren(doc, null).map((n) => n.name)).toEqual(['泵组'])
+    expect(getChildren(doc, GOLDEN_PATH_IDS.nodePump).map((n) => n.name)).toEqual(['泵体', '阀盖'])
+    expect(getDescendants(doc, GOLDEN_PATH_IDS.nodePump).map((n) => n.name)).toEqual(['泵体', '阀盖'])
+    expect(getAncestors(doc, GOLDEN_PATH_IDS.nodeCover).map((n) => n.name)).toEqual(['泵组'])
+    expect(getSubtreeIds(doc, GOLDEN_PATH_IDS.nodePump)).toHaveLength(3)
   })
 
-  it('the golden path builder is deterministic across runs', () => {
-    expect(JSON.stringify(createGoldenPathDocument())).toBe(JSON.stringify(createGoldenPathDocument()))
+  it('builds a display path from names — display only, never a key', () => {
+    expect(getDisplayPath(doc, GOLDEN_PATH_IDS.nodeCover)).toBe('泵组/阀盖')
+    expect(getDisplayPath(doc, 'nd_99999999')).toBe('')
   })
 
-  it('the golden path builder can be re-seeded without colliding', () => {
-    const a = createGoldenPathDocument({ idStart: 1 })
-    const b = createGoldenPathDocument({ idStart: 100, at: '2027-01-01T00:00:00.000Z' })
-    expect(a.projectId).not.toBe(b.projectId)
-    expect(b.meta.createdAt).toBe('2027-01-01T00:00:00.000Z')
-    expect(validate(b).ok).toBe(true)
+  it('walks the tree depth-first with depths', () => {
+    const seen: [string, number][] = []
+    walkTree(doc, (n, d) => seen.push([n.name, d]))
+    expect(seen).toEqual([
+      ['泵组', 0],
+      ['泵体', 1],
+      ['阀盖', 1],
+    ])
+  })
+
+  it('SCHEMA_SPEC §4.2 · refuses the drags that would create a cycle', () => {
+    expect(wouldCreateCycle(doc, GOLDEN_PATH_IDS.nodePump, GOLDEN_PATH_IDS.nodeCover)).toBe(true)
+    expect(wouldCreateCycle(doc, GOLDEN_PATH_IDS.nodeCover, GOLDEN_PATH_IDS.nodeCover)).toBe(true)
+    expect(wouldCreateCycle(doc, GOLDEN_PATH_IDS.nodeCover, null)).toBe(false)
+    expect(wouldCreateCycle(doc, GOLDEN_PATH_IDS.nodeBody, GOLDEN_PATH_IDS.nodeCover)).toBe(false)
+  })
+
+  it('terminates on an already-corrupted parent chain instead of hanging', () => {
+    const broken = structuredClone(doc)
+    broken.nodes[0]!.parent = broken.nodes[2]!.id
+    expect(getAncestors(broken, broken.nodes[1]!.id).length).toBeLessThan(10)
+    expect(getDescendants(broken, broken.nodes[0]!.id).length).toBeLessThan(10)
+    expect(getUnreachableNodes(broken)).toHaveLength(3)
+  })
+
+  it('reports nothing unreachable in a healthy document', () => {
+    expect(getUnreachableNodes(doc)).toEqual([])
+  })
+
+  it('allocates order keys with room to insert between them', () => {
+    expect(getAppendOrder(doc, GOLDEN_PATH_IDS.nodePump)).toBe(3000)
+    expect(getAppendOrder(doc, GOLDEN_PATH_IDS.nodeCover)).toBe(ORDER_STEP)
+    expect(getOrderBetween(1000, 2000)).toBe(1500)
+    expect(getOrderBetween(null, 2000)).toBe(1000)
+    expect(getOrderBetween(1000, null)).toBe(2000)
+    expect(getOrderBetween(null, null)).toBe(ORDER_STEP)
+  })
+
+  it('signals exhaustion so the caller renumbers instead of colliding', () => {
+    expect(getOrderBetween(1000, 1001)).toBeNull()
+    expect(getOrderBetween(1000, 1000)).toBeNull()
+    const renumbered = renumberSiblings(doc, GOLDEN_PATH_IDS.nodePump)
+    expect([...renumbered.values()]).toEqual([1000, 2000])
+  })
+
+  it('collects every id in the document, including flow steps', () => {
+    const ids = collectAllIds({
+      ...doc,
+      flows: [
+        {
+          id: 'flw_a1b2c3d4',
+          name: '流程',
+          variableId: 'step',
+          steps: [{ id: 'st_a1b2c3d4', name: '一', next: null, onEnter: [] }],
+        },
+      ],
+    })
+    expect(ids.has(GOLDEN_PATH_IDS.project)).toBe(true)
+    expect(ids.has(GOLDEN_PATH_IDS.nodeCover)).toBe(true)
+    expect(ids.has('st_a1b2c3d4')).toBe(true)
   })
 })

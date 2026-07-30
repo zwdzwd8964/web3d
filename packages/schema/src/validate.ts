@@ -1,16 +1,19 @@
 import type { z } from 'zod'
-import { SceneDocument } from './document.js'
+import { SceneDocumentSchema } from './document.js'
+import type { SceneDocument } from './document.js'
 
-export interface ValidationIssue {
-  /** Dotted/bracketed JSON path, e.g. `nodes[3].transform.p`. */
+/** SCHEMA_SPEC §9 · a plain result, so nothing throws into the editor's render path. */
+export type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E }
+
+export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value })
+export const err = <E>(error: E): Result<never, E> => ({ ok: false, error })
+
+export interface ValidationError {
+  /** Bracketed JSON path, e.g. `nodes[3].transform.p`. */
   readonly path: string
   readonly message: string
   readonly code: string
 }
-
-export type ValidateResult =
-  | { readonly ok: true; readonly document: SceneDocument }
-  | { readonly ok: false; readonly issues: readonly ValidationIssue[] }
 
 export function formatPath(path: readonly (string | number | symbol)[]): string {
   let out = ''
@@ -21,42 +24,44 @@ export function formatPath(path: readonly (string | number | symbol)[]): string 
   return out === '' ? '(root)' : out
 }
 
-export function toIssues(error: z.ZodError): ValidationIssue[] {
-  return error.issues.map((i) => ({
-    path: formatPath(i.path),
-    message: i.message,
-    code: i.code,
-  }))
+export function toValidationErrors(error: z.ZodError): ValidationError[] {
+  return error.issues.map((i) => ({ path: formatPath(i.path), message: i.message, code: i.code }))
 }
 
 /**
- * Structural validation only: shapes, enums, ranges, id formats.
- * Cross-references are checkIntegrity()'s job — the two are deliberately separate so
- * that a document can be *saved* while still incomplete, but never *published*
- * while broken (D8).
+ * Structural validation only — shapes, enums, ranges, id formats. Uses `safeParse`, so
+ * a malformed document surfaces as a list the UI can point at rather than an exception
+ * that takes the editor down (SCHEMA_SPEC §0.4).
+ *
+ * Cross-references are checkIntegrity's job. The split is deliberate: a document may be
+ * SAVED while still incomplete, but must never be PUBLISHED while broken (MVP_V0 D8).
+ *
+ * Note that `rules[].then[].params` is intentionally unvalidated here — per-action
+ * parameter schemas live in core's registry (ECA_SPEC §4.1), which this package sits
+ * below. The executor parses them through the registry before running a handler.
  */
-export function validate(input: unknown): ValidateResult {
-  const parsed = SceneDocument.safeParse(input)
-  if (parsed.success) return { ok: true, document: parsed.data }
-  return { ok: false, issues: toIssues(parsed.error) }
+export function validate(input: unknown): Result<SceneDocument, ValidationError[]> {
+  const parsed = SceneDocumentSchema.safeParse(input)
+  return parsed.success ? ok(parsed.data) : err(toValidationErrors(parsed.error))
 }
 
 export class DocumentValidationError extends Error {
-  readonly issues: readonly ValidationIssue[]
-  constructor(issues: readonly ValidationIssue[]) {
-    const head = issues
+  readonly errors: readonly ValidationError[]
+  constructor(errors: readonly ValidationError[]) {
+    const head = errors
       .slice(0, 5)
-      .map((i) => `  ${i.path}: ${i.message}`)
+      .map((e) => `  ${e.path}: ${e.message}`)
       .join('\n')
-    const more = issues.length > 5 ? `\n  … and ${issues.length - 5} more` : ''
-    super(`scene document failed validation (${issues.length} issue(s)):\n${head}${more}`)
+    const more = errors.length > 5 ? `\n  … and ${errors.length - 5} more` : ''
+    super(`scene document failed validation (${errors.length} issue(s)):\n${head}${more}`)
     this.name = 'DocumentValidationError'
-    this.issues = issues
+    this.errors = errors
   }
 }
 
+/** Convenience for tests and fixtures, where an invalid document is a bug, not input. */
 export function assertValid(input: unknown): SceneDocument {
   const r = validate(input)
-  if (!r.ok) throw new DocumentValidationError(r.issues)
-  return r.document
+  if (!r.ok) throw new DocumentValidationError(r.error)
+  return r.value
 }

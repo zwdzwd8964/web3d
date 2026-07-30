@@ -1,58 +1,68 @@
-import type { AssetObjectEntry } from './assets.js'
+import type { Asset } from './asset.js'
 import type { SceneDocument } from './document.js'
 
 /**
- * D5 / R02 · re-uploading a model must not silently destroy every configured
- * interaction, material override and hotspot.
+ * SCHEMA_SPEC §5.3 · re-uploading a model must not destroy the configuration built on
+ * top of it. Technical assessment R02, the register's second-highest risk — and it only
+ * ever fires on the *second* upload, i.e. after the customer has already invested a day
+ * of work.
  *
- * This is the risk register's second-highest item and it always surfaces the *second*
- * time a customer uploads a model — i.e. after they have already invested a day of
- * configuration. The four-tier ladder below is the whole mitigation:
+ * The ladder, tried in order per node whose `assetRef.assetId` matches:
+ *   1. objectPath identical                                   -> exact
+ *   2. objectName unique among the new objects                -> byName
+ *   3. name ambiguous, one candidate wins on longest common
+ *      path suffix (counted in `/` segments)                  -> byPathScore
+ *   4. top score is a tie                                     -> ambiguous
+ *   5. no candidate at all                                    -> orphaned
  *
- *   1. objectPath identical                       -> exact
- *   2. objectName unique in the new asset          -> byName
- *   3. objectName ambiguous, but one candidate wins
- *      on longest-common-path-suffix              -> byPathScore
- *   4. nothing matched                             -> orphaned
+ * Tiers 4 and 5 are never resolved automatically. And nothing is ever deleted: the node
+ * keeps its `objectPath`/`objectName` so the UI can say what it was looking for, and
+ * carries `missing: true` for a human to re-point. Deleting a node whose material,
+ * animation, hotspot and rules the user configured is not an acceptable response to a
+ * re-export with renamed groups.
  *
- * Tiers 3-with-a-tie and 4 are never resolved automatically: they are reported for a
- * human to re-point. And nothing is ever deleted — an unmatched reference is marked
- * `missing`, keeping the rule/material/hotspot that depends on it intact.
+ * On tiers 4/5 the node's `assetId` still moves to the new asset. "Keep the old ref"
+ * means keep the coordinates being searched for, not keep pointing at the superseded
+ * asset — otherwise a partially-remapped scene would silently render from two asset
+ * versions at once. Recorded in ADR-0007.
  */
-
-export type RemapStrategy = 'exact' | 'byName' | 'byPathScore' | 'ambiguous' | 'orphaned'
 
 export interface RemapEntry {
   readonly nodeId: string
   readonly nodeName: string
-  readonly oldPath: string
-  readonly oldName: string
-  readonly newPath: string | null
-  readonly strategy: RemapStrategy
-  /** Matching trailing path segments, for byPathScore / ambiguous. */
-  readonly score?: number
-  /** Every candidate path considered, when the outcome needs a human. */
-  readonly candidates?: readonly string[]
+  /** The objectPath we were looking for. */
+  readonly from: string
+  /** Where it landed. Absent for ambiguous / orphaned. */
+  readonly to?: string
+}
+
+export interface AmbiguousRemapEntry extends RemapEntry {
+  readonly candidates: string[]
+  readonly score: number
 }
 
 export interface MigrationReport {
-  readonly exact: readonly RemapEntry[]
-  readonly byName: readonly RemapEntry[]
-  readonly byPathScore: readonly RemapEntry[]
-  readonly ambiguous: readonly RemapEntry[]
-  readonly orphaned: readonly RemapEntry[]
-  /** Number of node references that pointed at the old asset. */
   readonly total: number
+  readonly exact: RemapEntry[]
+  readonly byName: RemapEntry[]
+  readonly byPathScore: RemapEntry[]
+  readonly ambiguous: AmbiguousRemapEntry[]
+  readonly orphaned: RemapEntry[]
   readonly oldAssetId: string
   readonly newAssetId: string
 }
 
+export interface AssetObject {
+  readonly path: string
+  readonly name: string
+}
+
 export interface RemapResult {
-  readonly document: SceneDocument
+  readonly doc: SceneDocument
   readonly report: MigrationReport
 }
 
-/** Count of matching trailing segments between two slash-joined paths. */
+/** Matching trailing `/`-segments between two object paths. */
 export function commonSuffixScore(a: string, b: string): number {
   const sa = a.split('/')
   const sb = b.split('/')
@@ -64,106 +74,93 @@ export function commonSuffixScore(a: string, b: string): number {
 export function remapAssetRefs(
   doc: SceneDocument,
   oldAssetId: string,
-  newAssetId: string,
-  newObjects: readonly AssetObjectEntry[],
+  newAsset: Asset,
+  newObjects: readonly AssetObject[],
 ): RemapResult {
-  const byPath = new Map<string, AssetObjectEntry>()
-  const byName = new Map<string, AssetObjectEntry[]>()
+  const byPath = new Set(newObjects.map((o) => o.path))
+  const byName = new Map<string, AssetObject[]>()
   for (const obj of newObjects) {
-    byPath.set(obj.path, obj)
     const list = byName.get(obj.name)
     if (list) list.push(obj)
     else byName.set(obj.name, [obj])
   }
 
-  const buckets: Record<RemapStrategy, RemapEntry[]> = {
-    exact: [],
-    byName: [],
-    byPathScore: [],
-    ambiguous: [],
-    orphaned: [],
-  }
+  const exact: RemapEntry[] = []
+  const byNameHits: RemapEntry[] = []
+  const byPathScore: RemapEntry[] = []
+  const ambiguous: AmbiguousRemapEntry[] = []
+  const orphaned: RemapEntry[] = []
 
   const nodes = doc.nodes.map((node) => {
     const ref = node.assetRef
     if (!ref || ref.assetId !== oldAssetId) return node
 
-    const { objectPath: oldPath, objectName: oldName } = ref
+    const from = ref.objectPath
+    const base = { nodeId: node.id, nodeName: node.name, from }
+    const moveTo = (objectPath: string, objectName: string) => ({
+      ...node,
+      assetRef: { assetId: newAsset.id, objectPath, objectName, missing: false },
+    })
+    const keepSearching = () => ({
+      ...node,
+      assetRef: { assetId: newAsset.id, objectPath: from, objectName: ref.objectName, missing: true },
+    })
 
-    // Tier 1 — the path survived the re-export untouched.
-    if (byPath.has(oldPath)) {
-      buckets.exact.push({ nodeId: node.id, nodeName: node.name, oldPath, oldName, newPath: oldPath, strategy: 'exact' })
-      return { ...node, assetRef: { assetId: newAssetId, objectPath: oldPath, objectName: oldName } }
+    // 1 — the path survived the re-export untouched.
+    if (byPath.has(from)) {
+      exact.push({ ...base, to: from })
+      return moveTo(from, ref.objectName)
     }
 
-    const sameName = byName.get(oldName) ?? []
+    const sameName = byName.get(ref.objectName) ?? []
 
-    // Tier 2 — the object moved, but its name is still unique.
+    // 2 — it moved, but its name is still unique.
     if (sameName.length === 1) {
       const hit = sameName[0]!
-      buckets.byName.push({ nodeId: node.id, nodeName: node.name, oldPath, oldName, newPath: hit.path, strategy: 'byName' })
-      return { ...node, assetRef: { assetId: newAssetId, objectPath: hit.path, objectName: hit.name } }
+      byNameHits.push({ ...base, to: hit.path })
+      return moveTo(hit.path, hit.name)
     }
 
-    // Tier 3 — several objects share the name; let the surrounding hierarchy decide.
+    // 3 / 4 — several share the name; let the surrounding hierarchy break the tie.
     if (sameName.length > 1) {
       const scored = sameName
-        .map((o) => ({ obj: o, score: commonSuffixScore(oldPath, o.path) }))
-        .sort((a, b) => b.score - a.score)
+        .map((o) => ({ obj: o, score: commonSuffixScore(from, o.path) }))
+        .sort((a, b) => b.score - a.score || a.obj.path.localeCompare(b.obj.path))
       const best = scored[0]!
-      const tie = scored.filter((s) => s.score === best.score).length > 1
+      const tied = scored.filter((s) => s.score === best.score).length > 1
       const candidates = scored.map((s) => s.obj.path)
 
-      if (!tie && best.score > 0) {
-        buckets.byPathScore.push({
-          nodeId: node.id,
-          nodeName: node.name,
-          oldPath,
-          oldName,
-          newPath: best.obj.path,
-          strategy: 'byPathScore',
-          score: best.score,
-          candidates,
-        })
-        return { ...node, assetRef: { assetId: newAssetId, objectPath: best.obj.path, objectName: best.obj.name } }
+      if (!tied && best.score > 0) {
+        byPathScore.push({ ...base, to: best.obj.path })
+        return moveTo(best.obj.path, best.obj.name)
       }
-
-      // Ambiguous: keep the old coordinates so the UI can show what we were looking for.
-      buckets.ambiguous.push({
-        nodeId: node.id,
-        nodeName: node.name,
-        oldPath,
-        oldName,
-        newPath: null,
-        strategy: 'ambiguous',
-        score: best.score,
-        candidates,
-      })
-      return { ...node, assetRef: { assetId: newAssetId, objectPath: oldPath, objectName: oldName, missing: true } }
+      ambiguous.push({ ...base, candidates, score: best.score })
+      return keepSearching()
     }
 
-    // Tier 4 — gone. Marked, never deleted.
-    buckets.orphaned.push({ nodeId: node.id, nodeName: node.name, oldPath, oldName, newPath: null, strategy: 'orphaned' })
-    return { ...node, assetRef: { assetId: newAssetId, objectPath: oldPath, objectName: oldName, missing: true } }
+    // 5 — gone.
+    orphaned.push(base)
+    return keepSearching()
   })
 
-  const total =
-    buckets.exact.length +
-    buckets.byName.length +
-    buckets.byPathScore.length +
-    buckets.ambiguous.length +
-    buckets.orphaned.length
+  const total = exact.length + byNameHits.length + byPathScore.length + ambiguous.length + orphaned.length
 
   return {
-    document: { ...doc, nodes },
-    report: { ...buckets, total, oldAssetId, newAssetId },
+    doc: { ...doc, nodes },
+    report: {
+      total,
+      exact,
+      byName: byNameHits,
+      byPathScore,
+      ambiguous,
+      orphaned,
+      oldAssetId,
+      newAssetId: newAsset.id,
+    },
   }
 }
 
-/**
- * The manual escape hatch the report's "needs confirmation" rows lead to.
- * The UI must offer this for every ambiguous and orphaned entry (D5).
- */
+/** The manual escape hatch every ambiguous / orphaned row in the report leads to. */
 export function applyManualRemap(
   doc: SceneDocument,
   nodeId: string,
@@ -173,14 +170,14 @@ export function applyManualRemap(
     ...doc,
     nodes: doc.nodes.map((n) =>
       n.id === nodeId
-        ? { ...n, assetRef: { assetId: target.assetId, objectPath: target.objectPath, objectName: target.objectName } }
+        ? { ...n, assetRef: { assetId: target.assetId, objectPath: target.objectPath, objectName: target.objectName, missing: false } }
         : n,
     ),
   }
 }
 
-/** "12 项已迁移 / 3 项需人工确认 / 1 项失效" — the sentence MVP_V0 D5 asks the UI to show. */
+/** "已迁移 N 项 / 需确认 M 项 / 失效 K 项" — the wording R02 requires the UI to show. */
 export function summarizeMigrationReport(report: MigrationReport): string {
   const migrated = report.exact.length + report.byName.length + report.byPathScore.length
-  return `${migrated} 项已迁移 / ${report.ambiguous.length} 项需人工确认 / ${report.orphaned.length} 项失效`
+  return `已迁移 ${migrated} 项 / 需确认 ${report.ambiguous.length} 项 / 失效 ${report.orphaned.length} 项`
 }

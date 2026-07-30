@@ -1,97 +1,67 @@
 {
   "schemaVersion": 1,
-  "projectId": "prj_000001",
+  "projectId": "prj_a1b2c3d4",
   "name": "泵组拆装演示",
   "meta": {
     "unit": "m",
     "upAxis": "Y",
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
-    "description": "v0 黄金路径样例场景"
+    "createdAt": "2026-08-01T02:10:00.000Z",
+    "updatedAt": "2026-08-01T03:42:11.000Z",
+    "background": {
+      "type": "color",
+      "color": "#1a1a1a"
+    }
   },
   "assets": [
     {
-      "id": "ast_000001",
+      "id": "ast_9k2m4p7q",
       "type": "model",
-      "filename": "pump.glb",
-      "mimeType": "model/gltf-binary",
-      "hash": "sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12",
-      "url": "assets/ab/12/ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12.glb",
-      "bytes": 8412300,
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
       "version": 1,
-      "supersedes": null,
+      "lineageId": "ast_9k2m4p7q",
       "stats": {
-        "bytes": 8412300,
-        "triangles": 128400,
-        "drawCalls": 18,
-        "meshes": 3,
+        "tris": 128400,
         "materials": 12,
         "textures": 6,
-        "textureBytes": 42991616,
-        "maxTextureSize": 1024,
-        "animations": 0,
-        "nodes": 7,
-        "boundsMin": [
-          -0.6,
-          0,
-          -0.6
-        ],
-        "boundsMax": [
-          0.6,
-          1.4,
-          0.6
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
         ]
       },
-      "objects": [
-        {
-          "path": "Root",
-          "name": "Root",
-          "hasMesh": false
-        },
-        {
-          "path": "Root/Pump",
-          "name": "Pump",
-          "hasMesh": false
-        },
-        {
-          "path": "Root/Pump/Body",
-          "name": "Body",
-          "hasMesh": true
-        },
-        {
-          "path": "Root/Pump/Valve",
-          "name": "Valve",
-          "hasMesh": false
-        },
-        {
-          "path": "Root/Pump/Valve/Cover",
-          "name": "Cover",
-          "hasMesh": true
-        },
-        {
-          "path": "Root/Pump/Valve/Bolt",
-          "name": "Bolt",
-          "hasMesh": true
-        },
-        {
-          "path": "Root/Pump/Valve/Gasket",
-          "name": "Gasket",
-          "hasMesh": true
-        }
-      ],
-      "createdAt": "2026-01-01T00:00:00.000Z"
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
     }
   ],
   "nodes": [
     {
-      "id": "nd_000001",
+      "id": "nd_r5t8y1u3",
       "name": "泵组",
       "parent": null,
-      "assetRef": {
-        "assetId": "ast_000001",
-        "objectPath": "Root/Pump",
-        "objectName": "Pump"
-      },
+      "order": 1000,
+      "assetRef": null,
       "transform": {
         "p": [
           0,
@@ -112,18 +82,18 @@
       },
       "visible": true,
       "locked": false,
-      "overrides": {
-        "materialId": null
-      }
+      "overrides": {}
     },
     {
-      "id": "nd_000002",
+      "id": "nd_v7w9x2z4",
       "name": "泵体",
-      "parent": "nd_000001",
+      "parent": "nd_r5t8y1u3",
+      "order": 1000,
       "assetRef": {
-        "assetId": "ast_000001",
+        "assetId": "ast_9k2m4p7q",
         "objectPath": "Root/Pump/Body",
-        "objectName": "Body"
+        "objectName": "Body",
+        "missing": false
       },
       "transform": {
         "p": [
@@ -145,23 +115,23 @@
       },
       "visible": true,
       "locked": false,
-      "overrides": {
-        "materialId": "mat_000002"
-      }
+      "overrides": {}
     },
     {
-      "id": "nd_000003",
+      "id": "nd_b3n5m7k9",
       "name": "阀盖",
-      "parent": "nd_000001",
+      "parent": "nd_r5t8y1u3",
+      "order": 2000,
       "assetRef": {
-        "assetId": "ast_000001",
-        "objectPath": "Root/Pump/Valve/Cover",
-        "objectName": "Cover"
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
       },
       "transform": {
         "p": [
           0,
-          0.9,
+          0,
           0
         ],
         "r": [
@@ -179,160 +149,78 @@
       "visible": true,
       "locked": false,
       "overrides": {
-        "materialId": "mat_000001"
-      }
-    },
-    {
-      "id": "nd_000004",
-      "name": "固定螺栓",
-      "parent": "nd_000003",
-      "assetRef": {
-        "assetId": "ast_000001",
-        "objectPath": "Root/Pump/Valve/Bolt",
-        "objectName": "Bolt"
-      },
-      "transform": {
-        "p": [
-          0.18,
-          0.06,
-          0
-        ],
-        "r": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "s": [
-          1,
-          1,
-          1
-        ]
-      },
-      "visible": true,
-      "locked": false,
-      "overrides": {
-        "materialId": "mat_000001"
-      }
-    },
-    {
-      "id": "nd_000005",
-      "name": "密封垫",
-      "parent": "nd_000001",
-      "assetRef": {
-        "assetId": "ast_000001",
-        "objectPath": "Root/Pump/Valve/Gasket",
-        "objectName": "Gasket"
-      },
-      "transform": {
-        "p": [
-          0,
-          0.86,
-          0
-        ],
-        "r": [
-          0,
-          0,
-          0,
-          1
-        ],
-        "s": [
-          1,
-          1,
-          1
-        ]
-      },
-      "visible": true,
-      "locked": false,
-      "overrides": {
-        "materialId": "mat_000002"
+        "materialId": "mat_c4d6f8h1"
       }
     }
   ],
   "materials": [
     {
-      "id": "mat_000001",
-      "name": "不锈钢",
-      "base": null,
+      "id": "mat_c4d6f8h1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
       "params": {
-        "color": "#c3c9cf",
-        "roughness": 0.35,
+        "roughness": 0.4,
         "metalness": 0.9,
-        "opacity": 1,
-        "transparent": false,
-        "emissive": "#000000",
-        "emissiveIntensity": 0,
-        "doubleSided": false
-      },
-      "maps": {}
-    },
-    {
-      "id": "mat_000002",
-      "name": "漆面蓝",
-      "base": null,
-      "params": {
-        "color": "#3f6f97",
-        "roughness": 0.6,
-        "metalness": 0.1,
-        "opacity": 1,
-        "transparent": false,
-        "emissive": "#000000",
-        "emissiveIntensity": 0,
-        "doubleSided": false
-      },
-      "maps": {}
+        "maps": {}
+      }
     }
   ],
   "animations": [
     {
-      "id": "anm_000001",
-      "name": "阀盖上移",
       "kind": "tween",
+      "id": "anm_j2l4n6p8",
+      "name": "阀盖抬起",
+      "duration": 1.2,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": false,
       "targets": [
         {
-          "nodeId": "nd_000003",
-          "from": null,
+          "nodeId": "nd_b3n5m7k9",
           "to": {
             "p": [
               0,
-              1.25,
+              0.35,
               0
             ]
           }
         }
-      ],
-      "durationMs": 1200,
-      "easing": "easeInOutCubic",
-      "loop": false
+      ]
     }
   ],
   "hotspots": [
     {
-      "id": "hs_000001",
-      "name": "拆卸第一步",
+      "id": "hs_q1s3u5w7",
+      "name": "拆卸提示",
       "anchor": {
-        "nodeId": "nd_000003",
+        "nodeId": "nd_b3n5m7k9",
         "offset": [
           0,
-          0.12,
+          0.2,
           0
         ]
       },
       "occlude": true,
       "visible": true,
-      "label": "1",
+      "fadeWithDistance": false,
       "content": {
         "type": "panel",
-        "title": "拆卸第一步",
-        "body": "松开六颗固定螺栓，均匀交叉卸力，避免阀盖变形。"
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020"
       }
     }
   ],
   "viewpoints": [
     {
-      "id": "vp_000001",
+      "id": "vp_e9g1i3k5",
       "name": "拆解视角",
       "camera": {
+        "kind": "perspective",
         "position": [
           2.4,
           1.8,
@@ -340,10 +228,16 @@
         ],
         "target": [
           0,
-          0.7,
+          0.4,
           0
         ],
-        "fov": 45,
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
         "near": 0.1,
         "far": 1000
       }
@@ -354,17 +248,20 @@
       "id": "step",
       "name": "当前步骤",
       "type": "number",
-      "default": 1
+      "default": 1,
+      "persist": false
     }
   ],
   "rules": [
     {
-      "id": "rl_000001",
-      "name": "第一步：点击阀盖",
+      "id": "rl_m8o2q4s6",
+      "name": "点击阀盖执行第一步",
       "enabled": true,
       "when": {
         "event": "click",
-        "nodeId": "nd_000003"
+        "target": {
+          "nodeId": "nd_b3n5m7k9"
+        }
       },
       "if": [
         {
@@ -377,44 +274,44 @@
           }
         }
       ],
+      "ifAny": [],
       "mode": "sequence",
       "reentry": "restart",
+      "onError": "abort",
       "then": [
         {
           "action": "playAnimation",
-          "animationId": "anm_000001",
-          "loop": null,
-          "speed": null
+          "params": {
+            "animationId": "anm_j2l4n6p8",
+            "await": true
+          }
         },
         {
           "action": "highlight",
-          "nodeId": "nd_000003",
-          "preset": "amber"
+          "params": {
+            "nodeId": "nd_b3n5m7k9",
+            "preset": "outline_amber"
+          }
         },
         {
           "action": "openPanel",
-          "hotspotId": "hs_000001"
+          "params": {
+            "hotspotId": "hs_q1s3u5w7"
+          }
         },
         {
           "action": "setVariable",
-          "variableId": "step",
-          "value": {
-            "const": 2
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
           }
         }
       ]
     }
   ],
-  "environment": {
-    "background": "#14171a",
-    "ambientIntensity": 0.6,
-    "keyIntensity": 2.1,
-    "fillIntensity": 0.55,
-    "showGrid": true,
-    "showGround": true
-  },
   "pages": [],
-  "media": [],
   "flows": [],
-  "constraints": []
+  "media": []
 }

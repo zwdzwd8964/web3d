@@ -1,43 +1,51 @@
 import { describe, expect, it } from 'vitest'
-import { CURRENT_SCHEMA_VERSION } from '../src/document.js'
+import { CURRENT_VERSION } from '../src/document.js'
 import { createGoldenPathDocument } from '../src/samples.js'
 import { DocumentValidationError, assertValid, validate } from '../src/validate.js'
 
-const golden = () => createGoldenPathDocument()
+/** T-012 · SCHEMA_SPEC §9 structural validation. */
 
-/** Deep-clone then mutate, so each case starts from a known-good document. */
+/** Deep-clone the known-good document, then break one thing. */
 function broken(mutate: (doc: Record<string, any>) => void): unknown {
-  const doc = structuredClone(golden()) as Record<string, any>
+  const doc = structuredClone(createGoldenPathDocument()) as Record<string, any>
   mutate(doc)
   return doc
 }
 
+const pathsOf = (input: unknown): string[] => {
+  const r = validate(input)
+  return r.ok ? [] : r.error.map((e) => e.path)
+}
+
 describe('validate()', () => {
   it('accepts the golden path document', () => {
-    const r = validate(golden())
-    expect(r.ok).toBe(true)
+    expect(validate(createGoldenPathDocument()).ok).toBe(true)
   })
 
-  it('the golden path document is at the current schema version', () => {
-    expect(golden().schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
+  it('pins schemaVersion to the literal current version', () => {
+    expect(createGoldenPathDocument().schemaVersion).toBe(CURRENT_VERSION)
+    expect(validate(broken((d) => (d.schemaVersion = 2))).ok).toBe(false)
+    expect(validate(broken((d) => (d.schemaVersion = 0))).ok).toBe(false)
   })
 
-  it('rejects a non-object', () => {
-    for (const bad of [null, undefined, 42, 'x', []]) {
-      expect(validate(bad).ok).toBe(false)
-    }
+  it('rejects anything that is not an object', () => {
+    for (const bad of [null, undefined, 42, 'x', []]) expect(validate(bad).ok).toBe(false)
   })
 
-  it('reports the failing path, not just "invalid"', () => {
-    const r = validate(broken((d) => (d.nodes[0].transform.p = [1, 2])))
-    expect(r.ok).toBe(false)
-    if (r.ok) return
-    expect(r.issues.some((i) => i.path.startsWith('nodes[0].transform.p'))).toBe(true)
+  it('reports a locatable path rather than just "invalid"', () => {
+    expect(pathsOf(broken((d) => (d.nodes[0].transform.p = [1, 2])))).toContainEqual(
+      expect.stringContaining('nodes[0].transform.p'),
+    )
+    expect(pathsOf(broken((d) => (d.rules[0].then = [])))).toContainEqual(expect.stringContaining('rules[0].then'))
   })
 
   it('rejects unknown keys instead of silently dropping them', () => {
-    const r = validate(broken((d) => (d.nodes[0].colour = 'red')))
-    expect(r.ok).toBe(false)
+    expect(validate(broken((d) => (d.nodes[0].colour = 'red'))).ok).toBe(false)
+    expect(validate(broken((d) => (d.somethingNew = 1))).ok).toBe(false)
+  })
+
+  it('rejects a `constraints` collection — SCHEMA_SPEC §7 deliberately does not define one', () => {
+    expect(validate(broken((d) => (d.constraints = []))).ok).toBe(false)
   })
 
   it('rejects NaN and Infinity, which do not survive JSON', () => {
@@ -45,82 +53,131 @@ describe('validate()', () => {
     expect(validate(broken((d) => (d.nodes[0].transform.p[1] = Number.POSITIVE_INFINITY))).ok).toBe(false)
   })
 
-  it('rejects an out-of-range material parameter', () => {
+  it('enforces id format on every reference field', () => {
+    expect(validate(broken((d) => (d.nodes[1].parent = 'pump'))).ok).toBe(false)
+    expect(validate(broken((d) => (d.nodes[2].overrides.materialId = 'nd_r5t8y1u3'))).ok).toBe(false)
+    expect(validate(broken((d) => (d.hotspots[0].anchor.nodeId = 'nd_TOOLONGXX'))).ok).toBe(false)
+  })
+
+  it('enforces material parameter ranges and colour format', () => {
     expect(validate(broken((d) => (d.materials[0].params.roughness = 1.4))).ok).toBe(false)
-    expect(validate(broken((d) => (d.materials[0].params.color = 'red'))).ok).toBe(false)
+    expect(validate(broken((d) => (d.meta.background.color = 'red'))).ok).toBe(false)
   })
 
-  it('rejects a variable whose default does not match its declared type', () => {
-    const r = validate(broken((d) => (d.variables[0].default = 'one')))
-    expect(r.ok).toBe(false)
-  })
-
-  it('rejects an unregistered action kind (C5: the catalog is the whole vocabulary)', () => {
-    const r = validate(broken((d) => (d.rules[0].then[0] = { action: 'launchMissiles', targetId: 'x' })))
-    expect(r.ok).toBe(false)
-  })
-
-  it('rejects an unregistered event kind', () => {
-    expect(validate(broken((d) => (d.rules[0].when = { event: 'pageEnter', pageId: 'pg_000001' }))).ok).toBe(false)
-  })
-
-  it('rejects an animation kind outside the closed enum (R03)', () => {
+  it('rejects an animation kind outside the closed union (R03 defence line)', () => {
     const r = validate(
       broken((d) => {
-        d.animations[0] = { id: d.animations[0].id, name: 'x', kind: 'keyframe', tracks: [] }
+        d.animations[0] = { kind: 'keyframe', id: 'anm_j2l4n6p8', name: 'x', tracks: [] }
       }),
     )
     expect(r.ok).toBe(false)
   })
 
-  it('rejects a rule with an empty action list', () => {
-    expect(validate(broken((d) => (d.rules[0].then = []))).ok).toBe(false)
+  it('rejects an event type v0 cannot fire', () => {
+    expect(validate(broken((d) => (d.rules[0].when = { event: 'pageEnter', pageId: 'pg_a1b2c3d4' }))).ok).toBe(false)
+    expect(validate(broken((d) => (d.rules[0].when = { event: 'flowStepEnter' }))).ok).toBe(false)
   })
 
-  it('accepts a rule with no conditions (empty means always)', () => {
-    expect(validate(broken((d) => (d.rules[0].if = []))).ok).toBe(true)
+  it('accepts every valid node target shape', () => {
+    const cover = createGoldenPathDocument().nodes[2]!.id
+    for (const target of [{ nodeId: cover }, { nodeId: cover, includeDescendants: true }, { any: true }]) {
+      expect(validate(broken((d) => (d.rules[0].when = { event: 'click', target }))).ok, JSON.stringify(target)).toBe(
+        true,
+      )
+    }
+    expect(validate(broken((d) => (d.rules[0].when = { event: 'click', target: { any: false } }))).ok).toBe(false)
+    expect(
+      validate(broken((d) => (d.rules[0].when = { event: 'click', target: { nodeId: cover, includeDescendants: false } })))
+        .ok,
+    ).toBe(false)
   })
 
-  it('accepts nested and/or/not conditions', () => {
-    const r = validate(
-      broken((d) => {
-        d.rules[0].if = [
-          {
-            op: 'or',
-            conditions: [
-              { op: 'not', condition: { op: 'eq', left: { var: 'step' }, right: { const: 9 } } },
-              { op: 'nodeVisible', nodeId: d.nodes[2].id, expected: true },
-            ],
-          },
-        ]
-      }),
+  it('accepts an action envelope without inspecting its params — that is the registry’s job', () => {
+    // C5: adding an action must not require a schema change, so `params` is opaque here.
+    expect(
+      validate(broken((d) => (d.rules[0].then = [{ action: 'somethingBrandNew', params: { whatever: [1, 2, 3] } }]))).ok,
+    ).toBe(true)
+    expect(validate(broken((d) => (d.rules[0].then = [{ action: '', params: {} }]))).ok).toBe(false)
+    expect(validate(broken((d) => (d.rules[0].then = [{ params: {} }]))).ok).toBe(false)
+  })
+
+  it('accepts flat if / ifAny and rejects a nested boolean tree (SCHEMA_SPEC §6.6)', () => {
+    expect(validate(broken((d) => (d.rules[0].ifAny = d.rules[0].if))).ok).toBe(true)
+    expect(validate(broken((d) => (d.rules[0].if = [{ op: 'and', conditions: [] }]))).ok).toBe(false)
+    expect(validate(broken((d) => (d.rules[0].if = [{ op: 'not', condition: {} }]))).ok).toBe(false)
+  })
+
+  it('accepts every condition operator shape', () => {
+    const doc = createGoldenPathDocument()
+    const cover = doc.nodes[2]!.id
+    const conditions = [
+      { op: 'eq', left: { var: 'step' }, right: { const: 1 } },
+      { op: 'in', left: { var: 'step' }, right: [1, 2, 3] },
+      { op: 'isVisible', nodeId: cover, value: true },
+      { op: 'isPlaying', animationId: doc.animations[0]!.id, value: false },
+      { op: 'isPanelOpen', hotspotId: doc.hotspots[0]!.id, value: true },
+      { op: 'gte', left: { prop: { nodeId: cover, key: 'positionY' } }, right: { const: 0.3 } },
+      { op: 'eq', left: { event: 'nodeId' }, right: { const: cover } },
+    ]
+    for (const cond of conditions) {
+      expect(validate(broken((d) => (d.rules[0].if = [cond]))).ok, JSON.stringify(cond)).toBe(true)
+    }
+    expect(validate(broken((d) => (d.rules[0].if = [{ op: 'matches', left: { var: 'step' }, right: { const: 1 } }]))).ok).toBe(
+      false,
     )
+    expect(
+      validate(broken((d) => (d.rules[0].if = [{ op: 'gte', left: { prop: { nodeId: cover, key: 'rotation' } }, right: { const: 1 } }])))
+        .ok,
+    ).toBe(false)
+  })
+
+  it('rejects a camera whose far plane is not beyond its near plane is out of range', () => {
+    expect(validate(broken((d) => (d.viewpoints[0].camera.fov = 200))).ok).toBe(false)
+    expect(validate(broken((d) => (d.viewpoints[0].camera.near = 0))).ok).toBe(false)
+  })
+
+  it('rejects a tween with no targets and a non-positive duration', () => {
+    expect(validate(broken((d) => (d.animations[0].targets = []))).ok).toBe(false)
+    expect(validate(broken((d) => (d.animations[0].duration = 0))).ok).toBe(false)
+  })
+
+  it('rejects a variable id that is a reserved word', () => {
+    expect(validate(broken((d) => (d.variables[0].id = 'event'))).ok).toBe(false)
+  })
+
+  it('SCHEMA_SPEC §0.5 · survives a JSON round trip unchanged', () => {
+    const doc = createGoldenPathDocument()
+    const back = validate(JSON.parse(JSON.stringify(doc)))
+    expect(back.ok).toBe(true)
+    if (back.ok) expect(back.value).toEqual(doc)
+  })
+
+  it('fills declared defaults when optional fields are absent', () => {
+    const doc = structuredClone(createGoldenPathDocument()) as Record<string, any>
+    delete doc.pages
+    delete doc.flows
+    delete doc.media
+    delete doc.rules[0].enabled
+    delete doc.rules[0].reentry
+    delete doc.nodes[0].visible
+    const r = validate(doc)
     expect(r.ok).toBe(true)
-  })
-
-  it('rejects a camera whose far plane is not beyond its near plane', () => {
-    expect(validate(broken((d) => (d.viewpoints[0].camera.far = 0.05))).ok).toBe(false)
-  })
-
-  it('rejects a tween target that changes nothing', () => {
-    expect(validate(broken((d) => (d.animations[0].targets[0].to = {}))).ok).toBe(false)
+    if (!r.ok) return
+    expect(r.value.pages).toEqual([])
+    expect(r.value.rules[0]!.enabled).toBe(true)
+    expect(r.value.rules[0]!.reentry).toBe('restart')
+    expect(r.value.nodes[0]!.visible).toBe(true)
   })
 
   it('assertValid throws a DocumentValidationError carrying every issue', () => {
-    expect(() => assertValid(golden())).not.toThrow()
+    expect(() => assertValid(createGoldenPathDocument())).not.toThrow()
     try {
       assertValid(broken((d) => (d.nodes[0].name = 42)))
       expect.unreachable('should have thrown')
-    } catch (err) {
-      expect(err).toBeInstanceOf(DocumentValidationError)
-      expect((err as DocumentValidationError).issues.length).toBeGreaterThan(0)
+    } catch (error) {
+      expect(error).toBeInstanceOf(DocumentValidationError)
+      expect((error as DocumentValidationError).errors.length).toBeGreaterThan(0)
+      expect((error as DocumentValidationError).message).toContain('nodes[0].name')
     }
-  })
-
-  it('survives a JSON round trip unchanged', () => {
-    const doc = golden()
-    const back = validate(JSON.parse(JSON.stringify(doc)))
-    expect(back.ok).toBe(true)
-    if (back.ok) expect(back.document).toEqual(doc)
   })
 })
