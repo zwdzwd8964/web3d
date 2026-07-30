@@ -1,5 +1,6 @@
 packages:
   - 'packages/*'
+  - 'tools/*'
   - 'e2e'
 
 # --- workspace-wide settings (pnpm >= 10 reads these here, not from .npmrc) ---
@@ -21,3 +22,4 @@ allowBuilds:
   # texture pipeline. We run gltf-transform in the browser (C6: no server-side GPU/native
   # step), so the native build is deliberately skipped.
   sharp: false
+

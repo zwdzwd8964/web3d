@@ -5,9 +5,14 @@ import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
+import { IssuePanel } from './panels/IssuePanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
+import { RuleLogPanel } from './panels/RuleLogPanel.js'
+import { RulePanel } from './panels/RulePanel.js'
+import { VariablePanel } from './panels/VariablePanel.js'
 import { ViewpointPanel } from './panels/ViewpointPanel.js'
+import { usePreview } from './preview/PreviewContext.jsx'
 import { useAutoSave } from './project/useAutoSave.js'
 import { useDocumentActions, useDocumentSelector } from './store/StoreContext.js'
 import { Viewport } from './viewport/Viewport.js'
@@ -20,7 +25,7 @@ import { fullRebuildCount } from './viewport/runtime-registry.js'
  * assets and rules along the bottom.
  */
 
-type BottomTab = 'assets' | 'material' | 'animation' | 'viewpoint' | 'history'
+type BottomTab = 'assets' | 'material' | 'animation' | 'viewpoint' | 'rules' | 'variables' | 'issues' | 'log' | 'history'
 
 export function App() {
   useShortcuts()
@@ -92,16 +97,7 @@ function TopBar() {
       </button>
       <SaveControl />
       <div className="topbar__spacer" />
-      <div className="seg">
-        <button type="button" aria-pressed="true">
-          编辑
-        </button>
-        {/* Preview mode arrives with T-093; the control is here so the layout is settled
-            before the behaviour lands, and disabled so it cannot lie about being wired. */}
-        <button type="button" aria-pressed="false" disabled title="预览模式：T-093">
-          预览
-        </button>
-      </div>
+      <ModeSwitch />
     </header>
   )
 }
@@ -141,9 +137,32 @@ const SAVE_LABELS: Record<ReturnType<typeof useAutoSave>['state'], string> = {
   error: '保存失败',
 }
 
+/**
+ * T-093 · edit / preview.
+ *
+ * Preview is the only place the ECA engine runs (ECA_SPEC §7). While editing, a click
+ * selects — otherwise an object with a click rule could not be edited, by its own
+ * configuration.
+ */
+function ModeSwitch() {
+  const active = usePreview((s) => s.active)
+  const setActive = usePreview((s) => s.setActive)
+  return (
+    <div className="seg">
+      <button type="button" aria-pressed={!active} onClick={() => setActive(false)}>
+        编辑
+      </button>
+      <button type="button" aria-pressed={active} onClick={() => setActive(true)} title="运行规则，退出后编辑态完全还原">
+        预览
+      </button>
+    </div>
+  )
+}
+
 function BottomDock() {
   const [tab, setTab] = useState<BottomTab>('assets')
   const rules = useDocumentSelector((s) => s.doc.rules)
+  const previewActive = usePreview((s) => s.active)
 
   return (
     <section className="panel panel--bottom">
@@ -155,6 +174,10 @@ function BottomDock() {
               ['material', '材质'],
               ['animation', '动画'],
               ['viewpoint', '视点'],
+              ['rules', '规则'],
+              ['variables', '变量'],
+              ['issues', '完整性'],
+              ['log', '规则日志'],
               ['history', '历史'],
             ] as const
           ).map(([id, label]) => (
@@ -164,7 +187,7 @@ function BottomDock() {
           ))}
         </div>
         <span className="panel__hint">
-          规则编辑器：T-091 · 当前 <span className="num">{rules.length}</span> 条
+          {previewActive ? '预览中 · 点击场景会触发规则' : `规则 ${rules.length} 条`}
         </span>
       </div>
       <div className="panel__body">
@@ -172,6 +195,10 @@ function BottomDock() {
         {tab === 'material' && <MaterialPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}
+        {tab === 'rules' && <RulePanel />}
+        {tab === 'variables' && <VariablePanel />}
+        {tab === 'issues' && <IssuePanel />}
+        {tab === 'log' && <RuleLogPanel />}
         {tab === 'history' && <HistoryPanel />}
       </div>
     </section>
@@ -188,7 +215,11 @@ function StatusBar() {
   const issues = useMemo(() => checkIntegrity(doc), [doc])
   const errors = errorsOf(issues).length
   const warnings = warningsOf(issues).length
-  const rebuilds = useMemo(() => fullRebuildCount(), [revision])
+  // Read straight through: this component already re-renders on every `revision` change,
+  // and wrapping a mutable module read in useMemo was using memoisation as a refresh
+  // trigger — which is what react-hooks/exhaustive-deps flagged the moment lint existed.
+  const rebuilds = fullRebuildCount()
+  void revision
 
   return (
     <footer className="statusbar">

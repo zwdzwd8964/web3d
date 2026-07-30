@@ -33,6 +33,15 @@ interface Slot {
 
 export interface EcaEngineOptions {
   readonly registry?: ActionRegistry
+  /**
+   * Called once per finished rule execution.
+   *
+   * `history` is a ring buffer and therefore forgets; the debug panel (T-093) and the
+   * parity comparison (T-103) both need every result as it happens, not a sample of the
+   * last N. Push rather than poll so a rule that completes between two frames is not
+   * silently dropped from the log.
+   */
+  readonly onResult?: (result: ExecResult) => void
 }
 
 /**
@@ -81,7 +90,10 @@ export class EcaEngine {
   private chainDepth = 0
   private historyBuffer: ExecResult[] = []
 
-  constructor(ctx: RuntimeContext, options: EcaEngineOptions = {}) {
+  constructor(
+    ctx: RuntimeContext,
+    private readonly options: EcaEngineOptions = {},
+  ) {
     this.ctx = ctx
     this.registry = options.registry ?? defaultRegistry
   }
@@ -167,6 +179,13 @@ export class EcaEngine {
   private record(result: ExecResult): void {
     this.historyBuffer.push(result)
     if (this.historyBuffer.length > HISTORY_LIMIT) this.historyBuffer.shift()
+    // A listener that throws must not take the rule down with it: the log panel is an
+    // observer, and an observer's bug is not the engine's problem to propagate.
+    try {
+      this.options.onResult?.(result)
+    } catch (error) {
+      this.ctx.log('warn', 'ECA onResult 监听器抛出异常，已忽略', error)
+    }
   }
 
   private runRule(rule: Rule, event: RuntimeEvent): void {

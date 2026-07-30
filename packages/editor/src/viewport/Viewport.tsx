@@ -2,8 +2,11 @@ import type { Transform } from '@w3/schema'
 import { DomHotspotRenderer, Gizmo, SceneRuntime } from '@w3/core'
 import type { GizmoMode, GizmoSpace } from '@w3/core'
 import { useEffect, useRef, useState } from 'react'
+import { usePreview, usePreviewStore } from '../preview/PreviewContext.jsx'
+import { PreviewController } from '../preview/controller.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
+import { fulfilPick, isPicking } from './pick-request.js'
 import { setActiveRuntime } from './runtime-registry.js'
 
 /**
@@ -27,6 +30,9 @@ export function Viewport() {
 
   const session = useProject()
   const store = useDocumentStore()
+  const previewStore = usePreviewStore()
+  const previewActive = usePreview((s) => s.active)
+  const controllerRef = useRef<PreviewController | null>(null)
   const { previewStart, preview, previewCommit, toggleSelection, clearSelection } = useDocumentActions()
   const selection = useDocumentSelector((s) => s.selection)
 
@@ -90,6 +96,7 @@ export function Viewport() {
     })
     runtimeRef.current = runtime
     setActiveRuntime(runtime)
+    controllerRef.current = new PreviewController(runtime, previewStore)
 
     const gizmo = new Gizmo({
       graph: runtime.graph,
@@ -121,6 +128,8 @@ export function Viewport() {
     return () => {
       cancelled = true
       resize.disconnect()
+      controllerRef.current?.dispose()
+      controllerRef.current = null
       gizmo.dispose()
       runtime.dispose()
       canvas.remove()
@@ -134,8 +143,40 @@ export function Viewport() {
   }, [])
 
   useEffect(() => {
-    gizmoRef.current?.attach(selection)
-  }, [selection, ready])
+    // ECA_SPEC §7 · the gizmo belongs to edit mode. Leaving it attached during preview
+    // would put a translate handle on top of whatever the viewer is looking at.
+    gizmoRef.current?.attach(previewActive ? [] : selection)
+  }, [selection, ready, previewActive])
+
+  useEffect(() => {
+    const controller = controllerRef.current
+    if (!controller || !ready) return
+    if (previewActive) controller.enter(store.getState().doc)
+    else if (controller.isActive) controller.exit()
+  }, [previewActive, ready, store])
+
+  // Rules edited mid-preview take effect immediately; the engine's dispatch index is
+  // derived from the document and would otherwise keep firing the old ones.
+  useEffect(() => {
+    if (!previewActive) return
+    let previous = store.getState().doc
+    const unsubscribe = store.subscribe((state) => {
+      if (state.doc === previous) return
+      previous = state.doc
+      controllerRef.current?.onDocumentChanged(state.doc)
+      controllerRef.current?.syncVariables(state.doc)
+    })
+    return unsubscribe
+  }, [previewActive, store])
+
+  // Variable values are runtime state, not document state, so nothing else would notice
+  // them changing. Polled on an interval rather than per frame: the panel is for reading,
+  // and sixty updates a second of a number nobody can read that fast is pure waste.
+  useEffect(() => {
+    if (!previewActive) return
+    const handle = setInterval(() => controllerRef.current?.syncVariables(store.getState().doc), 100)
+    return () => clearInterval(handle)
+  }, [previewActive, store])
 
   useEffect(() => {
     gizmoRef.current?.setMode(mode)
@@ -187,8 +228,19 @@ export function Viewport() {
           runtime.camera.camera,
           store.getState().doc,
         )
-        if (hit) toggleSelection(hit.nodeId, event.ctrlKey || event.metaKey)
-        else if (!event.ctrlKey && !event.metaKey) clearSelection()
+
+        // Three meanings for one click, in priority order. The rule editor's "拾取" wins
+        // because the user just armed it; preview wins over selection because in preview
+        // the click belongs to the scene, not to the editor (ECA_SPEC §7).
+        if (hit && isPicking()) {
+          fulfilPick(hit.nodeId)
+        } else if (controllerRef.current?.isActive) {
+          if (hit) controllerRef.current.dispatchClick(hit.nodeId, hit.point, hit.distance)
+        } else if (hit) {
+          toggleSelection(hit.nodeId, event.ctrlKey || event.metaKey)
+        } else if (!event.ctrlKey && !event.metaKey) {
+          clearSelection()
+        }
       }
       dragging = null
     }

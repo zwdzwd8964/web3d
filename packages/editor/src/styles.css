@@ -689,3 +689,263 @@ code {
   font: inherit;
   padding: 0 4px;
 }
+
+/* --- generated forms, rules, conditions -------------------------------------- */
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.fields__row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fields__label {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fields__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fields__none {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.field--kind,
+.field--op {
+  max-width: 96px;
+}
+
+.field--id {
+  width: 150px;
+}
+
+.rule-list,
+.issue-list,
+.log-list {
+  list-style: none;
+}
+
+.rule-list > li {
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-list__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+}
+
+.rule-list__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rule-list__summary {
+  color: var(--dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-editor {
+  padding: 6px 4px 12px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-editor__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.rule-editor__grid label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rule-editor__grid span {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.rule-editor__subhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.cond {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.action-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-row {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 6px;
+}
+
+.action-row--unknown {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.action-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.action-row__index {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.action-row__desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- issues, log ------------------------------------------------------------- */
+
+.issue-list__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 3px 4px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.issue-list__row:disabled {
+  cursor: default;
+}
+
+.issue-list > li[data-level='error'] .issue-list__code {
+  color: var(--warn);
+}
+
+.issue-list__code {
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+}
+
+.issue-list__msg {
+  flex: 1;
+}
+
+.issue-list__path {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.log-list > li {
+  border-bottom: 1px solid var(--line);
+  padding: 3px 4px;
+}
+
+.log-list__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.log-list__status {
+  flex: 1;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.log-list > li[data-status='failed'] .log-list__status {
+  color: var(--warn);
+}
+
+.log-list__steps {
+  list-style: none;
+  padding-left: 14px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.log-list__steps > li {
+  display: flex;
+  gap: 8px;
+}
+
+.log-list__steps > li[data-status='failed'] {
+  color: var(--warn);
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.grid th {
+  text-align: left;
+  color: var(--dim);
+  font-weight: 400;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.grid td {
+  border-bottom: 1px solid var(--line);
+  padding: 2px 4px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}

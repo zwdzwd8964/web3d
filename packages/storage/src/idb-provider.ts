@@ -158,7 +158,10 @@ export class IndexedDbProvider implements StorageProvider {
       const request = globalThis.indexedDB.deleteDatabase(this.databaseName)
       request.onsuccess = () => resolve()
       request.onblocked = () => resolve()
-      request.onerror = () => reject(request.error)
+      // `request.error` is DOMException | null. Rejecting with null produces a rejection
+      // nobody can inspect or report — the caller sees "something failed" and nothing else.
+      request.onerror = () =>
+        reject(new StorageError('unavailable', `删除本地数据库失败：${this.databaseName}`, { cause: request.error }))
     })
   }
 }

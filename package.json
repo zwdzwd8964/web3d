@@ -20,7 +20,8 @@
     "check:storage-abstraction": "node scripts/check-storage-abstraction.mjs",
     "check:deps-direction": "node scripts/check-deps-direction.mjs",
     "check:constitution": "node scripts/check-constitution.mjs",
-    "verify": "pnpm check:constitution && pnpm typecheck && pnpm test"
+    "verify": "pnpm lint && pnpm check:constitution && pnpm typecheck && pnpm test",
+    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js --config tools/lint/eslint.config.js packages"
   },
   "devDependencies": {
     "@types/node": "26.1.2",

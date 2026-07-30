@@ -1,7 +1,10 @@
+import { registerBuiltinActions } from '@w3/core'
 import { createGoldenPathDocument, validate } from '@w3/schema'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
+import { PreviewProvider } from './preview/PreviewContext.jsx'
+import { createPreviewStore } from './preview/preview-store.js'
 import { ProjectProvider } from './project/ProjectContext.jsx'
 import { ProjectSession } from './project/session.js'
 import { StoreProvider } from './store/StoreContext.js'
@@ -23,6 +26,13 @@ async function boot() {
   const container = document.getElementById('root')
   if (!container) throw new Error('缺少 #root 挂载点')
 
+  // ADR-0008 · actions are exported as data and registered by the host, deliberately not
+  // self-registering on import (which would make tree-shaking impossible to reason about
+  // and the registry's contents depend on import order). The host has to actually do it:
+  // without this line the rule editor offers nothing to add and every rule fails at
+  // execution with "未注册的动作".
+  registerBuiltinActions()
+
   const session = new ProjectSession()
 
   // Whatever was open last time. A refresh that silently discards the user's work is the
@@ -41,7 +51,9 @@ async function boot() {
     <StrictMode>
       <ProjectProvider session={session}>
         <StoreProvider store={store}>
-          <App />
+          <PreviewProvider store={createPreviewStore()}>
+            <App />
+          </PreviewProvider>
         </StoreProvider>
       </ProjectProvider>
     </StrictMode>,
