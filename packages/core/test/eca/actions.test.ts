@@ -1,0 +1,266 @@
+import type { Animation, SceneDocument } from '@w3/schema'
+import { createGoldenPathDocument } from '@w3/schema'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { ActionRegistry, BUILTIN_ACTIONS, registerBuiltinActions } from '../../src/eca/actions/index.js'
+import { HeadlessRuntime } from '../../src/eca/headless.js'
+import type { ActionDefinition, RuntimeEvent } from '../../src/eca/types.js'
+import { IDS } from '../helpers.js'
+
+/**
+ * T-085 · gate G0-5.
+ *
+ * `covered` below is the tested set. The final test compares it against the registry,
+ * so registering an action without writing a test fails the suite immediately — rather
+ * than shipping an action nobody ever ran.
+ */
+const covered = new Set<string>()
+
+const LOOPING: Animation = {
+  kind: 'tween',
+  id: 'anm_11111111',
+  name: '循环',
+  duration: 2,
+  easing: 'linear',
+  loop: true,
+  yoyo: false,
+  targets: [{ nodeId: IDS.cover, to: { p: [0, 1, 0] } }],
+}
+
+function testDoc(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  return { ...doc, animations: [...doc.animations, LOOPING] }
+}
+
+let registry: ActionRegistry
+let ctx: HeadlessRuntime
+
+beforeEach(() => {
+  registry = registerBuiltinActions(new ActionRegistry())
+  ctx = new HeadlessRuntime(testDoc())
+})
+
+/** Runs an action the way the executor does: parse params, then invoke. */
+async function run(type: string, params: Record<string, unknown>, event: RuntimeEvent | null = null) {
+  covered.add(type)
+  const definition = registry.get(type) as ActionDefinition<unknown>
+  expect(definition, `action "${type}" is not registered`).toBeDefined()
+  const parsed = definition.schema.safeParse(params)
+  expect(parsed.success, `params rejected: ${JSON.stringify(parsed.error?.issues)}`).toBe(true)
+  ctx.setCurrentEvent(event)
+  const controller = new AbortController()
+  const done = definition.handler(ctx, parsed.data, controller.signal)
+  return { done, controller, definition, params: parsed.data }
+}
+
+describe('animation actions', () => {
+  it('playAnimation resolves only when playback ends naturally', async () => {
+    const { done } = await run('playAnimation', { animationId: IDS.animation, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => {
+      settled = true
+    })
+    await ctx.clock.advance(1199)
+    expect(settled).toBe(false)
+    await ctx.clock.advance(1)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+  })
+
+  it('playAnimation with a looping clip resolves immediately (D6)', async () => {
+    const { done } = await run('playAnimation', { animationId: LOOPING.id, await: true })
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+    expect(ctx.isAnimationPlaying(LOOPING.id)).toBe(true)
+  })
+
+  it('playAnimation restarts by default, and can be told not to', async () => {
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: true })
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(true)
+    await ctx.clock.settle()
+  })
+
+  it('stopAnimation stops, and optionally rewinds', async () => {
+    await run('playAnimation', { animationId: IDS.animation, await: false })
+    await ctx.clock.advance(600)
+    await run('stopAnimation', { animationId: IDS.animation, reset: true })
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(false)
+    expect(ctx.timeOf(IDS.animation)).toBe(0)
+  })
+
+  it('seekAnimation moves the playhead without changing play state', async () => {
+    await run('seekAnimation', { animationId: IDS.animation, time: 0.8 })
+    expect(ctx.timeOf(IDS.animation)).toBe(0.8)
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(false)
+  })
+})
+
+describe('scene actions', () => {
+  it('setVisible toggles one node, and optionally its subtree', async () => {
+    await run('setVisible', { nodeId: IDS.cover, value: false })
+    expect(ctx.isVisible(IDS.cover)).toBe(false)
+    expect(ctx.isVisible(IDS.body)).toBe(true)
+
+    await run('setVisible', { nodeId: IDS.pump, value: false, includeDescendants: true })
+    expect(ctx.isVisible(IDS.body)).toBe(false)
+  })
+
+  it('setMaterial assigns and, with null, restores', async () => {
+    await run('setMaterial', { nodeId: IDS.body, materialId: IDS.material })
+    expect(ctx.materialOf(IDS.body)).toBe(IDS.material)
+    await run('setMaterial', { nodeId: IDS.body, materialId: null })
+    expect(ctx.materialOf(IDS.body)).toBeNull()
+  })
+
+  it('highlight applies a preset and clears with null', async () => {
+    await run('highlight', { nodeId: IDS.cover, preset: 'outline_amber' })
+    expect(ctx.highlightOf(IDS.cover)).toBe('outline_amber')
+    await run('highlight', { nodeId: IDS.cover, preset: null })
+    expect(ctx.highlightOf(IDS.cover)).toBeNull()
+  })
+
+  it('resetScene returns variables, visibility, materials, highlights and panels to the document', async () => {
+    ctx.setVar('step', 5)
+    ctx.setVisible(IDS.cover, false)
+    ctx.setMaterial(IDS.body, IDS.material)
+    ctx.highlight(IDS.cover, 'outline_red')
+    ctx.openPanel(IDS.hotspot)
+
+    await run('resetScene', {})
+
+    expect(ctx.getVar('step')).toBe(1)
+    expect(ctx.isVisible(IDS.cover)).toBe(true)
+    expect(ctx.materialOf(IDS.body)).toBeNull()
+    expect(ctx.highlightOf(IDS.cover)).toBeNull()
+    expect(ctx.openPanels).toEqual([])
+  })
+})
+
+describe('camera actions', () => {
+  it('moveCamera flies over the requested duration and resolves on arrival', async () => {
+    const { done } = await run('moveCamera', { viewpointId: IDS.viewpoint, duration: 1, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => {
+      settled = true
+    })
+    await ctx.clock.advance(999)
+    expect(settled).toBe(false)
+    expect(ctx.viewpoint).toBeNull()
+    await ctx.clock.advance(1)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+    expect(ctx.viewpoint).toBe(IDS.viewpoint)
+  })
+
+  it('moveCamera with zero duration jumps instantly', async () => {
+    const { done } = await run('moveCamera', { viewpointId: IDS.viewpoint, duration: 0 })
+    await done
+    expect(ctx.viewpoint).toBe(IDS.viewpoint)
+  })
+})
+
+describe('ui actions', () => {
+  it('openPanel and closePanel manage one panel', async () => {
+    await run('openPanel', { hotspotId: IDS.hotspot })
+    expect(ctx.isPanelOpen(IDS.hotspot)).toBe(true)
+    await run('closePanel', { hotspotId: IDS.hotspot })
+    expect(ctx.isPanelOpen(IDS.hotspot)).toBe(false)
+  })
+
+  it('closePanel "all" closes everything', async () => {
+    ctx.openPanel(IDS.hotspot)
+    ctx.openPanel('hs_00000002')
+    await run('closePanel', { hotspotId: 'all' })
+    expect(ctx.openPanels).toEqual([])
+  })
+
+  it('openLink records the intent — a head-less run must not navigate away', async () => {
+    await run('openLink', { url: '/docs/manual.pdf', target: '_blank' })
+    expect(ctx.openedLinks).toEqual([{ url: '/docs/manual.pdf', target: '_blank' }])
+  })
+})
+
+describe('state actions', () => {
+  it('setVariable assigns a constant', async () => {
+    await run('setVariable', { variableId: 'step', value: { const: 2 } })
+    expect(ctx.getVar('step')).toBe(2)
+  })
+
+  it('setVariable can copy another variable', async () => {
+    ctx.setVar('step', 4)
+    await run('setVariable', { variableId: 'step', value: { var: 'step' } })
+    expect(ctx.getVar('step')).toBe(4)
+  })
+
+  it('setVariable in add mode accumulates, and refuses non-numeric operands', async () => {
+    await run('setVariable', { variableId: 'step', value: { const: 3 }, mode: 'add' })
+    expect(ctx.getVar('step')).toBe(4)
+
+    await run('setVariable', { variableId: 'step', value: { const: 'x' }, mode: 'add' })
+    expect(ctx.getVar('step'), 'a bad add must leave the variable alone').toBe(4)
+    expect(ctx.warnings().some((w) => w.message.includes('add 模式'))).toBe(true)
+  })
+
+  it('setVariable can read the triggering event through ctx.currentEvent()', async () => {
+    const doc = testDoc()
+    ctx = new HeadlessRuntime({
+      ...doc,
+      variables: [...doc.variables, { id: 'clicked', name: '点中的对象', type: 'string', default: '', persist: false }],
+    })
+    await run('setVariable', { variableId: 'clicked', value: { event: 'nodeId' } }, { event: 'click', nodeId: IDS.cover })
+    expect(ctx.getVar('clicked')).toBe(IDS.cover)
+  })
+
+  it('wait suspends for exactly the requested time on the fake clock', async () => {
+    const { done } = await run('wait', { ms: 250 })
+    let settled = false
+    void Promise.resolve(done).then(() => {
+      settled = true
+    })
+    await ctx.clock.advance(249)
+    expect(settled).toBe(false)
+    await ctx.clock.advance(1)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+    expect(ctx.now()).toBe(250)
+  })
+
+  it('wait is cancellable', async () => {
+    const { done, controller } = await run('wait', { ms: 1000 })
+    controller.abort()
+    await expect(Promise.resolve(done)).rejects.toThrow()
+  })
+})
+
+describe('describe() produces the acceptance-case wording (R14)', () => {
+  it('names entities by their display name, not by id', () => {
+    const doc = testDoc()
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      ['playAnimation', { animationId: IDS.animation, await: true }, /播放动画「阀盖抬起」（等待播完）/],
+      ['setVisible', { nodeId: IDS.cover, value: false }, /隐藏对象「阀盖」/],
+      ['setMaterial', { nodeId: IDS.body, materialId: IDS.material }, /「泵体」.*「拉丝不锈钢」/],
+      ['highlight', { nodeId: IDS.cover, preset: 'outline_amber' }, /高亮对象「阀盖」/],
+      ['moveCamera', { viewpointId: IDS.viewpoint, duration: 1 }, /视点「拆解视角」/],
+      ['openPanel', { hotspotId: IDS.hotspot }, /热点「拆卸提示」/],
+      ['setVariable', { variableId: 'step', value: { const: 2 } }, /变量「当前步骤」为 2/],
+      ['wait', { ms: 500 }, /等待 500 毫秒/],
+      ['resetScene', {}, /恢复到文档初始状态/],
+    ]
+    for (const [type, params, pattern] of cases) {
+      const definition = registry.get(type)!
+      const parsed = definition.schema.safeParse(params)
+      expect(parsed.success, type).toBe(true)
+      expect(definition.describe(parsed.data, doc), type).toMatch(pattern)
+    }
+  })
+})
+
+describe('G0-5 · every registered action has a test', () => {
+  it('the tested set covers the registry exactly', () => {
+    const registered = BUILTIN_ACTIONS.map((a) => a.type).sort()
+    const missing = registered.filter((type) => !covered.has(type))
+    expect(
+      missing,
+      `these actions are registered but untested: ${missing.join(', ')}. ` +
+        'Add a test in this file — the coverage gate is not a formality (C8).',
+    ).toEqual([])
+  })
+})

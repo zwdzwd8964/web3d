@@ -16,7 +16,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectFiles, extractImports, makeReport, packageOf, printReport, stripCommentsAndStrings } from './lib/scan.mjs'
+import { collectFiles, extractImports, makeReport, packageOf, printReport, stripComments } from './lib/scan.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -60,8 +60,7 @@ for (const [name, dir] of Object.entries(DIRS)) {
   const files = collectFiles(join(ROOT, dir, 'src'), ['.ts', '.tsx', '.js'])
   report.filesScanned += files.length
   for (const file of files) {
-    const stripped = stripCommentsAndStrings(readFileSync(file, 'utf8'))
-    for (const { spec, line } of extractImports(stripped)) {
+    for (const { spec, line } of extractImports(stripComments(readFileSync(file, 'utf8')))) {
       const target = packageOf(spec)
       if (target && WORKSPACE.includes(target) && target !== name && !allowed.includes(target)) {
         report.add(file, line, `${name} imports ${target} — reverse or forbidden edge (allowed: ${allowed.join(', ') || 'none'})`)

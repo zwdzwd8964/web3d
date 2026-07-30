@@ -9,6 +9,18 @@
  * that has already started to drift.
  */
 
+/**
+ * Zod is re-exported from here rather than depended on directly by @w3/core.
+ *
+ * ECA_SPEC §4.1 requires every action definition to carry a `ZodType` for its params,
+ * so core needs zod — but CLAUDE.md's boundary table lists core's dependencies as
+ * `three` + `@w3/schema`. Routing zod through the package that already owns it keeps
+ * that table literally true and, more importantly, guarantees ONE zod instance across
+ * the workspace: two copies would silently break schema composition and instanceof.
+ */
+export { z } from 'zod'
+export type { ZodError, ZodType } from 'zod'
+
 export * from './animation.js'
 export * from './asset.js'
 export * from './deferred.js'

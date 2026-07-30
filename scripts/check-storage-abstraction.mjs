@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectFiles, extractImports, makeReport, matchLines, packageOf, printReport, stripCommentsAndStrings } from './lib/scan.mjs'
+import { collectFiles, extractImports, makeReport, matchLines, packageOf, printReport, stripComments, stripCommentsAndStrings } from './lib/scan.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -34,8 +34,9 @@ for (const pkgDir of GUARDED) {
   const files = collectFiles(join(ROOT, 'packages', pkgDir, 'src'), ['.ts', '.tsx', '.js'])
   report.filesScanned += files.length
   for (const file of files) {
-    const stripped = stripCommentsAndStrings(readFileSync(file, 'utf8'))
-    for (const { spec, line } of extractImports(stripped)) {
+    const source = readFileSync(file, 'utf8')
+    const stripped = stripCommentsAndStrings(source)
+    for (const { spec, line } of extractImports(stripComments(source))) {
       const name = packageOf(spec)
       if (name && FORBIDDEN_IMPORTS.includes(name)) {
         report.add(file, line, `@w3/${pkgDir} imports "${spec}" — only @w3/storage may name a concrete store`)

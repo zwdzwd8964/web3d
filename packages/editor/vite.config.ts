@@ -19,8 +19,6 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
-    // No remote chunks: everything ships in the bundle.
-    rollupOptions: { output: { manualChunks: { three: ['three'] } } },
   },
   server: { port: 5180, host: '127.0.0.1' },
 })

@@ -1,0 +1,186 @@
+import type { SceneDocument, VariableValue } from '@w3/schema'
+import type { ZodType } from '@w3/schema'
+
+/**
+ * T-030 · ECA_SPEC §6. The single seam between the rule engine and the renderer.
+ *
+ * Nothing in this file may reference three.js. That is not a style rule — it is the
+ * technical basis of C8. Production injects `SceneRuntime` (which owns WebGL); tests
+ * and the acceptance-case generator inject `HeadlessRuntime` (pure JS, fake clock).
+ * The engine cannot tell the difference, which is why the ECA suite runs in plain Node
+ * in under two seconds and never goes flaky.
+ */
+
+export type VarValue = VariableValue
+
+/* -------------------------------------------------------------------------- */
+/* Events — ECA_SPEC §2.1 payloads                                            */
+/* -------------------------------------------------------------------------- */
+
+export type RuntimeEvent =
+  | { readonly event: 'sceneReady' }
+  | { readonly event: 'click'; readonly nodeId: string; readonly point?: readonly [number, number, number]; readonly distance?: number }
+  | { readonly event: 'hoverEnter'; readonly nodeId: string }
+  | { readonly event: 'hoverLeave'; readonly nodeId: string }
+  | { readonly event: 'hotspotClick'; readonly hotspotId: string }
+  /** `completed: false` when the animation was stopped or aborted rather than finishing. */
+  | { readonly event: 'animationEnd'; readonly animationId: string; readonly completed: boolean }
+  | { readonly event: 'variableChange'; readonly variableId: string; readonly from: VarValue; readonly to: VarValue }
+  | { readonly event: 'timer'; readonly timerId: string; readonly tick: number }
+
+export type RuntimeEventType = RuntimeEvent['event']
+
+/* -------------------------------------------------------------------------- */
+/* RuntimeContext — ECA_SPEC §6                                               */
+/* -------------------------------------------------------------------------- */
+
+export interface SubtreeOption {
+  readonly includeDescendants?: boolean
+}
+
+export type LogLevel = 'debug' | 'warn' | 'error'
+
+export interface RuntimeContext {
+  // ---- variables ----
+  getVar(id: string): VarValue
+  /** Emits `variableChange` itself when the value actually changes. */
+  setVar(id: string, value: VarValue): void
+
+  // ---- scene ----
+  isVisible(nodeId: string): boolean
+  setVisible(nodeId: string, value: boolean, options?: SubtreeOption): void
+  /** null restores the source material. */
+  setMaterial(nodeId: string, materialId: string | null): void
+  /** null clears the highlight. */
+  highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void
+  getNodeProp(nodeId: string, key: string): VarValue
+  resetScene(): void
+
+  // ---- animation ----
+  /**
+   * MVP_V0 D6 · resolves when playback finishes naturally. A looping animation resolves
+   * IMMEDIATELY — otherwise any sequence containing one hangs forever. Interruption
+   * rejects with an AbortError, which the executor swallows.
+   */
+  playAnimation(id: string, options: { signal?: AbortSignal }): Promise<void>
+  stopAnimation(id: string, options?: { reset?: boolean }): void
+  /** `time` in seconds. */
+  seekAnimation(id: string, time: number): void
+  isAnimationPlaying(id: string): boolean
+
+  // ---- camera ----
+  moveCamera(viewpointId: string, options: { duration?: number; signal?: AbortSignal }): Promise<void>
+
+  // ---- UI ----
+  openPanel(hotspotId: string): void
+  closePanel(hotspotId: string | 'all'): void
+  isPanelOpen(hotspotId: string): boolean
+  openLink(url: string, target: '_blank' | '_self'): void
+
+  // ---- time (injectable — ECA_SPEC constraint three) ----
+  /** Milliseconds. Monotonic within a session; never `Date.now()`. */
+  now(): number
+  wait(ms: number, signal?: AbortSignal): Promise<void>
+
+  // ---- observation ----
+  readonly doc: SceneDocument
+  emit(event: RuntimeEvent): void
+  log(level: LogLevel, message: string, data?: unknown): void
+
+  /**
+   * The event currently being handled, or null outside a dispatch.
+   *
+   * Added to ECA_SPEC §6 under the escape hatch §10 step 2 grants ("if a new runtime
+   * capability is needed, add a method and implement it in BOTH runtimes"). It exists
+   * because `setVariable`'s `value` is a ValueExpr, which may be `{ event: 'nodeId' }`,
+   * while §4.1 fixes the handler signature at (ctx, params, signal) — so the event has
+   * to arrive through the context. The engine sets it around each dispatch. See ADR-0008.
+   */
+  currentEvent(): RuntimeEvent | null
+}
+
+/* -------------------------------------------------------------------------- */
+/* Action registry — ECA_SPEC §4.1 / §4.4                                     */
+/* -------------------------------------------------------------------------- */
+
+export type RefKind = 'node' | 'material' | 'animation' | 'hotspot' | 'viewpoint' | 'variable' | 'media'
+
+/** ECA_SPEC §4.4 · a closed set, because the rule editor renders exactly these. */
+export type FieldDescriptor =
+  | { readonly key: string; readonly type: 'ref'; readonly refKind: RefKind; readonly label: string; readonly required?: boolean }
+  | { readonly key: string; readonly type: 'number'; readonly label: string; readonly min?: number; readonly max?: number; readonly step?: number; readonly default?: number }
+  | { readonly key: string; readonly type: 'boolean'; readonly label: string; readonly default?: boolean }
+  | { readonly key: string; readonly type: 'string'; readonly label: string; readonly multiline?: boolean; readonly default?: string }
+  | { readonly key: string; readonly type: 'enum'; readonly label: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
+  | { readonly key: string; readonly type: 'valueExpr'; readonly label: string }
+
+export type ActionHandler<P = unknown> = (
+  ctx: RuntimeContext,
+  params: P,
+  signal: AbortSignal,
+) => void | Promise<void>
+
+export interface ActionUi {
+  readonly label: string
+  readonly icon?: string
+  readonly group: 'animation' | 'scene' | 'camera' | 'ui' | 'state' | 'flow'
+  readonly fields: readonly FieldDescriptor[]
+}
+
+/**
+ * ECA_SPEC §4.1 · `schema`, `handler`, `ui`, `refs` and `describe` are ALL mandatory.
+ *
+ * They look like boilerplate; each one carries a capability:
+ *   refs     -> checkIntegrity finds "this rule points at a deleted node", and the
+ *               reverse index answers "what breaks if I delete this?";
+ *   describe -> the acceptance-case document (R14) is generated, not written;
+ *   ui       -> the rule editor needs no per-action form, which is what makes
+ *               "3 files to add an action" true (NORTH_STAR §7).
+ * Skip one and the marginal cost of an action goes from half a day to two days.
+ */
+export interface ActionDefinition<P = unknown> {
+  readonly type: string
+  readonly schema: ZodType<P>
+  readonly handler: ActionHandler<P>
+  readonly ui: ActionUi
+  readonly refs: (params: P) => ReadonlyArray<{ kind: RefKind; id: string }>
+  readonly describe: (params: P, doc: SceneDocument) => string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Execution results — ECA_SPEC §5.4                                          */
+/* -------------------------------------------------------------------------- */
+
+export type ExecStatus = 'completed' | 'aborted' | 'failed' | 'skipped-condition' | 'skipped-reentry'
+export type StepStatus = 'ok' | 'failed' | 'skipped'
+
+export interface ExecStep {
+  readonly index: number
+  readonly action: string
+  readonly status: StepStatus
+  readonly error?: string
+}
+
+/**
+ * Shared by three consumers: the rule debug panel (T-093), the parity comparison
+ * (T-103) and the acceptance-case execution log (§8). It therefore must be complete and
+ * deterministic — no field may vary between two runs of the same input.
+ */
+export interface ExecResult {
+  readonly ruleId: string
+  readonly status: ExecStatus
+  readonly startedAt: number
+  readonly endedAt: number
+  readonly steps: readonly ExecStep[]
+}
+
+/** Raised by `ctx.wait` and animation/camera promises when their signal aborts. */
+export class AbortError extends Error {
+  constructor(message = 'aborted') {
+    super(message)
+    this.name = 'AbortError'
+  }
+}
+
+export const isAbortError = (error: unknown): boolean =>
+  error instanceof AbortError || (error instanceof Error && error.name === 'AbortError')

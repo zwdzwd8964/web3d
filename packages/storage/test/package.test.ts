@@ -1,0 +1,166 @@
+import { createGoldenPathDocument } from '@w3/schema'
+import type { SceneDocument } from '@w3/schema'
+import { unzipSync, zipSync } from 'fflate'
+import { describe, expect, it } from 'vitest'
+import { hashToPath } from '../src/hash.js'
+import {
+  MANIFEST_FILENAME,
+  SCENE_FILENAME,
+  THUMBNAIL_FILENAME,
+  createPackageResolver,
+  packScene,
+  referencedHashes,
+  unpackScene,
+} from '../src/package.js'
+import type { BlobHash } from '../src/provider.js'
+import { StorageError } from '../src/provider.js'
+
+/** T-024 · MVP_V0 D8. */
+
+const GLB_BYTES = new TextEncoder().encode('glTF binary payload — pretend this is 8.4 MB')
+
+function blobsFor(doc: SceneDocument): Map<BlobHash, Uint8Array> {
+  const map = new Map<BlobHash, Uint8Array>()
+  for (const asset of doc.assets) map.set(asset.hash, GLB_BYTES)
+  return map
+}
+
+function pack(overrides: Partial<Parameters<typeof packScene>[0]> = {}) {
+  const document = createGoldenPathDocument()
+  return packScene({
+    document,
+    snapshotId: 'snp_a1b2c3d4',
+    publishedAt: '2026-08-01T04:00:00.000Z',
+    coreVersion: '0.0.0',
+    blobs: blobsFor(document),
+    ...overrides,
+  })
+}
+
+describe('referencedHashes()', () => {
+  it('reports exactly the asset hashes the document names', () => {
+    const doc = createGoldenPathDocument()
+    expect([...referencedHashes(doc)]).toEqual([doc.assets[0]!.hash])
+    expect(referencedHashes({ ...doc, assets: [] }).size).toBe(0)
+  })
+})
+
+describe('packScene()', () => {
+  it('writes the four documented members', () => {
+    const entries = unzipSync(pack({ thumbnail: new Uint8Array([137, 80, 78, 71]) }))
+    const doc = createGoldenPathDocument()
+    expect(Object.keys(entries).sort()).toEqual([MANIFEST_FILENAME, SCENE_FILENAME, THUMBNAIL_FILENAME, doc.assets[0]!.url].sort())
+  })
+
+  it('stores the asset under the document’s own url, so the player needs no lookup table', () => {
+    const doc = createGoldenPathDocument()
+    const entries = unzipSync(pack())
+    expect(entries[doc.assets[0]!.url]).toEqual(GLB_BYTES)
+    expect(doc.assets[0]!.url).toBe(hashToPath(doc.assets[0]!.hash, '.glb'))
+  })
+
+  it('records coreVersion — the only thread to pull on "old package, new player"', () => {
+    const { manifest } = unpackScene(pack({ coreVersion: '1.4.2' }))
+    expect(manifest).toMatchObject({
+      coreVersion: '1.4.2',
+      schemaVersion: 1,
+      snapshotId: 'snp_a1b2c3d4',
+      projectId: createGoldenPathDocument().projectId,
+      assetCount: 1,
+    })
+  })
+
+  it('carries an optional label and omits the key when absent', () => {
+    expect(unpackScene(pack({ label: '验收版' })).manifest.label).toBe('验收版')
+    expect('label' in unpackScene(pack()).manifest).toBe(false)
+  })
+
+  it('refuses to publish when a referenced blob is missing, naming how many', () => {
+    expect(() => pack({ blobs: new Map() })).toThrow(StorageError)
+    expect(() => pack({ blobs: new Map() })).toThrow(/1 referenced asset blob\(s\) are missing/)
+  })
+
+  it('ships only what the scene references, ignoring extra blobs', () => {
+    const doc = createGoldenPathDocument()
+    const blobs = blobsFor(doc)
+    blobs.set(`sha256:${'f'.repeat(64)}`, new TextEncoder().encode('unused'))
+    const entries = unzipSync(packScene({
+      document: doc,
+      snapshotId: 'snp_a1b2c3d4',
+      publishedAt: '2026-08-01T04:00:00.000Z',
+      coreVersion: '0.0.0',
+      blobs,
+    }))
+    expect(Object.keys(entries)).toHaveLength(3)
+  })
+
+  it('produces a package with no assets when the document has none', () => {
+    const empty = { ...createGoldenPathDocument(), assets: [], nodes: [], animations: [], materials: [], hotspots: [], rules: [] }
+    const entries = unzipSync(packScene({
+      document: empty as SceneDocument,
+      snapshotId: 'snp_a1b2c3d4',
+      publishedAt: '2026-08-01T04:00:00.000Z',
+      coreVersion: '0.0.0',
+      blobs: new Map(),
+    }))
+    expect(Object.keys(entries).sort()).toEqual([MANIFEST_FILENAME, SCENE_FILENAME])
+  })
+})
+
+describe('unpackScene()', () => {
+  it('round-trips the document exactly', () => {
+    expect(unpackScene(pack()).document).toEqual(createGoldenPathDocument())
+  })
+
+  it('round-trips asset bytes keyed by content hash', () => {
+    const doc = createGoldenPathDocument()
+    expect(unpackScene(pack()).blobs.get(doc.assets[0]!.hash)).toEqual(GLB_BYTES)
+  })
+
+  it('round-trips a thumbnail and omits it when absent', () => {
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+    expect(unpackScene(pack({ thumbnail: png })).thumbnail).toEqual(png)
+    expect(unpackScene(pack()).thumbnail).toBeUndefined()
+  })
+
+  it('rejects a file that is not a zip', () => {
+    expect(() => unpackScene(new TextEncoder().encode('definitely not a zip'))).toThrow(/not a readable/)
+  })
+
+  it('names which member is missing', () => {
+    expect(() => unpackScene(zipSync({ 'scene.json': new Uint8Array([123, 125]) }))).toThrow(/missing manifest\.json/)
+    expect(() => unpackScene(zipSync({ 'manifest.json': new Uint8Array([123, 125]) }))).toThrow(/missing scene\.json/)
+  })
+
+  it('validates the scene it unpacks rather than trusting the producer', () => {
+    const encoder = new TextEncoder()
+    const bad = zipSync({
+      'manifest.json': encoder.encode('{}'),
+      'scene.json': encoder.encode(JSON.stringify({ schemaVersion: 1 })),
+    })
+    expect(() => unpackScene(bad)).toThrow(/failed validation/)
+  })
+})
+
+describe('createPackageResolver()', () => {
+  it('resolves every asset url out of the package, with no request of any kind (C6)', async () => {
+    const pkg = unpackScene(pack())
+    const resolver = createPackageResolver(pkg)
+    const buffer = await resolver.resolve(pkg.document.assets[0]!.url)
+    expect(new Uint8Array(buffer)).toEqual(GLB_BYTES)
+  })
+
+  it('hands out a copy, so a consumer cannot corrupt the package in memory', async () => {
+    const pkg = unpackScene(pack())
+    const resolver = createPackageResolver(pkg)
+    const url = pkg.document.assets[0]!.url
+    const first = new Uint8Array(await resolver.resolve(url))
+    first[0] = 0
+    expect(new Uint8Array(await resolver.resolve(url))[0]).toBe(GLB_BYTES[0])
+  })
+
+  it('reports an unknown url as not-found rather than resolving empty bytes', async () => {
+    const resolver = createPackageResolver(unpackScene(pack()))
+    await expect(resolver.resolve('assets/zz/zz/nope.glb')).rejects.toThrow(StorageError)
+  })
+})

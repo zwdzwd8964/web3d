@@ -22,9 +22,65 @@ export function collectFiles(dir, exts, out = []) {
 }
 
 /**
- * Blank out comments and string/template literals, preserving offsets so that
- * line numbers stay correct. Used before identifier scans so that a rule's own
- * documentation ("do not call Date.now()") never trips the rule.
+ * Blank out comments only, preserving offsets so line numbers stay correct.
+ *
+ * Import extraction MUST run on this rather than on the fully-stripped source: a module
+ * specifier *is* a string literal, so blanking string contents erases exactly what the
+ * scan is looking for. That bug made the C2 import blacklist and the dependency-direction
+ * guard silently pass everything — the failure mode NORTH_STAR §2 names outright
+ * ("没有检查手段的约束等于没有约束"). Keep the two passes separate.
+ */
+export function stripComments(src) {
+  let out = ''
+  let i = 0
+  const n = src.length
+  const blank = (s) => s.replace(/[^\n]/g, ' ')
+
+  while (i < n) {
+    const two = src.slice(i, i + 2)
+    if (two === '//') {
+      const end = src.indexOf('\n', i)
+      const stop = end === -1 ? n : end
+      out += blank(src.slice(i, stop))
+      i = stop
+      continue
+    }
+    if (two === '/*') {
+      const end = src.indexOf('*/', i + 2)
+      const stop = end === -1 ? n : end + 2
+      out += blank(src.slice(i, stop))
+      i = stop
+      continue
+    }
+    const ch = src[i]
+    // Skip over string bodies verbatim so a `//` inside one is not treated as a comment.
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1
+      while (j < n) {
+        if (src[j] === '\\') {
+          j += 2
+          continue
+        }
+        if (src[j] === ch) break
+        j++
+      }
+      const stop = Math.min(j + 1, n)
+      out += src.slice(i, stop)
+      i = stop
+      continue
+    }
+    out += ch
+    i++
+  }
+  return out
+}
+
+/**
+ * Blank out comments AND string/template literal contents, preserving offsets.
+ *
+ * Used before IDENTIFIER scans, so that a rule's own documentation ("do not call
+ * Date.now()") never trips the rule it documents. Never use this before extracting
+ * imports — see `stripComments`.
  */
 export function stripCommentsAndStrings(src) {
   let out = ''
@@ -85,7 +141,11 @@ export function extractImports(src) {
     re.lastIndex = 0
     let m
     while ((m = re.exec(src)) !== null) {
-      found.push({ spec: m[1], line: src.slice(0, m.index).split('\n').length })
+      // The patterns consume one leading whitespace/`;`/`}` character, so the raw match
+      // index points at the line BEFORE the statement. Skip to the first non-space so
+      // the reported line is the one a developer would click on.
+      const offset = m.index + Math.max(0, m[0].search(/\S/))
+      found.push({ spec: m[1], line: src.slice(0, offset).split('\n').length })
     }
   }
   return found

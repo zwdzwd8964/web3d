@@ -19,6 +19,7 @@ import {
   matchLines,
   packageOf,
   printReport,
+  stripComments,
   stripCommentsAndStrings,
 } from './lib/scan.mjs'
 
@@ -84,8 +85,8 @@ for (const field of ['dependencies', 'peerDependencies', 'devDependencies']) {
 const srcFiles = collectFiles(join(CORE, 'src'), ['.ts', '.tsx', '.js', '.mjs'])
 report.filesScanned = srcFiles.length
 for (const file of srcFiles) {
-  const stripped = stripCommentsAndStrings(readFileSync(file, 'utf8'))
-  for (const { spec, line } of extractImports(stripped)) {
+  const source = readFileSync(file, 'utf8')
+  for (const { spec, line } of extractImports(stripComments(source))) {
     const pkgName = packageOf(spec)
     if (isForbidden(pkgName)) {
       report.add(file, line, `@w3/core imports "${spec}" (C2: core must not know about UI frameworks or sit above storage)`)
@@ -100,8 +101,9 @@ if (ecaFiles.length === 0 && srcFiles.length > 0) {
   report.note('packages/core/src/eca is empty — determinism section had nothing to check')
 }
 for (const file of ecaFiles) {
-  const stripped = stripCommentsAndStrings(readFileSync(file, 'utf8'))
-  for (const { spec, line } of extractImports(stripped)) {
+  const source = readFileSync(file, 'utf8')
+  const stripped = stripCommentsAndStrings(source)
+  for (const { spec, line } of extractImports(stripComments(source))) {
     if (packageOf(spec) === 'three') {
       report.add(file, line, 'the ECA engine imports three (C8: it must run in plain Node with no WebGL)')
     }
