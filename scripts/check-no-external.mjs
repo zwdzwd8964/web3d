@@ -37,7 +37,16 @@ const OUT_DIRS = [
   'packages/player/dist',
 ]
 
-const TEXT_EXT = ['.js', '.mjs', '.cjs', '.css', '.html', '.json', '.map', '.svg', '.webmanifest', '.d.ts']
+/**
+ * `.map` is deliberately absent.
+ *
+ * A source map is a development artefact: the app never fetches it, and a browser only
+ * requests it with devtools open, same-origin. But it embeds every dependency's ORIGINAL
+ * source, comments included — three.js alone cites a dozen Wikipedia articles in its
+ * maths. Scanning maps buries the signal under other people's comments, which is how a
+ * guard stops being read.
+ */
+const TEXT_EXT = ['.js', '.mjs', '.cjs', '.css', '.html', '.json', '.svg', '.webmanifest', '.d.ts']
 
 /* -------------------------------------------------------------------------- */
 /* Pass 1 — positions that actually cause a request                           */
@@ -70,6 +79,11 @@ const INERT = [
   // Links inside error messages and code comments shipped by dependencies.
   [/^https?:\/\/(react\.dev|developer\.mozilla\.org|stackoverflow\.com|blog\.stevenlevithan\.com|thekevinscott\.com)\//, 'documentation link in a message or comment'],
   [/^https?:\/\/bit\.ly\//, 'shortened documentation link in a dependency comment'],
+  // Paper and reference citations in dependency comments (three cites its maths).
+  [/^https?:\/\/(en\.wikipedia\.org|jcgt\.org|www\.w3\.org\/TR\/)/, 'specification or paper citation in a comment'],
+  // RFC 2606 reserves `.example`; it can never resolve. gltf-transform uses it as the
+  // sentinel base for resolving relative asset paths.
+  [/^https?:\/\/[^/]*\.(example|invalid|test)(\/|$)/, 'RFC 2606 reserved host used as a sentinel'],
   // Homepage / licence URLs in banner comments.
   [/^https?:\/\/(www\.)?(threejs\.org|github\.com|opensource\.org|unlicense\.org|zod\.dev)\//, 'licence or homepage banner'],
 ]

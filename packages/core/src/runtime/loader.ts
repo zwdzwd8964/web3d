@@ -10,22 +10,34 @@ import type { AssetResolver, AssetSource, LoadedAsset } from './types.js'
  *
  * Two things here are load-bearing for the constitution:
  *
- * **C6** — Draco and KTX2 decoders are WASM blobs the loaders fetch at runtime. three's
- * examples fetch them from a CDN; on a customer intranet that is a white screen, found
- * on go-live day (anti-pattern A7). The paths below point at our own self-hosted
- * `vendor/` copies, which `scripts/sync-vendor.mjs` keeps in step with the locked three.
+ * **C6** — Draco and KTX2 decoders are WASM blobs the loaders fetch at runtime, and
+ * the classic failure is fetching them from a CDN: a white screen on a customer
+ * intranet, found on go-live day (anti-pattern A7).
+ *
+ * three 0.185 resolves them with `new URL('../libs/…', import.meta.url)`, so a bundler
+ * emits them alongside the app and they load SAME-ORIGIN with no configuration. That
+ * is why no decoder path is set by default: overriding it would replace a path the
+ * bundler already resolved correctly with one the host then has to remember to serve.
+ *
+ * `vendor/` and `scripts/sync-vendor.mjs` remain for the deployment that does need an
+ * explicit path — a non-bundled build, or decoders served from a shared location.
+ * See ADR-0012.
  *
  * **C7** — bytes arrive through the injected `AssetResolver`. This loader never learns
  * whether they came from IndexedDB, a `.w3p` zip or an HTTP endpoint, which is what
  * lets it run in Node against a resolver backed by an in-memory Map.
  */
 
-/** Where the app serves `vendor/` from. Both must be served by the host app (C6). */
-export const DEFAULT_DRACO_PATH = '/vendor/draco/gltf/'
-export const DEFAULT_KTX2_PATH = '/vendor/basis/'
+/**
+ * Where `vendor/` is served from, for hosts that opt into an explicit decoder path.
+ * NOT applied by default — see the note above.
+ */
+export const VENDOR_DRACO_PATH = '/vendor/draco/gltf/'
+export const VENDOR_KTX2_PATH = '/vendor/basis/'
 
 export interface AssetLoaderOptions {
   readonly resolver: AssetResolver
+  /** Leave unset to use three's bundler-resolved, same-origin decoders. */
   readonly dracoPath?: string
   readonly ktx2Path?: string
   /**
@@ -49,12 +61,13 @@ export class AssetLoader implements AssetSource {
     this.options = options
 
     this.draco = new DRACOLoader()
-    this.draco.setDecoderPath(options.dracoPath ?? DEFAULT_DRACO_PATH)
+    // Only override when the host asks: three's own default is already same-origin.
+    if (options.dracoPath) this.draco.setDecoderPath(options.dracoPath)
     this.gltf.setDRACOLoader(this.draco)
 
     if (options.renderer) {
       this.ktx2 = new KTX2Loader()
-      this.ktx2.setTranscoderPath(options.ktx2Path ?? DEFAULT_KTX2_PATH)
+      if (options.ktx2Path) this.ktx2.setTranscoderPath(options.ktx2Path)
       this.ktx2.detectSupport(options.renderer)
       this.gltf.setKTX2Loader(this.ktx2)
     }
