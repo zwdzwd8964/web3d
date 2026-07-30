@@ -28,5 +28,8 @@
     "@w3/schema": "workspace:*",
     "fflate": "0.8.3",
     "idb": "8.0.3"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5"
   }
 }

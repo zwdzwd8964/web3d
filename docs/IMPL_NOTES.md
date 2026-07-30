@@ -29,10 +29,12 @@ MVP_V0 §4《实测版本》表对应的实际安装结果。3D 相关依赖全�
 | vitest | 4.1.10 | 根 (dev) | |
 | @vitest/coverage-v8 | 4.1.10 | 根 (dev) | |
 | jsdom | 30.0.1 | @w3/editor (dev) | |
+| fake-indexeddb | 6.4.0 | @w3/storage (dev) | 人工批准（R1-Q3）。真实 IndexedDB 实现，非桩 |
 | pnpm | 11.12.0 | — | 工作区配置在 `pnpm-workspace.yaml`，不在 `.npmrc` |
 
-**未安装**：`@react-three/fiber`、`postprocessing`、`@playwright/test`、UI 组件库。
-前两项见交付报告中的待决问题；Playwright 会下载浏览器二进制，未在无人确认时执行。
+**未安装且已决定不装**：`@react-three/fiber`（ADR-0009）、UI 组件库（ADR-0010）。
+**未安装、待定**：`postprocessing`（v0 刻意不引 EffectComposer，R07 整体推到 v1）、
+`@playwright/test`（会下载浏览器二进制，未在无人确认时执行）。
 
 ### 环境
 
@@ -46,11 +48,17 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 
 | 项 | 状态 | 原因 | 何时能验证 |
 |---|---|---|---|
-| `IndexedDbProvider` 的 14 条契约测试 | **跳过并告警** | 纯 Node 无 `indexedDB` | 浏览器 E2E（T-112），或经批准引入 `fake-indexeddb` |
+| `IndexedDbProvider` 契约 | ✅ **已真实执行** | 经批准引入 `fake-indexeddb` | — |
+| IndexedDB 的配额、跨标签页锁、超大 blob | **未验证** | fake-indexeddb 不模拟这些 | 浏览器 E2E（T-112） |
+| `WebGLRenderer` 相关路径 | **未执行** | T-031/T-032 未实现，且需真实 GL | T-031 之后 + E2E |
 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测 | 需人工断网后跑 `pnpm build` |
 | `vendor/` 解码器实际加载 | **未执行** | 加载器（T-032）尚未实现 | T-032 之后 |
 | Player 体积预算 gzip ≤ 400KB | **未测量** | Player 尚未实现 | T-105 |
 | benchmark 实测（G0-7） | **未执行** | 需目标机器 | T-110 |
+
+**Runtime 的可测边界**：three 的场景图、材质、Raycaster、相机数学都不需要 GL 上下文，
+所以 T-033~T-040 是**真跑过的**（core 261 条测试），不是"看起来对"。
+只有 `WebGLRenderer` 与 GLTFLoader 需要浏览器，那部分尚未实现。
 
 `scripts/check-no-external.mjs` 在未构建的包上会打印
 `NOT built, therefore NOT checked`，不会把"没查"报成"通过"。
@@ -69,6 +77,9 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | 4 | core 经 `@w3/schema` 取 zod，不直接依赖 | ADR-0007 |
 | 5 | 动作以数据导出后集中注册，非"导入即注册" | ADR-0008 |
 | 6 | 声明文件由 tsc 生成，非 tsup dts | ADR-0003 |
+| 8 | 编辑器 3D 层不使用 R3F（§4 锁定了 R3F） | ADR-0009 |
+| 9 | v0 不引入 UI 组件库（§4 要求用成熟组件库） | ADR-0010 |
+| 10 | 材质写时复制改为无条件克隆（D3 写的是"被 >1 引用才克隆"） | ADR-0011 |
 | 7 | `checkIntegrity` 新增 `I3-actions-unchecked` 一档 info：未注入动作解析器时显式声明"动作参数内的引用未检查" | — （不改变任何检查项语义，仅拒绝把"没查"报成"通过"） |
 
 `@w3/schema` 中另加了两个规范未列出的文件：`selectors.ts`（纯查询，T-014 点名要 `getAncestors`
@@ -81,10 +92,9 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 
 TASK_BACKLOG 的勾选与耗时回填由人工执行。当前实现覆盖：
 
-- **完成**：T-001 ~ T-006、T-010 ~ T-018、T-020 ~ T-024、T-030、T-080 ~ T-087
-- **未开工**：T-031 ~ T-041（Runtime 3D 层）、T-050 ~ T-054（资产管线）、
-  T-060 ~ T-072（编辑器外壳与撤销）、T-090 ~ T-093（规则编辑 UI）、
-  T-100 ~ T-105（发布与播放器）、T-110 ~ T-114（验收与文档）
-
-T-023 的自测命令 `pnpm -F @w3/storage test idb` 会通过，但其中 14 条契约测试是跳过的——
-见 §2。
+- **完成**：T-001 ~ T-006、T-010 ~ T-018、T-020 ~ T-024、T-030、
+  T-033 ~ T-040、T-080 ~ T-087
+- **部分**：T-037（导入 clip 的 AnimationMixer 未接，补间部分已完成）
+- **未开工**：T-031、T-032（需 WebGL）、T-041（热点层，需 DOM）、
+  T-050 ~ T-054（资产管线）、T-060 ~ T-072（编辑器外壳与撤销）、
+  T-090 ~ T-093（规则编辑 UI）、T-100 ~ T-105（发布与播放器）、T-110 ~ T-114
