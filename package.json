@@ -1,0 +1,33 @@
+{
+  "name": "web3d-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Web3D tool engine — a versionable JSON scene document, rendered by one shared core through two views (editor + player).",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" build",
+    "dev:editor": "pnpm -F @w3/editor dev",
+    "dev:player": "pnpm -F @w3/player dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:parity": "pnpm -F @w3/player test:parity",
+    "check:core-purity": "node scripts/check-core-purity.mjs",
+    "check:no-external": "node scripts/check-no-external.mjs",
+    "check:storage-abstraction": "node scripts/check-storage-abstraction.mjs",
+    "check:deps-direction": "node scripts/check-deps-direction.mjs",
+    "check:constitution": "node scripts/check-constitution.mjs",
+    "verify": "pnpm check:constitution && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "@vitest/coverage-v8": "4.1.10",
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "packageManager": "pnpm@11.12.0"
+}

@@ -1,0 +1,420 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_000001",
+  "name": "泵组拆装演示",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+    "description": "v0 黄金路径样例场景"
+  },
+  "assets": [
+    {
+      "id": "ast_000001",
+      "type": "model",
+      "filename": "pump.glb",
+      "mimeType": "model/gltf-binary",
+      "hash": "sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12",
+      "url": "assets/ab/12/ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12.glb",
+      "bytes": 8412300,
+      "version": 1,
+      "supersedes": null,
+      "stats": {
+        "bytes": 8412300,
+        "triangles": 128400,
+        "drawCalls": 18,
+        "meshes": 3,
+        "materials": 12,
+        "textures": 6,
+        "textureBytes": 42991616,
+        "maxTextureSize": 1024,
+        "animations": 0,
+        "nodes": 7,
+        "boundsMin": [
+          -0.6,
+          0,
+          -0.6
+        ],
+        "boundsMax": [
+          0.6,
+          1.4,
+          0.6
+        ]
+      },
+      "objects": [
+        {
+          "path": "Root",
+          "name": "Root",
+          "hasMesh": false
+        },
+        {
+          "path": "Root/Pump",
+          "name": "Pump",
+          "hasMesh": false
+        },
+        {
+          "path": "Root/Pump/Body",
+          "name": "Body",
+          "hasMesh": true
+        },
+        {
+          "path": "Root/Pump/Valve",
+          "name": "Valve",
+          "hasMesh": false
+        },
+        {
+          "path": "Root/Pump/Valve/Cover",
+          "name": "Cover",
+          "hasMesh": true
+        },
+        {
+          "path": "Root/Pump/Valve/Bolt",
+          "name": "Bolt",
+          "hasMesh": true
+        },
+        {
+          "path": "Root/Pump/Valve/Gasket",
+          "name": "Gasket",
+          "hasMesh": true
+        }
+      ],
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_000001",
+      "name": "泵组",
+      "parent": null,
+      "assetRef": {
+        "assetId": "ast_000001",
+        "objectPath": "Root/Pump",
+        "objectName": "Pump"
+      },
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": null
+      }
+    },
+    {
+      "id": "nd_000002",
+      "name": "泵体",
+      "parent": "nd_000001",
+      "assetRef": {
+        "assetId": "ast_000001",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body"
+      },
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_000002"
+      }
+    },
+    {
+      "id": "nd_000003",
+      "name": "阀盖",
+      "parent": "nd_000001",
+      "assetRef": {
+        "assetId": "ast_000001",
+        "objectPath": "Root/Pump/Valve/Cover",
+        "objectName": "Cover"
+      },
+      "transform": {
+        "p": [
+          0,
+          0.9,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_000001"
+      }
+    },
+    {
+      "id": "nd_000004",
+      "name": "固定螺栓",
+      "parent": "nd_000003",
+      "assetRef": {
+        "assetId": "ast_000001",
+        "objectPath": "Root/Pump/Valve/Bolt",
+        "objectName": "Bolt"
+      },
+      "transform": {
+        "p": [
+          0.18,
+          0.06,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_000001"
+      }
+    },
+    {
+      "id": "nd_000005",
+      "name": "密封垫",
+      "parent": "nd_000001",
+      "assetRef": {
+        "assetId": "ast_000001",
+        "objectPath": "Root/Pump/Valve/Gasket",
+        "objectName": "Gasket"
+      },
+      "transform": {
+        "p": [
+          0,
+          0.86,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_000002"
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_000001",
+      "name": "不锈钢",
+      "base": null,
+      "params": {
+        "color": "#c3c9cf",
+        "roughness": 0.35,
+        "metalness": 0.9,
+        "opacity": 1,
+        "transparent": false,
+        "emissive": "#000000",
+        "emissiveIntensity": 0,
+        "doubleSided": false
+      },
+      "maps": {}
+    },
+    {
+      "id": "mat_000002",
+      "name": "漆面蓝",
+      "base": null,
+      "params": {
+        "color": "#3f6f97",
+        "roughness": 0.6,
+        "metalness": 0.1,
+        "opacity": 1,
+        "transparent": false,
+        "emissive": "#000000",
+        "emissiveIntensity": 0,
+        "doubleSided": false
+      },
+      "maps": {}
+    }
+  ],
+  "animations": [
+    {
+      "id": "anm_000001",
+      "name": "阀盖上移",
+      "kind": "tween",
+      "targets": [
+        {
+          "nodeId": "nd_000003",
+          "from": null,
+          "to": {
+            "p": [
+              0,
+              1.25,
+              0
+            ]
+          }
+        }
+      ],
+      "durationMs": 1200,
+      "easing": "easeInOutCubic",
+      "loop": false
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_000001",
+      "name": "拆卸第一步",
+      "anchor": {
+        "nodeId": "nd_000003",
+        "offset": [
+          0,
+          0.12,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "label": "1",
+      "content": {
+        "type": "panel",
+        "title": "拆卸第一步",
+        "body": "松开六颗固定螺栓，均匀交叉卸力，避免阀盖变形。"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_000001",
+      "name": "拆解视角",
+      "camera": {
+        "position": [
+          2.4,
+          1.8,
+          3.2
+        ],
+        "target": [
+          0,
+          0.7,
+          0
+        ],
+        "fov": 45,
+        "near": 0.1,
+        "far": 1000
+      }
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_000001",
+      "name": "第一步：点击阀盖",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "nodeId": "nd_000003"
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "mode": "sequence",
+      "reentry": "restart",
+      "then": [
+        {
+          "action": "playAnimation",
+          "animationId": "anm_000001",
+          "loop": null,
+          "speed": null
+        },
+        {
+          "action": "highlight",
+          "nodeId": "nd_000003",
+          "preset": "amber"
+        },
+        {
+          "action": "openPanel",
+          "hotspotId": "hs_000001"
+        },
+        {
+          "action": "setVariable",
+          "variableId": "step",
+          "value": {
+            "const": 2
+          }
+        }
+      ]
+    }
+  ],
+  "environment": {
+    "background": "#14171a",
+    "ambientIntensity": 0.6,
+    "keyIntensity": 2.1,
+    "fillIntensity": 0.55,
+    "showGrid": true,
+    "showGround": true
+  },
+  "pages": [],
+  "media": [],
+  "flows": [],
+  "constraints": []
+}

@@ -1,0 +1,23 @@
+packages:
+  - 'packages/*'
+  - 'e2e'
+
+# --- workspace-wide settings (pnpm >= 10 reads these here, not from .npmrc) ---
+
+# MVP_V0 §4: exact versions, no ^ or ~. three's minor releases carry breaking changes.
+saveExact: true
+
+# Constitution C2/C7: no phantom dependencies. A package may only import what it declares.
+shamefullyHoist: false
+
+strictPeerDependencies: false
+autoInstallPeers: true
+
+# pnpm requires explicit opt-in for dependency build scripts.
+# Keep this list minimal and reviewed: every entry runs arbitrary code at install time.
+allowBuilds:
+  esbuild: true
+  # sharp is a transitive dep of @gltf-transform/functions used only for its Node
+  # texture pipeline. We run gltf-transform in the browser (C6: no server-side GPU/native
+  # step), so the native build is deliberately skipped.
+  sharp: false

@@ -1,0 +1,32 @@
+{
+  "name": "@w3/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "StorageProvider abstraction (C7) + Memory/IndexedDB implementations + content-addressed assets + .w3p scene packages.",
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@w3/schema": "workspace:*",
+    "fflate": "0.8.3",
+    "idb": "8.0.3"
+  }
+}

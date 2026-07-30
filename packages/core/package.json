@@ -1,0 +1,39 @@
+{
+  "name": "@w3/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime Core + ECA engine. Framework-agnostic (C2). The editor preview and the player run this exact code (C3).",
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./eca": {
+      "types": "./dist/eca.d.ts",
+      "import": "./dist/eca.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@w3/schema": "workspace:*",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.1"
+  }
+}

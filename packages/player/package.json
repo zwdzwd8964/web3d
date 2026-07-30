@@ -1,0 +1,25 @@
+{
+  "name": "@w3/player",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only player SPA. Size-sensitive (gzip <= 400KB, excluding assets).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:parity": "vitest run parity",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@w3/core": "workspace:*",
+    "@w3/schema": "workspace:*",
+    "@w3/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "8.1.5"
+  }
+}
