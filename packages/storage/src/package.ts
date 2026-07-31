@@ -55,16 +55,32 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 /**
- * Which content hashes a document needs.
+ * Which content hashes a document actually needs.
  *
- * Derived from `asset.url` rather than from the caller's blob map, so a publish can only
- * ever ship what the scene references — an over-supplied map does not bloat the package,
- * and an under-supplied one is caught here rather than in the player.
+ * "Needs" means **reachable from a node, an animation or a media record** — not "appears
+ * in `document.assets`". Those are different sets, and the difference is the whole point:
+ * an asset imported, evaluated and then deleted from the scene keeps its record (D4 makes
+ * asset records immutable) while nothing references it any more. Iterating `assets`
+ * shipped those bytes anyway, so T-100's "产出包只含被引用的资产" did not hold and a package
+ * could be many times larger than the scene inside it.
+ *
+ * Derived from the document rather than from the caller's blob map, so an over-supplied
+ * map cannot bloat the package and an under-supplied one is caught at pack time rather
+ * than by the player.
  */
 export function referencedHashes(document: SceneDocument): Set<BlobHash> {
+  const used = new Set<string>()
+  for (const node of document.nodes) {
+    if (node.assetRef) used.add(node.assetRef.assetId)
+  }
+  for (const animation of document.animations) {
+    if (animation.kind === 'imported') used.add(animation.assetId)
+  }
+  for (const media of document.media) used.add(media.assetId)
+
   const out = new Set<BlobHash>()
   for (const asset of document.assets) {
-    if (isBlobHash(asset.hash)) out.add(asset.hash)
+    if (used.has(asset.id) && isBlobHash(asset.hash)) out.add(asset.hash)
   }
   return out
 }

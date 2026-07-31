@@ -89,6 +89,20 @@ export function createPlaybackSession(options: PlaybackSessionOptions): Playback
   let running = false
   let detachRuntime: (() => void) | null = null
   let document = options.document
+  /**
+   * Bumped by every `stop()`, captured by every `start()`.
+   *
+   * `start()` awaits `runtime.load()`, and `running` was only set to true afterwards —
+   * so a `stop()` arriving during that window hit `if (!running) return` and did
+   * nothing, and `start()` then resumed and enabled an engine whose host had already
+   * thrown away its reference. The result was an unstoppable session: timers firing
+   * forever against a disposed runtime, rules running in edit mode (ECA_SPEC §7), and a
+   * second `enter()` producing two live engines on one runtime.
+   *
+   * A generation counter rather than a boolean because `stop(); start(); stop()` must
+   * not let the first stop cancel the second start.
+   */
+  let generation = 0
   /** The node the pointer was over on the previous report. */
   let hovered: string | null = null
 
@@ -102,7 +116,11 @@ export function createPlaybackSession(options: PlaybackSessionOptions): Playback
 
     async start() {
       if (running) return
+      const mine = generation
       await runtime.load(document)
+      // Someone stopped us while the assets were loading. Do nothing at all — not even
+      // attach — and leave the runtime exactly as `stop()` left it.
+      if (mine !== generation) return
 
       engine.attach(document)
       engine.setEnabled(true)
@@ -163,6 +181,11 @@ export function createPlaybackSession(options: PlaybackSessionOptions): Playback
     },
 
     stop() {
+      // Invalidate any `start()` still inside its await window, whether or not we are
+      // currently running. This line is the whole fix, and it must come BEFORE the early
+      // return — `if (!running) return` was the bug.
+      generation++
+
       if (!running) return
       running = false
       hovered = null

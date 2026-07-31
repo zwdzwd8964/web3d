@@ -5,6 +5,18 @@ import { formatPublishedAt, listSnapshots, rollbackTo } from '../publish/snapsho
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 
 /**
+ * Overwrites `target` with `source`, one element at a time.
+ *
+ * `target.splice(0, target.length, ...source)` in one call would be shorter and would
+ * make immer emit a single whole-array replace — which is exactly what this exists to
+ * avoid. Trimming then assigning by index keeps the patches per-element.
+ */
+function replaceInPlace<T>(target: T[], source: readonly T[]): void {
+  if (target.length > source.length) target.splice(source.length, target.length - source.length)
+  for (let i = 0; i < source.length; i++) target[i] = source[i]!
+}
+
+/**
  * T-104 · the snapshot list.
  *
  * Rolling back goes through `replaceDocument`, which lands as a normal history entry —
@@ -47,11 +59,27 @@ export function SnapshotPanel() {
       // patches belonging to a document that no longer existed, silently corrupting the
       // one that did. Meanwhile this panel was promising the user they could undo it.
       commit(`回滚到 ${formatPublishedAt(summary.publishedAt)}${summary.label ? ` · ${summary.label}` : ''}`, (draft) => {
-        // Field-by-field so immer emits a real patch set rather than one whole-document
-        // replacement — the renderer reconciles it incrementally like any other edit.
-        for (const key of Object.keys(draft) as (keyof typeof draft)[]) {
-          ;(draft as Record<string, unknown>)[key] = (document as Record<string, unknown>)[key]
-        }
+        // Field-by-field, but element-by-element inside each array.
+        //
+        // Assigning whole arrays looked incremental and is not: immer describes it as one
+        // `replace /nodes`, `replace /materials`, … per collection, and the patch applier
+        // recognises none of those except `/nodes` — so a rollback tripped the D1
+        // full-rebuild fallback and put 铁律 11's alarm counter at 1 on a perfectly
+        // ordinary operation. Splicing in place produces per-element patches the renderer
+        // reconciles like any other edit.
+        replaceInPlace(draft.nodes, document.nodes)
+        replaceInPlace(draft.materials, document.materials)
+        replaceInPlace(draft.animations, document.animations)
+        replaceInPlace(draft.hotspots, document.hotspots)
+        replaceInPlace(draft.viewpoints, document.viewpoints)
+        replaceInPlace(draft.variables, document.variables)
+        replaceInPlace(draft.rules, document.rules)
+        replaceInPlace(draft.assets, document.assets)
+        replaceInPlace(draft.media, document.media)
+        replaceInPlace(draft.pages, document.pages)
+        replaceInPlace(draft.flows, document.flows)
+        draft.name = document.name
+        Object.assign(draft.meta, document.meta)
       })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

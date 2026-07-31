@@ -2,7 +2,8 @@ import type { Asset, AssetAudit, AssetStats, IdFactory, Node, SceneDocument } fr
 import { collectAllIds, defaultIdFactory, remapAssetRefs } from '@w3/schema'
 import type { MigrationReport } from '@w3/schema'
 import type { AuditResult } from '@w3/core'
-import { AssetLoader, auditGlb, computeNormalization, instantiate } from '@w3/core'
+import { AssetLoader, auditGlb, computeNormalization, instantiate, renderThumbnail } from '@w3/core'
+import type { LoadedAsset } from '@w3/core'
 import type { BlobHash, StorageProvider } from '@w3/storage'
 import { extensionOf, hashBytes, hashToPath } from '@w3/storage'
 
@@ -18,7 +19,15 @@ import { extensionOf, hashBytes, hashToPath } from '@w3/storage'
  * about — can be exercised without a browser.
  */
 
-export type ImportStage = 'hashing' | 'deduplicating' | 'auditing' | 'normalizing' | 'storing' | 'instantiating' | 'done'
+export type ImportStage =
+  | 'hashing'
+  | 'deduplicating'
+  | 'auditing'
+  | 'normalizing'
+  | 'storing'
+  | 'thumbnailing'
+  | 'instantiating'
+  | 'done'
 
 export interface ImportProgress {
   readonly stage: ImportStage
@@ -38,6 +47,11 @@ export interface ImportOptions {
   readonly newId?: IdFactory
   readonly now?: () => string
   readonly onProgress?: (progress: ImportProgress) => void
+  /**
+   * Renders the asset's thumbnail. Injected so the flow stays testable in Node — the
+   * real one needs a GPU, and a missing thumbnail must never be able to fail an import.
+   */
+  readonly renderThumbnail?: (scene: LoadedAsset['scene']) => Promise<Blob | null>
 }
 
 export interface ImportResult {
@@ -47,6 +61,17 @@ export interface ImportResult {
   readonly nodes: readonly Node[]
   /** Present only when replacing an existing asset. */
   readonly remap?: MigrationReport
+  /**
+   * The document with every assetRef moved onto the new asset.
+   *
+   * Carried alongside the report because the report alone is a description of work that
+   * has not been done. `applyImport` used to fold in only the asset record and the (empty)
+   * node list, so a second upload showed a perfect "已迁移 4 项" dialog and left every node
+   * pointing at the OLD asset id — SCHEMA_SPEC §5.3 and G0-6 unimplemented at the editor
+   * level, with the unit tests for `remapAssetRefs` all green because they test the
+   * function, not its use.
+   */
+  readonly remapped?: SceneDocument
   /** True when the bytes were already in storage — a second upload of the same file. */
   readonly deduplicated: boolean
   readonly hash: BlobHash
@@ -120,12 +145,35 @@ export async function importModel(options: ImportOptions): Promise<ImportResult>
   report('instantiating', '正在建立场景节点…')
   const loaded = await loader.parse(assetId, file.bytes)
 
+  // T-053 · the thumbnail, which lived as an unreachable function until now. Generated
+  // here because this is the one moment the geometry is already parsed and in memory
+  // (技术方案 §1.5 rules out doing it server-side).
+  //
+  // Best-effort by construction: a failure or a missing renderer leaves `thumbnailUrl`
+  // unset, and the asset panel falls back to text. An import must never fail because a
+  // picture could not be drawn.
+  let thumbnailUrl: string | undefined
+  const render = options.renderThumbnail ?? defaultThumbnailRenderer
+  try {
+    report('thumbnailing', '正在生成缩略图…')
+    const blob = await render(loaded.scene)
+    if (blob) {
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      const thumbHash = await hashBytes(bytes)
+      await storage.putBlob(bytes)
+      thumbnailUrl = hashToPath(thumbHash, '.png')
+    }
+  } catch {
+    thumbnailUrl = undefined
+  }
+  if (thumbnailUrl) Object.assign(asset, { thumbnailUrl })
+
   if (previous) {
     // §5.3 · move the existing configuration across rather than creating new nodes.
     const objects = [...loaded.objects.entries()].map(([path, object]) => ({ path, name: object.name }))
-    const { report: remap } = remapAssetRefs(doc, previous.id, asset, objects)
+    const { doc: remapped, report: remap } = remapAssetRefs(doc, previous.id, asset, objects)
     report('done', '导入完成')
-    return { asset, audit, nodes: [], remap, deduplicated, hash }
+    return { asset, audit, nodes: [], remap, remapped, deduplicated, hash }
   }
 
   const { nodes } = instantiate(loaded.scene, {
@@ -149,7 +197,28 @@ export function applyImport(draft: SceneDocument, result: ImportResult): void {
   const index = draft.assets.findIndex((a) => a.id === result.asset.id)
   if (index === -1) draft.assets.push(result.asset)
   else draft.assets[index] = result.asset
+
+  // §5.3 · a re-upload moves existing configuration onto the new asset. The remapped
+  // nodes are the whole point of the remap ladder; without this the dialog reports
+  // "已迁移 N 项" and nothing has moved.
+  if (result.remapped) {
+    draft.nodes = result.remapped.nodes.map((n) => ({ ...n }))
+    draft.animations = result.remapped.animations.map((a) => ({ ...a }))
+    return
+  }
+
   draft.nodes.push(...(result.nodes as Node[]))
+}
+
+/**
+ * The browser thumbnail renderer, or nothing at all outside a browser.
+ *
+ * Resolved lazily so importing this module in Node — which the tests and the parity suite
+ * do — never touches `document`.
+ */
+async function defaultThumbnailRenderer(scene: LoadedAsset['scene']): Promise<Blob | null> {
+  if (typeof document === 'undefined') return null
+  return renderThumbnail(scene)
 }
 
 /** The sentence R02 requires the remap dialog to lead with. */

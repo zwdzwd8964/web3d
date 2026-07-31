@@ -1,4 +1,4 @@
-import { validate } from '@w3/schema'
+import { migrate } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import type { Snapshot, SnapshotSummary, StorageProvider } from '@w3/storage'
 
@@ -40,16 +40,21 @@ export async function rollbackTo(storage: StorageProvider, snapshotId: string): 
   const snapshot = await storage.loadSnapshot(snapshotId)
   if (!snapshot) throw new Error(`找不到这个快照：${snapshotId}`)
 
-  const parsed = validate(snapshot.document)
+  // `migrate`, not `validate`. `schemaVersion` is a `z.literal(CURRENT_VERSION)`, so
+  // `validate` rejects EVERY document written by an older build — and a local snapshot is
+  // a published historical document exactly as a `.w3p` is. Constitution C4 covers both:
+  // 「任何历史版本的已发布快照，必须永远能被当前代码打开」. The storage side was fixed;
+  // this path was missed, which meant that the day `schemaVersion` reaches 2, every
+  // snapshot in the user's IndexedDB turns to a brick and reports 「未通过校验」 while doing
+  // it.
+  const parsed = migrate(snapshot.document)
   if (!parsed.ok) {
-    const detail = parsed.error
-      .slice(0, 3)
-      .map((e) => `${e.path}：${e.message}`)
-      .join('；')
-    throw new Error(`该快照未通过校验，已拒绝回滚（当前文档未被改动）。${detail}`)
+    throw new Error(
+      `该快照无法打开，已拒绝回滚（当前文档未被改动）。原因：${parsed.error.kind} —— ${parsed.error.message}`,
+    )
   }
 
-  return { document: parsed.value, snapshot }
+  return { document: parsed.value.document, snapshot }
 }
 
 /** `2026-07-31T09:12:03.000Z` -> `2026-07-31 09:12`, in the viewer's own timezone. */
