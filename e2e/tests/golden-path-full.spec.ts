@@ -362,6 +362,21 @@ test('黄金路径 12 步', async ({ page, context }) => {
   await expect(player.locator('.player__error')).toHaveCount(0)
   expect(await colourBuckets(player, 'canvas.player__canvas'), '播放器里视口是空的').toBeGreaterThan(3)
 
+  // A machine with no GPU gets the software-rendering notice, which covers the viewport
+  // until the viewer accepts it (player/app.ts, T-111). That is the product working as
+  // designed, and it means the golden path on such a machine has one more click in it.
+  //
+  // This branch was invisible until CI ran: every dev machine this test was written on had
+  // hardware GL, so the notice never appeared, and the click below — which times out
+  // against it — always found a clear canvas. Software rendering is not an exotic case for
+  // this product; it is the normal state of an intranet workstation or a VM.
+  const notice = player.locator('.w3-capability')
+  if ((await notice.count()) > 0) {
+    await expect(notice, '性能提示应当说清楚是软件渲染').toContainText('软件渲染')
+    await notice.getByRole('button', { name: '仍然继续' }).click()
+    await expect(notice, '「仍然继续」之后提示必须真的让开，否则播放器点不动').toHaveCount(0)
+  }
+
   // And the same interaction does the same thing.
   //
   // Asserted on the DOM rather than on pixels: the sample rule's chain ends in
