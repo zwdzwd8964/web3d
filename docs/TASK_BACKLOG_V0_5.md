@@ -144,12 +144,17 @@
   会从 M9 开始持续鸣叫。还顺带修了 `disposeSubtree` 无差别 dispose 几何——资产实例的
   几何是共享的，删一个节点会让同一零件的其他实例白掉到下次上传。13 处变异检验全红。
 
-### [ ] T-131 · LightFactory：五种灯
-- **依赖** T-130 · **预估** 0.8d · **实际** ___
+### [x] T-131 · LightFactory：五种灯
+- **依赖** T-130 · **预估** 0.8d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/light-factory.ts`, `packages/core/test/runtime/light-factory.test.ts`
 - **做** ambient / hemisphere / directional / point / spot 的构建与增量更新；方向性灯沿节点局部 -Z（D13，target 由世界矩阵每帧推出，不进文档）；`angleDeg` → 弧度；`quality` → mapSize 512/1024/2048；颜色/强度/角度等参数 patch **就地更新**不重建，`kind` 变更走重建 + dispose。
 - **验收** 每种灯一条构建断言 + 一条增量更新断言；-Z 朝向有数学断言（旋转节点 → 光照方向随动）
 - **自测** `pnpm -F @w3/core test light-factory`
+- **实际情况**：D13 的实现不需要每帧 tick——把 target 挂成灯的**子对象**放在局部 -Z，
+  three 自己每帧从灯的世界矩阵推出朝向。10 处变异检验全红，其中两条值得记：
+  target 不挂成子对象（回到 three 默认的游离 target）→ 5 条红；换阴影质量不 dispose
+  旧 map → 红（three 只在首次按 mapSize 分配，不 dispose 的话"高"档永远还在 512 渲染，
+  控件看起来什么也没干）。
 
 ### [ ] T-132 · 阴影管线
 - **依赖** T-131 · **预估** 0.5d · **实际** ___

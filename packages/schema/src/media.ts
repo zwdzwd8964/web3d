@@ -42,7 +42,7 @@ export type Media = z.infer<typeof MediaSchema>
 
 /** Which asset type each media type must point at. Enforced by integrity check I14. */
 export const MEDIA_ASSET_TYPES: Record<MediaType, string> = {
-  image: 'texture',
-  video: 'hdri',
-  audio: 'model',
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
 }
