@@ -32,6 +32,21 @@ export interface PatchApplierTargets {
   readonly rebuild: (doc: SceneDocument) => void
   /** Re-reads `doc.meta` — background colour, mostly. */
   readonly applyMeta?: (doc: SceneDocument) => void
+  /**
+   * v0.5 hooks. Each is optional and each has a defined meaning when absent:
+   *
+   *   applyEnvironment  `/meta/environment/**` — the IBL map, intensity and exposure (T-133)
+   *   applyNodeShadow   `/nodes/i/overrides/{castShadow,receiveShadow}` (T-132)
+   *   applyMedia        `/media/**` — the media element pool (T-163)
+   *
+   * Absent means "this build renders nothing that depends on it", which is why the paths
+   * still count as handled. That is NOT the same as ignoring an unknown path: these are
+   * recognised paths whose consumer has not shipped yet, and the day it does, the wiring
+   * is already here rather than being invented alongside the feature.
+   */
+  readonly applyEnvironment?: (doc: SceneDocument) => void
+  readonly applyNodeShadow?: (doc: SceneDocument, nodeId: string) => void
+  readonly applyMedia?: (doc: SceneDocument) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -85,11 +100,18 @@ export class PatchApplier {
         return this.applyNodePatch(patch, indexRaw, rest, next, prev)
       case 'materials':
         return this.applyMaterialPatch(patch, indexRaw, rest, next)
-      case 'meta':
-        // Background and unit/up-axis live here. Re-reading the whole meta block is
-        // cheaper than the switch that would tell them apart.
+      case 'meta': {
+        // `/meta/environment/**` gets its own consumer because rebuilding a PMREM
+        // environment is expensive and must not happen when the user typed a background
+        // colour. Everything else in meta re-reads the whole block, which is cheaper than
+        // the switch that would tell unit from upAxis.
+        if (indexRaw === 'environment') this.targets.applyEnvironment?.(next)
+        // The fallthrough is deliberate and load-bearing: an unrecognised key under meta
+        // must still be handled, or adding a meta field later silently starts triggering
+        // full rebuilds.
         this.targets.applyMeta?.(next)
         return true
+      }
       case 'assets':
         // Asset BYTES are loaded asynchronously and therefore cannot be handled from a
         // synchronous patch. The host is responsible for awaiting `ensureAssets` BEFORE
@@ -99,6 +121,11 @@ export class PatchApplier {
         return true
       // Collections with no renderer-side representation: the ECA engine and the hotspot
       // projector read them straight from the document, so there is nothing to mirror.
+      case 'media':
+        // The hotspot layer and the media bus read `doc.media` directly; the pool of
+        // <audio> elements is the only thing that mirrors it (T-163).
+        this.targets.applyMedia?.(next)
+        return true
       case 'rules':
       case 'variables':
       case 'viewpoints':
@@ -106,7 +133,6 @@ export class PatchApplier {
       case 'hotspots':
       case 'pages':
       case 'flows':
-      case 'media':
       case 'name':
       case 'schemaVersion':
       case 'id':
@@ -137,21 +163,38 @@ export class PatchApplier {
     const index = Number(indexRaw)
     if (!Number.isInteger(index)) return false
 
-    // A whole node was added or removed.
+    // A whole element of `nodes` moved, arrived or left.
+    //
+    // The trap is that `add` / `replace` / `remove` at an INDEX rarely mean what they say.
+    // Immer describes `nodes.splice(2, 1)` on a five-element array as
+    // `replace /nodes/2`, `replace /nodes/3`, `remove /nodes/4` — three patches, and the
+    // only one naming the deleted node is the trailing remove, whose index now points at
+    // a different node entirely. Undo replays the same shifts in the other direction.
+    //
+    // Reading them literally (drop whatever used to be at this index, add whatever is
+    // there now) removed a LIVE node and then failed to re-add it, because `addNode`
+    // refuses a duplicate. The batch came back unhandled and rebuilt: that is the
+    // `fullRebuildCount === 1` recorded against the golden path in IMPL_NOTES §4, invisible
+    // to every unit test in this file.
+    //
+    // So the index is treated as a hint and the ID as the truth. Try the O(1) move; when
+    // it does not apply, diff the two node lists. `reconcileNodes` is idempotent, so one
+    // splice costs one reconcile and then a couple of no-ops.
     if (rest.length === 0) {
       if (patch.op === 'remove') {
         const removed = prev.nodes[index]
-        return removed ? graph.removeNode(removed.id) : false
+        if (!removed) return false
+        // Still present under a different index: this remove is the vacated slot, not a
+        // deletion. Removing it here is the live-node bug in its purest form.
+        if (next.nodes.some((n) => n.id === removed.id)) return this.reconcileNodes(next, prev)
+        return graph.removeNode(removed.id)
       }
       const added = next.nodes[index]
       if (!added) return false
-      // `replace` on a whole element means the node at this index is a different node.
-      if (patch.op === 'replace') {
-        const before = prev.nodes[index]
-        if (before && before.id !== added.id) graph.removeNode(before.id)
-        else if (before) return this.resyncNode(added.id, next)
-      }
-      return graph.addNode(added) !== null
+      // `addNode` returns null for two different reasons — the node is already in the
+      // graph (an index shift), or its parent has not been added yet (a subtree arriving
+      // in one batch). Reconcile handles both, and is the only thing that can.
+      return graph.addNode(added) !== null || this.reconcileNodes(next, prev)
     }
 
     const node = next.nodes[index]
@@ -176,7 +219,20 @@ export class PatchApplier {
         return true
       case 'locked':
         return true
+      case 'primitive':
+        // Covers `/primitive` wholesale and `/primitive/size/1`: the carrier is re-read
+        // either way, and the factory decides whether that is an in-place update.
+        return graph.setPrimitive(node.id, node)
+      case 'light':
+        // Same, and it is the path that carries `/light/shadow/bias` and
+        // `/light/intensity` — every `setLight` action and every slider drag.
+        return graph.setLight(node.id, node)
       case 'overrides': {
+        if (sub === 'castShadow' || sub === 'receiveShadow') {
+          // v1 defined these and nothing read them; v2's shadow pipeline (T-132) does.
+          this.targets.applyNodeShadow?.(next, node.id)
+          return true
+        }
         if (sub !== undefined && sub !== 'materialId') return false
         const defs = new Map(next.materials.map((m) => [m.id, m]))
         // The return value is deliberately ignored. `applyToNode` reports false when the
@@ -262,12 +318,24 @@ export class PatchApplier {
     if (!node) return false
     const { graph, materials } = this.targets
     const defs = new Map(doc.materials.map((m) => [m.id, m]))
+    const carrierOk =
+      node.primitive !== null ? graph.setPrimitive(nodeId, node) : node.light !== null ? graph.setLight(nodeId, node) : true
+
+    // `applyToNode`'s return value is deliberately dropped, for the same reason the
+    // `overrides` branch above drops it: it answers false for a node with no mesh — a
+    // grouping node, an unresolved placeholder, and now every light — and that is
+    // "nothing to render", not "unrecognised patch".
+    //
+    // It used to be `&& … !== false`, which meant that from the first light a document
+    // contained, ANY wholesale `/nodes` change fell back to a full rebuild. The counter
+    // that is supposed to be D1's alarm would have been ringing continuously.
+    materials.applyToNode(nodeId, node.overrides.materialId ?? null, defs, graph)
     return (
+      carrierOk &&
       graph.setTransform(nodeId, node) &&
       graph.setVisible(nodeId, node.visible) &&
       graph.setName(nodeId, node.name) &&
-      graph.setParent(nodeId, node.parent) &&
-      materials.applyToNode(nodeId, node.overrides.materialId ?? null, defs, graph) !== false
+      graph.setParent(nodeId, node.parent)
     )
   }
 }

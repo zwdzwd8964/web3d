@@ -128,12 +128,21 @@
 
 ## E13 · 光照与环境（`@w3/core`）
 
-### [ ] T-130 · 场景图承载体分发 ★
-- **依赖** T-120 · **预估** 0.8d · **实际** ___
+### [x] T-130 · 场景图承载体分发 ★
+- **依赖** T-120 · **预估** 0.8d · **实际** 1.2h
 - **独占** `packages/core/src/runtime/scene-graph.ts`, `packages/core/src/runtime/apply-patch.ts`, `packages/core/src/runtime/carrier-types.ts`, `packages/core/test/runtime/scene-graph.test.ts`, `packages/core/test/runtime/apply-patch.test.ts`
 - **做** 场景图识别三种承载体（assetRef / primitive / light），primitive 与 light 的 Object3D 构建委托给 `PrimitiveFactory` / `LightFactory` 接口（本卡定义接口 + 占位实现，真实实现在 T-140 / T-131）。applyPatch 增路径分发：`/nodes/i/primitive/**`、`/nodes/i/light/**`、`/meta/environment/**`、`/meta/background/**`、`/media/**`——**每类路径都不落全量重建**。
 - **验收** 新路径逐类有单测；`fullRebuildCount` 在全部新路径上为 0
 - **自测** `pnpm -F @w3/core test scene-graph apply-patch`
+- **实际情况**：顺手清掉了 IMPL_NOTES §4 登记的那条 major——黄金路径 `fullRebuildCount`
+  实测为 1。根因不在新路径上，而在**索引位移**：immer 把 `nodes.splice(2,1)` 描述成
+  `replace /nodes/2` + `remove /nodes/3`，按字面读会删掉一个还活着的节点、再重复添加失败。
+  现在整条黄金路径实测 0，并在 E2E 末尾（第 12 步之后）补了断言——原来两处断言都在
+  那次回落之前，这才是它活了一整个版本的原因。
+  另修 `resyncNode` 把非 Mesh 节点的 `applyToNode === false` 当成"未识别"：**文档里
+  只要有一盏灯，任何 `/nodes` 整体替换都会回落全量重建**（灯没有 mesh），D1 的报警器
+  会从 M9 开始持续鸣叫。还顺带修了 `disposeSubtree` 无差别 dispose 几何——资产实例的
+  几何是共享的，删一个节点会让同一零件的其他实例白掉到下次上传。13 处变异检验全红。
 
 ### [ ] T-131 · LightFactory：五种灯
 - **依赖** T-130 · **预估** 0.8d · **实际** ___

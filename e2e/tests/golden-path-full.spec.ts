@@ -406,4 +406,14 @@ test('黄金路径 12 步', async ({ page, context }) => {
   ).toHaveCount(1)
 
   await player.close()
+
+  /* ── 收尾 · 全程零全量重建 ────────────────────────────────────────── */
+  //
+  // Asserted HERE, at the end, and that placement is the whole point. The two earlier
+  // checks (steps 6 and 11) both sat before step 12, and step 12 — delete a node, then
+  // undo it — was where the fallback actually happened: `fullRebuildCount` finished this
+  // run at 1 for the entire life of the golden path while every assertion said 0
+  // (IMPL_NOTES §4). D1's alarm is only an alarm if something reads it after the last
+  // thing that could set it off.
+  await expect(statusNumber(page, '全量重建'), '整条黄金路径必须零全量重建（铁律 11）').toHaveText('0')
 })

@@ -1,5 +1,8 @@
 import type { Node, SceneDocument } from '@w3/schema'
+import { getCarrier } from '@w3/schema'
 import { Group, Mesh, Object3D, Quaternion, Vector3 } from 'three'
+import type { CarrierUserData, LightFactory, PrimitiveFactory } from './carrier-types.js'
+import { PLACEHOLDER_LIGHT_FACTORY, PLACEHOLDER_PRIMITIVE_FACTORY } from './carrier-types.js'
 import type { AssetSource, NodeUserData } from './types.js'
 import { EMPTY_ASSET_SOURCE } from './types.js'
 
@@ -20,6 +23,9 @@ import { EMPTY_ASSET_SOURCE } from './types.js'
 
 export interface SceneGraphOptions {
   readonly assets?: AssetSource
+  /** v0.5 · supplied by SceneRuntime. Defaults build empty groups (see carrier-types.ts). */
+  readonly primitives?: PrimitiveFactory
+  readonly lights?: LightFactory
 }
 
 export class SceneGraph {
@@ -29,14 +35,26 @@ export class SceneGraph {
   private objects = new Map<string, Object3D>()
   private assets: AssetSource
   private materialised = new Map<string, boolean>()
+  private primitives: PrimitiveFactory
+  private lights: LightFactory
 
   constructor(options: SceneGraphOptions = {}) {
     this.root.name = 'w3:document-root'
     this.assets = options.assets ?? EMPTY_ASSET_SOURCE
+    this.primitives = options.primitives ?? PLACEHOLDER_PRIMITIVE_FACTORY
+    this.lights = options.lights ?? PLACEHOLDER_LIGHT_FACTORY
   }
 
   setAssetSource(source: AssetSource): void {
     this.assets = source
+  }
+
+  setPrimitiveFactory(factory: PrimitiveFactory): void {
+    this.primitives = factory
+  }
+
+  setLightFactory(factory: LightFactory): void {
+    this.lights = factory
   }
 
   /** The Object3D representing a document node. */
@@ -96,15 +114,30 @@ export class SceneGraph {
     walk(null, this.root)
   }
 
+  /**
+   * The one place a document node becomes an Object3D — `build` and `addNode` both come
+   * through here, so a new carrier is one branch, not two.
+   */
   private createObject(node: Node): Object3D {
-    const source = this.sourceObjectFor(node)
-    const object = source ? materialise(source) : new Group()
+    const carrier = getCarrier(node)
+    const source = carrier === 'assetRef' ? this.sourceObjectFor(node) : null
+    const object =
+      carrier === 'primitive' && node.primitive
+        ? this.primitives.create(node.primitive)
+        : carrier === 'light' && node.light
+          ? this.lights.create(node.light)
+          : source
+            ? materialise(source)
+            : new Group()
 
-    // Two different empty groups, and conflating them would be a bug the user sees:
-    //  - `assetRef === null`  the user made a grouping node. Nothing is wrong.
+    // Three different empty groups, and conflating them would be a bug the user sees:
+    //  - no carrier at all: the user made a grouping node. Nothing is wrong.
     //  - `assetRef` set but unresolved: the asset is still loading, or the object is
     //    gone after a re-import (D5). The hierarchy tree must flag this one.
-    const isPlaceholder = node.assetRef !== null && source === null
+    //  - primitive / light: fully materialised, whatever the factory built. Reporting
+    //    these as placeholders would make `highlight` tell the user the asset has not
+    //    loaded yet, about a node that has no asset and never will.
+    const isPlaceholder = carrier === 'assetRef' && source === null
     this.materialised.set(node.id, !isPlaceholder)
 
     object.name = node.name
@@ -163,6 +196,45 @@ export class SceneGraph {
     return true
   }
 
+  /**
+   * v0.5 · re-applies a primitive carrier, replacing the object only when the factory
+   * reports the change is structural (box to sphere).
+   */
+  setPrimitive(nodeId: string, node: Node): boolean {
+    const object = this.objects.get(nodeId)
+    if (!object) return false
+    if (node.primitive && getCarrier(node) === 'primitive' && this.primitives.update(object, node.primitive)) return true
+    return this.replaceObject(nodeId, node)
+  }
+
+  /** v0.5 · the same for a light carrier. A `kind` change is structural. */
+  setLight(nodeId: string, node: Node): boolean {
+    const object = this.objects.get(nodeId)
+    if (!object) return false
+    if (node.light && getCarrier(node) === 'light' && this.lights.update(object, node.light)) return true
+    return this.replaceObject(nodeId, node)
+  }
+
+  /**
+   * Swaps a node's Object3D for a freshly built one, keeping its place in the tree.
+   *
+   * The children move across: they are other document nodes, and they have no idea their
+   * parent's geometry was rebuilt. Dropping them would delete a subtree because someone
+   * turned a sphere into a cube.
+   */
+  private replaceObject(nodeId: string, node: Node): boolean {
+    const old = this.objects.get(nodeId)
+    if (!old) return false
+    const parent = old.parent
+    const next = this.createObject(node)
+    for (const child of [...old.children]) next.add(child)
+    parent?.add(next)
+    old.parent?.remove(old)
+    this.disposeObject(old)
+    this.objects.set(nodeId, next)
+    return true
+  }
+
   /** Adds one node without touching the rest of the tree. */
   addNode(node: Node): Object3D | null {
     if (this.objects.has(node.id)) return null
@@ -178,10 +250,23 @@ export class SceneGraph {
   removeNode(nodeId: string): boolean {
     const object = this.objects.get(nodeId)
     if (!object) return false
-    for (const id of this.subtreeIds(nodeId)) this.objects.delete(id)
+    for (const id of this.subtreeIds(nodeId)) {
+      this.objects.delete(id)
+      // Was missing: a placeholder id outlived its node, so `isPlaceholder(deletedId)`
+      // kept answering true. Nothing reads it today; the next thing to key a cache off
+      // node ids would have inherited a slow leak.
+      this.materialised.delete(id)
+    }
     object.parent?.remove(object)
-    disposeSubtree(object)
+    this.disposeObject(object)
     return true
+  }
+
+  /** Routes a detached subtree to whoever owns its resources. */
+  private disposeObject(root: Object3D): void {
+    this.primitives.dispose(root)
+    this.lights.dispose(root)
+    disposeSubtree(root)
   }
 
   private subtreeIds(nodeId: string): string[] {
@@ -198,7 +283,7 @@ export class SceneGraph {
   clear(): void {
     for (const child of [...this.root.children]) {
       this.root.remove(child)
-      disposeSubtree(child)
+      this.disposeObject(child)
     }
     this.objects.clear()
     this.materialised.clear()
@@ -239,10 +324,21 @@ function materialise(source: Object3D): Object3D {
   return new Group()
 }
 
-/** Frees GPU-side resources for a detached subtree. Materials belong to the registry. */
+/**
+ * Frees GPU-side resources for a detached subtree.
+ *
+ * Only geometry this graph OWNS — meshes a carrier factory built and flagged
+ * `w3OwnedGeometry`. An asset instance SHARES its BufferGeometry with the asset cache
+ * (see `materialise`), and disposing it here blanked every other instance of the same
+ * part until the next upload. `AssetLoader.disposeAsset` frees those, once, when the
+ * asset itself goes away.
+ *
+ * Materials are never touched here either — they belong to MaterialRegistry.
+ */
 export function disposeSubtree(root: Object3D): void {
   root.traverse((child) => {
     const mesh = child as Mesh
-    if (mesh.isMesh) mesh.geometry?.dispose()
+    if (!mesh.isMesh) return
+    if ((child.userData as CarrierUserData).w3OwnedGeometry === true) mesh.geometry?.dispose()
   })
 }

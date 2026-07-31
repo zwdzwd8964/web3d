@@ -1,7 +1,9 @@
+import type { SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
-import { Group, Mesh } from 'three'
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from 'three'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { SceneGraph } from '../../src/runtime/scene-graph.js'
+import type { LightFactory, PrimitiveFactory } from '../../src/runtime/carrier-types.js'
+import { SceneGraph, disposeSubtree } from '../../src/runtime/scene-graph.js'
 import { IDS } from '../helpers.js'
 import { createPumpAsset } from './fixtures.js'
 
@@ -204,5 +206,215 @@ describe('incremental mutations', () => {
     graph.clear()
     expect(graph.size).toBe(0)
     expect(graph.root.children).toHaveLength(0)
+  })
+})
+
+/* ========================================================================== */
+/* T-130 · carrier dispatch                                                   */
+/* ========================================================================== */
+
+/** A document with one node per carrier, plus a plain grouping node. */
+function carrierDoc(): SceneDocument {
+  const base = createGoldenPathDocument()
+  const node = (over: Partial<SceneDocument['nodes'][number]>): SceneDocument['nodes'][number] => ({
+    id: 'nd_00000000',
+    name: 'x',
+    parent: null,
+    order: 1000,
+    assetRef: null,
+    primitive: null,
+    light: null,
+    transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+    visible: true,
+    locked: false,
+    overrides: {},
+    ...over,
+  })
+  return {
+    ...base,
+    nodes: [
+      node({ id: 'nd_gr000000', name: '分组' }),
+      node({ id: 'nd_pr000000', name: '展台', order: 2000, primitive: { kind: 'box', size: [2, 0.2, 2] } }),
+      node({ id: 'nd_li000000', name: '聚光灯', order: 3000, light: { kind: 'ambient', color: '#ffffff', intensity: 0.6 } }),
+    ],
+  }
+}
+
+/** Records what the graph asked of it, so the dispatch itself can be asserted. */
+function spyFactories() {
+  const calls: string[] = []
+  let updateAnswer = true
+  const primitives: PrimitiveFactory = {
+    create: (spec) => {
+      calls.push(`primitive.create:${spec.kind}`)
+      const mesh = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial())
+      ;(mesh.userData as Record<string, unknown>).w3OwnedGeometry = true
+      return mesh
+    },
+    update: (_o, spec) => {
+      calls.push(`primitive.update:${spec.kind}`)
+      return updateAnswer
+    },
+    dispose: () => calls.push('primitive.dispose'),
+  }
+  const lights: LightFactory = {
+    create: (spec) => {
+      calls.push(`light.create:${spec.kind}`)
+      return new Group()
+    },
+    update: (_o, spec) => {
+      calls.push(`light.update:${spec.kind}`)
+      return updateAnswer
+    },
+    dispose: () => calls.push('light.dispose'),
+  }
+  return {
+    calls,
+    primitives,
+    lights,
+    setUpdateAnswer(value: boolean) {
+      updateAnswer = value
+    },
+  }
+}
+
+describe('carrier dispatch (T-130)', () => {
+  it('routes each node to the factory its carrier names, and nothing else', () => {
+    const spy = spyFactories()
+    const g = new SceneGraph({ assets: pump.source, primitives: spy.primitives, lights: spy.lights })
+    g.build(carrierDoc())
+
+    expect(spy.calls).toEqual(['primitive.create:box', 'light.create:ambient'])
+    expect(g.size).toBe(3)
+    // The grouping node still gets a plain Group, and the asset path is untouched.
+    expect(g.objectFor('nd_gr000000')).toBeInstanceOf(Group)
+  })
+
+  it('a carrier node is materialised, not a placeholder', () => {
+    // `isPlaceholder` means "an assetRef that did not resolve". A light reported as a
+    // placeholder would make SceneRuntime tell the user their asset has not loaded, about
+    // a node that has no asset at all.
+    const g = new SceneGraph({ assets: pump.source })
+    g.build(carrierDoc())
+    expect(g.isPlaceholder('nd_pr000000')).toBe(false)
+    expect(g.isPlaceholder('nd_li000000')).toBe(false)
+    expect(g.isPlaceholder('nd_gr000000')).toBe(false)
+  })
+
+  it('without factories a carrier node still exists, keeps its transform and is findable', () => {
+    // A host that installs no factories must not lose nodes: a vanished object looks
+    // exactly like a bug in the user's document.
+    const doc = carrierDoc()
+    doc.nodes[1]!.transform.p = [1, 2, 3]
+    const g = new SceneGraph({ assets: pump.source })
+    g.build(doc)
+    expect(g.objectFor('nd_pr000000')!.position.toArray()).toEqual([1, 2, 3])
+  })
+
+  it('setPrimitive updates in place when the factory can, and replaces when it cannot', () => {
+    const spy = spyFactories()
+    const g = new SceneGraph({ assets: pump.source, primitives: spy.primitives, lights: spy.lights })
+    const doc = carrierDoc()
+    g.build(doc)
+    const before = g.objectFor('nd_pr000000')
+
+    doc.nodes[1]!.primitive = { kind: 'box', size: [3, 3, 3] }
+    expect(g.setPrimitive('nd_pr000000', doc.nodes[1]!)).toBe(true)
+    expect(g.objectFor('nd_pr000000'), 'a resize must not swap the object').toBe(before)
+
+    spy.setUpdateAnswer(false)
+    doc.nodes[1]!.primitive = { kind: 'sphere', radius: 1 }
+    expect(g.setPrimitive('nd_pr000000', doc.nodes[1]!)).toBe(true)
+    expect(g.objectFor('nd_pr000000'), 'box to sphere is a different object').not.toBe(before)
+    expect(spy.calls).toContain('primitive.dispose')
+  })
+
+  it('a structural replacement keeps the children — they are other document nodes', () => {
+    const spy = spyFactories()
+    spy.setUpdateAnswer(false)
+    const g = new SceneGraph({ assets: pump.source, primitives: spy.primitives, lights: spy.lights })
+    const doc = carrierDoc()
+    doc.nodes.push({ ...doc.nodes[0]!, id: 'nd_ch000000', name: '子件', parent: 'nd_pr000000', order: 1000 })
+    g.build(doc)
+
+    doc.nodes[1]!.primitive = { kind: 'sphere', radius: 1 }
+    g.setPrimitive('nd_pr000000', doc.nodes[1]!)
+    expect(g.objectFor('nd_ch000000')!.parent).toBe(g.objectFor('nd_pr000000'))
+  })
+
+  it('setLight goes to the light factory, and a kind change replaces', () => {
+    const spy = spyFactories()
+    const g = new SceneGraph({ assets: pump.source, primitives: spy.primitives, lights: spy.lights })
+    const doc = carrierDoc()
+    g.build(doc)
+
+    doc.nodes[2]!.light = { kind: 'ambient', color: '#ff0000', intensity: 1 }
+    expect(g.setLight('nd_li000000', doc.nodes[2]!)).toBe(true)
+    expect(spy.calls).toContain('light.update:ambient')
+
+    spy.setUpdateAnswer(false)
+    doc.nodes[2]!.light = { kind: 'point', color: '#ffffff', intensity: 1, range: 0, decay: 2, shadow: { enabled: false, quality: 'medium', bias: -0.0005 } }
+    g.setLight('nd_li000000', doc.nodes[2]!)
+    expect(spy.calls).toContain('light.create:point')
+    expect(spy.calls).toContain('light.dispose')
+  })
+
+  it('setPrimitive / setLight report false for a node the graph does not have', () => {
+    const g = new SceneGraph({ assets: pump.source })
+    g.build(carrierDoc())
+    expect(g.setPrimitive('nd_99999999', carrierDoc().nodes[1]!)).toBe(false)
+    expect(g.setLight('nd_99999999', carrierDoc().nodes[2]!)).toBe(false)
+  })
+})
+
+describe('resource ownership on removal (T-130)', () => {
+  it('disposes the geometry a primitive factory made', () => {
+    const spy = spyFactories()
+    const g = new SceneGraph({ assets: pump.source, primitives: spy.primitives, lights: spy.lights })
+    g.build(carrierDoc())
+    const geometry = (g.objectFor('nd_pr000000') as Mesh).geometry
+    let disposed = false
+    geometry.addEventListener('dispose', () => (disposed = true))
+
+    g.removeNode('nd_pr000000')
+    expect(disposed).toBe(true)
+  })
+
+  it('does NOT dispose an asset instance’s geometry — the asset cache still owns it', () => {
+    // Every instance of a part shares one BufferGeometry (see `materialise`). Disposing it
+    // when one node is deleted blanks the others until the next upload, and the asset
+    // loader disposes it properly when the asset itself goes.
+    const g = new SceneGraph({ assets: pump.source })
+    g.build(createGoldenPathDocument())
+    let disposed = false
+    pump.bodyMesh.geometry.addEventListener('dispose', () => (disposed = true))
+
+    g.removeNode(IDS.body)
+    expect(disposed).toBe(false)
+  })
+
+  it('forgets a removed node’s placeholder flag', () => {
+    const g = new SceneGraph()
+    g.build(createGoldenPathDocument())
+    expect(g.isPlaceholder(IDS.body), 'no asset source, so it is a placeholder').toBe(true)
+    g.removeNode(IDS.body)
+    expect(g.isPlaceholder(IDS.body), 'the id outlived the node').toBe(false)
+  })
+
+  it('disposeSubtree leaves unowned geometry alone and frees owned geometry', () => {
+    const owned = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial())
+    ;(owned.userData as Record<string, unknown>).w3OwnedGeometry = true
+    const borrowed = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial())
+    const root = new Group()
+    root.add(owned, borrowed)
+
+    let ownedDisposed = false
+    let borrowedDisposed = false
+    owned.geometry.addEventListener('dispose', () => (ownedDisposed = true))
+    borrowed.geometry.addEventListener('dispose', () => (borrowedDisposed = true))
+
+    disposeSubtree(root)
+    expect(ownedDisposed).toBe(true)
+    expect(borrowedDisposed).toBe(false)
   })
 })
