@@ -6,19 +6,20 @@
 
 ## 项目是什么
 
-Web 3D 工具引擎的 MVP v0。一句话：**把"三维资产 + 交互逻辑"表达为一份可版本化的 JSON 文档，编辑器和播放器只是这份文档的两种视图。**
+Web 3D 工具引擎（当前版本 v0.5）。一句话：**把"三维资产 + 交互逻辑"表达为一份可版本化的 JSON 文档，编辑器和播放器只是这份文档的两种视图。**
 
-v0 的目标是把底座打穿，不是把功能做全。**看到一个"顺手也能做"的功能时，先查 [docs/MVP_V0_孵化规划.md](docs/MVP_V0_孵化规划.md) §1.2 的 Out of Scope 清单。**
+v0 已完成（底座打穿）。**当前活动版本是 v0.5「表现力与体验」**：对象库与放置 · 光照与环境 · 材质纹理 · 多媒体，经 [ADR-0015](docs/adr/0015-插入-v0.5-表现力与体验版本.md) 插入版本阶梯。目标仍是把能力"长在底座上"，不是把功能做全。**看到一个"顺手也能做"的功能时，先查 [docs/MVP_V0_5_进化规划.md](docs/MVP_V0_5_进化规划.md) §1.2 的 Out of Scope 清单**（v0 历史清单在 [docs/MVP_V0_孵化规划.md](docs/MVP_V0_孵化规划.md) §1.2）。
 
 ## 必读文档（按顺序）
 
 | 文档 | 什么时候读 |
 |---|---|
 | [docs/NORTH_STAR.md](docs/NORTH_STAR.md) | 开工前。九条宪法任何情况下不得违反 |
-| [docs/MVP_V0_孵化规划.md](docs/MVP_V0_孵化规划.md) | 开工前。范围、黄金路径、关键设计决策 D1–D10 |
-| [docs/SCHEMA_SPEC.md](docs/SCHEMA_SPEC.md) | 动 `@w3/schema` 或任何文档字段之前 |
+| [docs/MVP_V0_5_进化规划.md](docs/MVP_V0_5_进化规划.md) | 开工前。v0.5 范围、黄金路径 II、设计决策 D11–D20、规范增量 §4（已冻结） |
+| [docs/MVP_V0_孵化规划.md](docs/MVP_V0_孵化规划.md) | 参考。v0 范围、黄金路径 I、设计决策 D1–D10 |
+| [docs/SCHEMA_SPEC.md](docs/SCHEMA_SPEC.md) | 动 `@w3/schema` 或任何文档字段之前（v0.5 增量以进化规划 §4 为准，T-120 回写） |
 | [docs/ECA_SPEC.md](docs/ECA_SPEC.md) | 动 `packages/core/src/eca/` 之前 |
-| [docs/TASK_BACKLOG.md](docs/TASK_BACKLOG.md) | 每次领新任务时 |
+| [docs/TASK_BACKLOG_V0_5.md](docs/TASK_BACKLOG_V0_5.md) | 每次领新任务时（v0 历史台账：[docs/TASK_BACKLOG.md](docs/TASK_BACKLOG.md)，只读） |
 
 **两份 SPEC 是逐字实现的规范，不是参考建议。** 需要偏离时写 ADR 并停下来问人，不要自行调整字段名或结构。
 
@@ -124,7 +125,7 @@ preview(d => { ... })                                                  // 不落
 - [ ] 涉及 ECA 动作的，单测已加（否则覆盖率门槛会 fail）
 - [ ] 涉及 schema 变更的，三件套齐（铁律 4）
 - [ ] 有 ADR 需求的，ADR 已写
-- [ ] 在 [docs/TASK_BACKLOG.md](docs/TASK_BACKLOG.md) 里把该卡标为 `[x]` 并回填实际耗时
+- [ ] 在当前版本任务台账（[docs/TASK_BACKLOG_V0_5.md](docs/TASK_BACKLOG_V0_5.md)）里把该卡标为 `[x]` 并回填实际耗时
 
 ---
 
