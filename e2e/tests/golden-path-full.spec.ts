@@ -37,18 +37,44 @@ const tab = (page: Page, name: string) => page.getByRole('button', { name, exact
  * "点击阀盖" mean 点击阀盖.
  */
 async function clickNode(page: Page, name: string): Promise<void> {
-  const point = await page.evaluate((nodeName) => {
-    const rows = [...document.querySelectorAll('.tree-row')]
-    const row = rows.find((r) => r.querySelector('.tree-row__name')?.textContent === nodeName)
-    const id = row?.getAttribute('data-node-id')
+  const point = await page.evaluate((nodeId) => {
     const locate = (globalThis as Record<string, unknown>)['__w3DevLocate'] as
-      | ((nodeId: string) => { x: number; y: number } | null)
+      | ((id: string) => { x: number; y: number } | null)
       | undefined
-    return id && locate ? locate(id) : null
-  }, name)
+    return locate ? locate(nodeId) : null
+  }, await nodeIdOf(page, name))
 
   if (!point) throw new Error(`找不到「${name}」在屏幕上的位置——它可能不在视野内`)
   await page.locator('canvas.viewport__canvas').click({ position: point })
+}
+
+/** The document id behind a hierarchy-tree row. Names are for humans; ids are the key (C9). */
+async function nodeIdOf(page: Page, name: string): Promise<string> {
+  const id = await page.evaluate((nodeName) => {
+    const rows = [...document.querySelectorAll('.tree-row')]
+    const row = rows.find((r) => r.querySelector('.tree-row__name')?.textContent === nodeName)
+    return row?.getAttribute('data-node-id') ?? null
+  }, name)
+  if (!id) throw new Error(`层级树里找不到「${name}」`)
+  return id
+}
+
+/**
+ * What the RENDERER is drawing this node with, via the DEV-only hook in runtime-registry.ts.
+ *
+ * Reading the material panel back proves the document changed. This proves the change
+ * reached the three material the frame is actually drawn from — the other half, and the
+ * half that D1's incremental patch path exists to deliver.
+ */
+async function renderedMaterial(page: Page, nodeId: string): Promise<{ roughness: number | null }> {
+  const probe = await page.evaluate((id) => {
+    const read = (globalThis as Record<string, unknown>)['__w3DevMaterialOf'] as
+      | ((nodeId: string) => { roughness: number | null } | null)
+      | undefined
+    return read ? read(id) : null
+  }, nodeId)
+  if (!probe) throw new Error(`渲染器里读不到节点 ${nodeId} 的材质`)
+  return probe
 }
 
 /** Distinct colour buckets on the canvas. Three means "background and grid only". */
@@ -129,14 +155,49 @@ test('黄金路径 12 步', async ({ page, context }) => {
   await page.keyboard.press('Control+y')
   await expect(statusNumber(page, '历史')).toHaveText(String(historyBefore + 1))
 
-  /* ── 6 · 改材质 roughness，共享材质的兄弟不变 ─────────────────────── */
+  /* ── 6 · 改材质 roughness，文档侧与渲染侧同时生效 ─────────────────── */
+  //
+  // The previous version of this step never touched roughness. It located
+  // `.panel--bottom .field__input` `.first()`, which is the material DROPDOWN — the panel
+  // renders the material `<select>` before any numeric field — asserted it was visible,
+  // and moved on. Roughness could have been wired to nothing at all and this step stayed
+  // green. It is now: locate the field by its label, write a value, and check both halves
+  // of the claim — the document (the panel reads back from it, and undo walks it) and the
+  // renderer (the live three material the frame is drawn from).
+  const capId = await nodeIdOf(page, '阀盖')
   await tab(page, '材质').click()
   await page.getByRole('button', { name: '新建并指定' }).click()
   await page.waitForTimeout(SETTLE)
-  const roughness = page.locator('.panel--bottom .field__input, .panel--bottom input[type=range]').first()
-  await expect(roughness).toBeVisible()
+
   const historyAfterMaterial = Number(await statusNumber(page, '历史').innerText())
-  expect(historyAfterMaterial).toBeGreaterThan(historyBefore + 1)
+  expect(historyAfterMaterial, '「新建并指定」是一条撤销').toBe(historyBefore + 2)
+
+  const roughness = page.locator('.panel--bottom label.field', { hasText: '粗糙度' }).locator('input.field__input')
+  await expect(roughness).toBeVisible()
+
+  await roughness.fill('0.05')
+  await roughness.press('Enter')
+  await page.waitForTimeout(SETTLE)
+  await expect(roughness, '面板从文档回读，写进去的值必须留在文档里').toHaveValue('0.05')
+  expect(Number(await statusNumber(page, '历史').innerText()), '改粗糙度落一条撤销').toBe(historyAfterMaterial + 1)
+  expect((await renderedMaterial(page, capId)).roughness, '渲染器手里的材质没跟上文档').toBeCloseTo(0.05, 6)
+
+  // A second value, outside the 500 ms merge window, so this is two undo entries and not
+  // one: a patch path that only ever applied the first write would pass the check above.
+  await page.waitForTimeout(600)
+  await roughness.fill('0.92')
+  await roughness.press('Enter')
+  await page.waitForTimeout(SETTLE)
+  await expect(roughness).toHaveValue('0.92')
+  expect(Number(await statusNumber(page, '历史').innerText())).toBe(historyAfterMaterial + 2)
+  expect((await renderedMaterial(page, capId)).roughness).toBeCloseTo(0.92, 6)
+
+  // And undo has to reach the renderer too, not just the document.
+  await page.keyboard.press('Control+z')
+  await expect(statusNumber(page, '历史')).toHaveText(String(historyAfterMaterial + 1))
+  await expect(roughness).toHaveValue('0.05')
+  expect((await renderedMaterial(page, capId)).roughness, '撤销只回滚了文档，没回滚渲染').toBeCloseTo(0.05, 6)
+
   // R08's guarantee is unit-tested against a genuinely shared material; here we only
   // assert the edit landed and did not force a rebuild.
   await expect(statusNumber(page, '全量重建')).toHaveText('0')
@@ -149,20 +210,51 @@ test('黄金路径 12 步', async ({ page, context }) => {
   expect(await page.locator('.panel--bottom li').count()).toBe(viewpointsBefore + 1)
 
   /* ── 8 · 新建补间动画 ─────────────────────────────────────────────── */
+  //
+  // Counted before and after rather than `.first()`: the sample document ships with an
+  // imported clip, so "the first row exists" was true before the button was ever clicked.
+  const animRows = page.locator('.panel--bottom .anim-row')
   await tab(page, '动画').click()
+  const animsBefore = await animRows.count()
+  const historyBeforeAnim = Number(await statusNumber(page, '历史').innerText())
   await page.getByRole('button', { name: '用选中对象新建补间' }).click()
   await page.waitForTimeout(SETTLE)
-  await expect(page.locator('.panel--bottom li').first()).toBeVisible()
+  await expect(animRows, '「用选中对象新建补间」没有新增动画').toHaveCount(animsBefore + 1)
+  expect(Number(await statusNumber(page, '历史').innerText()), '新建补间是一条撤销').toBe(historyBeforeAnim + 1)
+
+  // It is a tween aimed at the selection, not just any row: the duration field and the
+  // target count only exist on `kind: 'tween'` (§6.2).
+  const newAnim = animRows.last()
+  await expect(newAnim.locator('label.field', { hasText: '时长(秒)' }).locator('input')).toHaveValue('1.2')
+  await expect(newAnim.locator('span.num')).toHaveText('1 个目标')
 
   /* ── 9 · 加热点，开启遮挡 ─────────────────────────────────────────── */
+  //
+  // Same trap as step 8, and the sample document really does ship with a hotspot: the
+  // old `.first()` asserted against that pre-existing one, so "在选中对象上新建" could
+  // have been a no-op button and the step still passed. New hotspots are appended
+  // (`draft.hotspots.push`), so the new one is `.last()` — and it is verified to be the
+  // new one by the count and by its anchor being the node that was selected.
+  const hotspots = page.locator('.hotspot-list > li')
   await tab(page, '热点').click()
+  const hotspotsBefore = await hotspots.count()
   await page.getByRole('button', { name: '在选中对象上新建' }).click()
   await page.waitForTimeout(SETTLE)
-  const hotspot = page.locator('.hotspot-list > li').first()
-  await expect(hotspot).toBeVisible()
+  await expect(hotspots, '「在选中对象上新建」没有新增热点').toHaveCount(hotspotsBefore + 1)
+
+  const hotspot = hotspots.last()
+  await expect(hotspot.locator('.hotspot-list__head input.field'), '新热点应以锚点对象命名').toHaveValue('阀盖 说明')
+  await expect(hotspot.locator('.hotspot-list__head .tbtn').first(), '新热点没锚在选中的对象上').toHaveText('阀盖')
+
   await hotspot.locator('textarea').fill('拆卸第一步：松开六颗固定螺栓')
-  // D7's occlusion flag is on by default; assert rather than assume.
-  await expect(hotspot.locator('input[type=checkbox]').last()).toBeChecked()
+  await page.waitForTimeout(SETTLE)
+  await expect(hotspot.locator('textarea'), '正文没有落进文档').toHaveValue('拆卸第一步：松开六颗固定螺栓')
+  // D7's occlusion flag is on by default; assert rather than assume. Located by its own
+  // row — `.last()` over every checkbox in the item is one added field away from being
+  // a different control.
+  await expect(
+    hotspot.locator('.fields__row', { hasText: '遮挡判定' }).locator('input[type=checkbox]'),
+  ).toBeChecked()
 
   /* ── 10 · 新建变量 step，新建规则 ─────────────────────────────────── */
   await tab(page, '变量').click()

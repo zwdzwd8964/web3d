@@ -29,15 +29,29 @@ const halfFov = (fov: number) => ((fov * Math.PI) / 180) / 2
  * clipped. Returned as a ratio rather than a boolean so the tangent case can be asserted
  * for what it is — at padding 1.0 the fit is exact, and a strict `<` there would be
  * testing which side of the last floating-point bit the multiply happened to land on.
+ *
+ * Both halves of the view are read, distance AND aim. An earlier version measured only
+ * `view.position` against the sphere, which meant `view.target` was never read by any
+ * assertion in this file: a camera standing at the right distance and looking at the
+ * world origin — the exact bug the "looks at the object" test below names — framed empty
+ * space and every fit assertion here still passed.
  */
 function frameFill(object: Object3D, fov = 35, padding?: number): number {
   const view = computeThumbnailView(object, padding === undefined ? { fov } : { fov, padding })
   const sphere = new Box3().setFromObject(object).getBoundingSphere(new Sphere())
   const position = new Vector3(...view.position)
-  const distance = position.distanceTo(sphere.center)
+  const toCentre = sphere.center.clone().sub(position)
+  const distance = toCentre.length()
 
-  // The sphere fits when the angle it subtends is within the vertical half-FOV. Square
-  // aspect, so vertical is the binding constraint.
+  // Where the camera is pointed. `renderThumbnail` feeds this straight to `camera.lookAt`,
+  // so it is the optical axis, and anything off that axis eats into the half-FOV budget.
+  const forward = new Vector3(...view.target).sub(position)
+  if (forward.lengthSq() === 0 || distance === 0) return Number.POSITIVE_INFINITY
+  const offAxis = forward.angleTo(toCentre)
+
+  // The sphere fits when the angle it subtends, offset by how far off-axis its centre
+  // sits, is within the vertical half-FOV. Square aspect, so vertical is the binding
+  // constraint.
   const subtended = Math.asin(Math.min(1, sphere.radius / distance))
 
   // Depth is a hard requirement at every padding: a near plane inside the model slices it
@@ -45,7 +59,7 @@ function frameFill(object: Object3D, fov = 35, padding?: number): number {
   if (view.near > distance - sphere.radius) return Number.POSITIVE_INFINITY
   if (view.far < distance + sphere.radius) return Number.POSITIVE_INFINITY
 
-  return subtended / halfFov(fov)
+  return (offAxis + subtended) / halfFov(fov)
 }
 
 const fitsInFrame = (object: Object3D, fov = 35, padding?: number) => frameFill(object, fov, padding) <= 1 + 1e-9
@@ -55,10 +69,16 @@ describe('computeThumbnailView', () => {
     expect(fitsInFrame(boxAt(0, 0, 0, 1))).toBe(true)
   })
 
-  it('fits an object that is nowhere near the origin', () => {
+  it.each([
+    [120, -40, 300],
+    [0, 85, -60],
+    [-15, -220, 4],
+  ])('fits an object at (%s, %s, %s), nowhere near the origin', (x, y, z) => {
     // Exporters put origins in surprising places; a view that assumed the model was
-    // centred would frame empty space.
-    expect(fitsInFrame(boxAt(120, -40, 300, 2))).toBe(true)
+    // centred would frame empty space. Every sample has a non-zero y AND z offset: with
+    // an all-zero sample, a view that only ever got the x component right — or that
+    // aimed at the origin outright — would read as correctly framed.
+    expect(fitsInFrame(boxAt(x, y, z, 2))).toBe(true)
   })
 
   it.each([0.01, 0.1, 1, 25, 1000])('fits a %s-unit object', (size) => {
@@ -86,8 +106,23 @@ describe('computeThumbnailView', () => {
   })
 
   it('looks at the object, not at the world origin', () => {
-    const view = computeThumbnailView(boxAt(50, 0, 0, 2))
+    // Off-origin on all three axes on purpose. The previous sample sat at (50, 0, 0),
+    // where a target of [x, 0, 0] — or of [50, 0, 0] hard-coded from the box's own
+    // position while y and z were dropped — is indistinguishable from a correct one.
+    const view = computeThumbnailView(boxAt(50, -12, 7, 2))
     expect(view.target[0]).toBeCloseTo(50, 3)
+    expect(view.target[1]).toBeCloseTo(-12, 3)
+    expect(view.target[2]).toBeCloseTo(7, 3)
+  })
+
+  it('aims the camera at the model even when the model is far off-axis', () => {
+    // The pairing that makes the fit assertions load-bearing: the optical axis has to
+    // run through the model, not merely past it at the right distance.
+    const view = computeThumbnailView(boxAt(-300, 90, 40, 6))
+    const position = new Vector3(...view.position)
+    const target = new Vector3(...view.target)
+    const centre = new Vector3(-300, 90, 40)
+    expect(target.clone().sub(position).angleTo(centre.clone().sub(position))).toBeCloseTo(0, 9)
   })
 
   it('produces a usable view for an empty object rather than NaN', () => {

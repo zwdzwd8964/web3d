@@ -39,4 +39,52 @@ export function fullRebuildCount(): number {
 if (import.meta.env.DEV) {
   ;(globalThis as Record<string, unknown>)['__w3DevLocate'] = (nodeId: string) =>
     active?.projectToScreen(nodeId) ?? null
+
+  /**
+   * DEV-only read-back of the material the RENDERER is holding for a node.
+   *
+   * The golden-path E2E has to be able to tell "the document says roughness 0.05" from
+   * "the thing on screen is drawn with roughness 0.05" — those are two different claims,
+   * and the whole point of D1's patch path is that the second follows from the first.
+   * Reading the panel back only ever proves the first. Pixels could prove the second, but
+   * a roughness change on a flat quad can move a specular lobe by less than one 8-bit
+   * step, so a pixel assertion there would be a coin flip dressed up as a test.
+   *
+   * Duck-typed rather than imported from three: the editor owns no 3D behaviour (C3) and
+   * has no `import 'three'` anywhere, and one test hook is not a reason to start.
+   * Read-only, like `__w3DevLocate` — it exposes no way to change anything.
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevMaterialOf'] = (nodeId: string): MaterialProbe | null => {
+    const object = active?.graph.objectFor(nodeId)
+    if (!object) return null
+    const found: MaterialProbe[] = []
+    object.traverse((child) => {
+      if (found.length > 0) return
+      const mesh = child as unknown as { isMesh?: boolean; material?: unknown }
+      if (mesh.isMesh !== true) return
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+      if (material === null || typeof material !== 'object') return
+      const read = material as {
+        roughness?: unknown
+        metalness?: unknown
+        opacity?: unknown
+        color?: { getHexString?: () => string }
+      }
+      found.push({
+        roughness: typeof read.roughness === 'number' ? read.roughness : null,
+        metalness: typeof read.metalness === 'number' ? read.metalness : null,
+        opacity: typeof read.opacity === 'number' ? read.opacity : null,
+        color: typeof read.color?.getHexString === 'function' ? `#${read.color.getHexString()}` : null,
+      })
+    })
+    return found[0] ?? null
+  }
+}
+
+/** What `__w3DevMaterialOf` reports: the live three material's numbers, or null per field. */
+interface MaterialProbe {
+  readonly roughness: number | null
+  readonly metalness: number | null
+  readonly opacity: number | null
+  readonly color: string | null
 }
