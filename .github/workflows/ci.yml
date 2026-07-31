@@ -5,10 +5,18 @@
 # it plainly —「T-105 的『超标 CI fail』没有落点：仓库里没有任何 CI 配置」. A budget that
 # nothing enforces is a comment.
 #
-# Step order deviates from the task card on one point, deliberately: the card lists
-# constitution first, but `check:constitution --require-build` scans `dist/` and FAILS when
-# a package is not built (that strictness was itself a v0 fix — "not built" used to read as
-# "passed"). So build runs before it. Every other step is in the card's order.
+# Step order deviates from the task card, deliberately, for two reasons that only show up
+# on a machine that has never built this repo before:
+#
+#   1. Every workspace package resolves its siblings through `types: ./dist/index.d.ts`
+#      (ADR-0003 — declarations come from tsc, not tsup). On a fresh clone `dist/` does not
+#      exist, so `pnpm -r typecheck` fails with "Cannot find module '@w3/schema'" before it
+#      has type-checked a single line. It passes locally only because the developer's
+#      `dist/` is left over from the last build. The first CI run found exactly this.
+#   2. `check:constitution --require-build` scans `dist/` and FAILS when a package is not
+#      built — that strictness was itself a v0 fix ("not built" used to read as "passed").
+#
+# So `build` runs first and everything else keeps the card's order behind it.
 #
 # Not here, on purpose: the offline build (C6). A real 断网 build needs a pre-seeded store
 # and a network-denied runner; approximating it with a warm pnpm cache would prove almost
@@ -56,6 +64,12 @@ jobs:
       - name: install
         run: pnpm install --frozen-lockfile
 
+      # First, not last: see the note at the top of this file. `pnpm -r` walks the
+      # workspace in dependency order, so schema's declarations exist before core is
+      # type-checked against them.
+      - name: build
+        run: pnpm build
+
       - name: typecheck
         run: pnpm -r typecheck
 
@@ -64,9 +78,6 @@ jobs:
 
       - name: unit tests
         run: pnpm -r test
-
-      - name: build
-        run: pnpm build
 
       - name: constitution (C2 / C5 / C6 / C7 + 依赖方向)
         run: pnpm check:constitution

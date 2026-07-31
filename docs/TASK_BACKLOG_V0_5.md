@@ -66,11 +66,12 @@
 - **做** GitHub Actions：constitution → typecheck → lint → 全部单测 → build → size-limit；Playwright E2E 单列 job（可 nightly）。pnpm 缓存。补上 IMPL_NOTES §4 点名的「T-105 超标 CI fail 没有落点」。
 - **验收** 分支上推送一次全绿；临时把 size 预算调小验证 CI 会红（验证后还原）
 - **自测** 推送后观察 CI 结果
-- **实际情况**：步骤顺序较卡片有一处调整——`check:constitution --require-build` 会扫
-  `dist/`，未构建即 fail，所以 build 排在它前面（顺序理由写在 yml 顶部注释里）；
-  另加 `pnpm test:parity`（属于 `pnpm verify`，卡片未列但漏了就是没有 C3 守卫）。
-  体积闸门的「会红」已**本地**验证：预算临时改 100 KB → `pnpm size` 打印 FAIL 并
-  exit 1（已还原）。**推送验证待人工授权**，见 [IMPL_NOTES](IMPL_NOTES.md) §2。
+- **实际情况**：步骤顺序较卡片有调整——`build` 提到最前，两个理由都只在干净机器上才
+  显形：① 各包经 `types: ./dist/*.d.ts` 认识兄弟包，没构建时 `pnpm -r typecheck` 一行
+  都查不到就挂（**CI 首跑就是被这条抓红的**，见 [IMPL_NOTES](IMPL_NOTES.md) §4）；
+  ② `check:constitution --require-build` 未构建即 fail。另加 `pnpm test:parity`
+  （属于 `pnpm verify`，卡片未列但漏了就是 CI 里没有 C3 守卫）。
+  体积闸门「会红」已本地验证：预算临时改 100 KB → `pnpm size` 打印 FAIL 并 exit 1（已还原）。
 
 ---
 
