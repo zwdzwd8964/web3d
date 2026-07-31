@@ -99,6 +99,57 @@ export function getUnreachableNodes(doc: SceneDocument): Node[] {
 }
 
 /* -------------------------------------------------------------------------- */
+/* v2 carriers — SCHEMA_SPEC §4.1-6                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Which carrier a node holds. `null` = a pure grouping node. */
+export type NodeCarrier = 'assetRef' | 'primitive' | 'light' | null
+
+/**
+ * The node's carrier, as one value to switch on.
+ *
+ * Everything that turns a document node into something renderable needs this answer, and
+ * writing the three null-checks at each of those sites is how they drift apart. Core's
+ * scene graph dispatches on it; so does the hierarchy tree's icon.
+ *
+ * On a document that sets two carriers — which integrity check I11 reports as an error —
+ * this returns the first in `assetRef, primitive, light` order rather than throwing.
+ * `checkIntegrity` is where an invalid document gets reported; a selector that threw would
+ * take the editor down before the user could be shown what is wrong with their file.
+ */
+export function getCarrier(node: Node): NodeCarrier {
+  if (node.assetRef !== null) return 'assetRef'
+  if (node.primitive !== null) return 'primitive'
+  if (node.light !== null) return 'light'
+  return null
+}
+
+/** Every light node, in document order. The scene's lighting, as the document states it. */
+export function getLightNodes(doc: SceneDocument): Node[] {
+  return doc.nodes.filter((n) => n.light !== null)
+}
+
+/** Every primitive node, in document order. */
+export function getPrimitiveNodes(doc: SceneDocument): Node[] {
+  return doc.nodes.filter((n) => n.primitive !== null)
+}
+
+/**
+ * Whether core should install its built-in three-light rig (D14).
+ *
+ * True only when the document expresses no lighting of its own — no light node AND no
+ * environment map. The rig is a display default of the same kind as the default background
+ * colour: it is not in the document, and the moment the document says anything about
+ * lighting, it stands down.
+ *
+ * Lives here rather than in core so that the editor (which greys out "add default lights"
+ * hints) and the runtime (which installs them) cannot disagree about the condition.
+ */
+export function needsDefaultLightRig(doc: SceneDocument): boolean {
+  return getLightNodes(doc).length === 0 && doc.meta.environment.hdriAssetId === null
+}
+
+/* -------------------------------------------------------------------------- */
 /* order helpers — SCHEMA_SPEC §4.1-4                                         */
 /* -------------------------------------------------------------------------- */
 

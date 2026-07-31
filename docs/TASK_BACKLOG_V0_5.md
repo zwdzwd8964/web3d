@@ -111,12 +111,18 @@
   `texture`（材质采样）与 `image`（媒体展示）分开，两条规则并存会让人说不清哪条才算数，
   所以把类型判断整体挪进 I13。8 次变异检验逐条转红。
 
-### [ ] T-122 · 工厂、选择器与索引增量
-- **依赖** T-120 · **预估** 0.5d · **实际** ___
+### [x] T-122 · 工厂、选择器与索引增量
+- **依赖** T-120 · **预估** 0.5d · **实际** 0.5h
 - **独占** `packages/schema/src/factory.ts`, `packages/schema/src/selectors.ts`, `packages/schema/src/index-builder.ts`, 对应 `test/*.test.ts`
 - **做** `createPrimitiveNode` / `createLightNode` / `createMediaRecord`；`ensureDefaultMaterial(doc)`（无则创建名为「默认材质」的共享记录并返回 id，D15）；`DocIndex` 增 `mediaById`；`refsTo` 覆盖 `hotspot.content.mediaId` 与 `media.assetId`；selectors 增灯/原始体节点查询。
 - **验收** 工厂产物直接过 `validate`；`refsTo` 能回答"删除 med_x 会影响哪些热点/规则"
 - **自测** `pnpm -F @w3/schema test`
+- **实际情况**：`refsTo` 对 `hotspot.content.mediaId` 与 `media.assetId` 在 v0 就已覆盖，
+  本卡补的是**没人点名但会静默出事的第三条**——`meta.environment.hdriAssetId`：它不挂在任何
+  节点上，删掉那张 .hdr 时删除确认框会说"无人引用"，然后场景照明整个消失。
+  另加两个选择器给 core 用：`getCarrier`（三种承载体归一成一个可 switch 的值，T-130 的
+  分发点）与 `needsDefaultLightRig`（D14 的判据放 schema，编辑器与运行时不可能对它有分歧）。
+  8 次变异检验逐条转红。
 
 ---
 

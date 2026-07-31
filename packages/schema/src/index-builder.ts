@@ -3,6 +3,7 @@ import type { Asset } from './asset.js'
 import type { SceneDocument } from './document.js'
 import type { Hotspot } from './hotspot.js'
 import type { Material } from './material.js'
+import type { Media } from './media.js'
 import type { Node } from './node.js'
 import type { Action, Condition, EventType, Rule, ValueExpr } from './rule.js'
 import { getChildren } from './selectors.js'
@@ -68,6 +69,8 @@ export interface DocIndex {
   readonly hotspotById: Map<string, Hotspot>
   readonly viewpointById: Map<string, Viewpoint>
   readonly variableById: Map<string, Variable>
+  /** v2 · media got a runtime in v0.5, so it gets an index like every other collection. */
+  readonly mediaById: Map<string, Media>
   /** ECA dispatch entry point. Never iterate all rules per event (ECA_SPEC §2.3). */
   readonly rulesByEvent: Map<EventType, Rule[]>
   /** Reverse references: which entities point at this id. */
@@ -130,6 +133,7 @@ export function buildIndex(doc: SceneDocument, options: BuildIndexOptions = {}):
   const hotspotById = new Map(doc.hotspots.map((h) => [h.id, h]))
   const viewpointById = new Map(doc.viewpoints.map((v) => [v.id, v]))
   const variableById = new Map(doc.variables.map((v) => [v.id, v]))
+  const mediaById = new Map(doc.media.map((m) => [m.id, m]))
 
   const childrenOf = new Map<string | null, Node[]>()
   childrenOf.set(null, getChildren(doc, null))
@@ -143,6 +147,17 @@ export function buildIndex(doc: SceneDocument, options: BuildIndexOptions = {}):
   }
 
   const refsTo = new Map<string, Ref[]>()
+
+  // v2 · the environment map is referenced by the document itself, not by any node. It
+  // still has to appear here: without it, deleting the .hdr asset takes the scene's
+  // lighting with it and the delete dialog says "nothing references this".
+  if (doc.meta.environment.hdriAssetId != null) {
+    pushRef(refsTo, doc.meta.environment.hdriAssetId, {
+      from: { kind: 'document', id: doc.projectId },
+      path: 'meta.environment.hdriAssetId',
+      targetKind: 'asset',
+    })
+  }
 
   doc.nodes.forEach((node, i) => {
     const from: RefTarget = { kind: 'node', id: node.id }
@@ -244,6 +259,7 @@ export function buildIndex(doc: SceneDocument, options: BuildIndexOptions = {}):
     hotspotById,
     viewpointById,
     variableById,
+    mediaById,
     rulesByEvent,
     refsTo,
     actionRefsResolved: options.actionRefs !== undefined,
@@ -270,6 +286,7 @@ export function describeReferences(index: DocIndex, id: string): string {
     material: '个材质',
     media: '个多媒体',
     flow: '个流程',
+    document: '处场景设置',
   }
   const counts = new Map<string, Set<string>>()
   for (const ref of refs) {

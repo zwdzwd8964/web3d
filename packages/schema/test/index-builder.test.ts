@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { ActionRefResolver } from '../src/index-builder.js'
 import { buildIndex, describeReferences, referencesTo } from '../src/index-builder.js'
 import { GOLDEN_PATH_IDS, createGoldenPathDocument } from '../src/samples.js'
+import type { SceneDocument } from '../src/document.js'
+import goldenPathTwo from './fixtures/v2/golden-path-2.json' with { type: 'json' }
 
 /** T-015 · SCHEMA_SPEC §8. */
 
@@ -124,5 +126,68 @@ describe('refsTo — the reverse index behind "what breaks if I delete this?"', 
     const index = buildIndex(withExtras)
     expect(referencesTo(index, GOLDEN_PATH_IDS.asset).map((r) => r.path)).toContain('media[0].assetId')
     expect(referencesTo(index, 'step').map((r) => r.path)).toContain('flows[0].variableId')
+  })
+})
+
+/* ========================================================================== */
+/* T-122 · v2 index increments                                                */
+/* ========================================================================== */
+
+describe('the v2 index', () => {
+  const v2 = () => structuredClone(goldenPathTwo) as unknown as SceneDocument
+
+  it('indexes media by id like every other collection', () => {
+    const index = buildIndex(v2())
+    const doc = v2()
+    for (const media of doc.media) {
+      expect(index.mediaById.get(media.id)?.name).toBe(media.name)
+    }
+    expect(index.mediaById.size).toBe(doc.media.length)
+    expect(index.mediaById.get('med_99999999')).toBeUndefined()
+  })
+
+  it('answers "what breaks if I delete this media" — the hotspot that shows it', () => {
+    const doc = v2()
+    const image = doc.media.find((m) => m.type === 'image')!
+    const index = buildIndex(doc)
+    expect(referencesTo(index, image.id).map((r) => r.path)).toContain('hotspots[0].content.mediaId')
+    expect(describeReferences(index, image.id)).toContain('个热点')
+  })
+
+  it('answers it for the rule that plays it, once the resolver can see into params', () => {
+    const doc = v2()
+    const audio = doc.media.find((m) => m.type === 'audio')!
+    const mediaAware: ActionRefResolver = (action) => {
+      const id = (action.params as Record<string, unknown>).mediaId
+      return typeof id === 'string' ? [{ kind: 'media', id }] : []
+    }
+    expect(describeReferences(buildIndex(doc, { actionRefs: mediaAware }), audio.id)).toContain('条规则')
+    // …and without a resolver it honestly reports nothing rather than guessing.
+    expect(describeReferences(buildIndex(doc), audio.id)).toBe('')
+  })
+
+  it('indexes the environment map, so deleting the .hdr is not a silent scene change', () => {
+    // Nothing in `nodes` points at it — the reference is on the document itself, which is
+    // exactly why it would have been missed.
+    const doc = v2()
+    const index = buildIndex(doc)
+    const refs = referencesTo(index, doc.meta.environment.hdriAssetId!)
+    expect(refs.map((r) => r.path)).toContain('meta.environment.hdriAssetId')
+    expect(describeReferences(index, doc.meta.environment.hdriAssetId!)).toContain('场景设置')
+  })
+
+  it('says nothing about the environment map when there is none', () => {
+    const doc = v2()
+    const hdriId = doc.meta.environment.hdriAssetId!
+    doc.meta.environment.hdriAssetId = null
+    expect(referencesTo(buildIndex(doc), hdriId)).toHaveLength(0)
+  })
+
+  it('indexes the texture a material samples, so the same question works for 贴图', () => {
+    const doc = v2()
+    const textureId = doc.materials[0]!.params.maps.map!
+    const index = buildIndex(doc)
+    expect(referencesTo(index, textureId).map((r) => r.path)).toContain('materials[0].params.maps.map')
+    expect(describeReferences(index, textureId)).toContain('个材质')
   })
 })

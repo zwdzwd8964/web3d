@@ -6,6 +6,7 @@ import type { IdFactory } from './id.js'
 import { defaultIdFactory } from './id.js'
 import type { Light } from './light.js'
 import type { Material, MaterialParams } from './material.js'
+import type { Media, MediaType } from './media.js'
 import type { AssetRef, Node, NodeOverrides } from './node.js'
 import type { Primitive } from './primitive.js'
 import type { Easing, Transform, Vec3 } from './primitives.js'
@@ -111,6 +112,96 @@ export function appendNode(doc: SceneDocument, options: CreateNodeOptions): Node
     order: options.order ?? getAppendOrder(doc, options.parent ?? null),
     ctx: { newId: (kind) => ctx.newId(kind, collectAllIds(doc)), now: ctx.now },
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/* v2 carriers — SCHEMA_SPEC §4.3 / §4.4                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A primitive node, appended to `doc`.
+ *
+ * Takes the whole `Primitive` rather than a kind plus loose numbers: the shape is a
+ * discriminated union, and building it here from `kind` + optional dimensions would mean
+ * re-deriving each variant's defaults in a second place. Callers pass `{ kind: 'box' }`
+ * and zod's defaults fill the rest at validation, or pass explicit dimensions.
+ *
+ * Note what this does NOT do: attach a material. D15 requires the editor to point the
+ * node at a real document material (`ensureDefaultMaterial`), and doing it here would
+ * make a pure factory reach into two collections at once.
+ */
+export function createPrimitiveNode(
+  doc: SceneDocument,
+  options: Omit<CreateNodeOptions, 'assetRef' | 'primitive' | 'light'> & { primitive: Primitive },
+): Node {
+  return appendNode(doc, { ...options, assetRef: null, primitive: options.primitive, light: null })
+}
+
+/**
+ * A light node, appended to `doc`.
+ *
+ * D12 · a light is a node, so it arrives through the same factory as everything else and
+ * inherits the tree, the transform, undo and patching for free.
+ */
+export function createLightNode(
+  doc: SceneDocument,
+  options: Omit<CreateNodeOptions, 'assetRef' | 'primitive' | 'light'> & { light: Light },
+): Node {
+  return appendNode(doc, { ...options, assetRef: null, primitive: null, light: options.light })
+}
+
+/**
+ * A media record for an already-imported asset.
+ *
+ * `durationS` is omitted rather than defaulted when unknown: absent means "the browser
+ * would not tell us", and `playMedia` resolves immediately and warns instead of hanging a
+ * sequence on a fabricated length (D19).
+ */
+export function createMediaRecord(
+  doc: SceneDocument,
+  options: { type: MediaType; assetId: string; name: string; durationS?: number; ctx?: FactoryContext },
+): Media {
+  const ctx = ctxOf(options.ctx)
+  return {
+    id: ctx.newId('media', collectAllIds(doc)),
+    type: options.type,
+    assetId: options.assetId,
+    name: options.name,
+    ...(options.durationS === undefined ? {} : { durationS: options.durationS }),
+  }
+}
+
+/** The name every primitive's fallback material carries. User-visible, so Chinese. */
+export const DEFAULT_MATERIAL_NAME = '默认材质'
+
+/**
+ * The id of the shared 「默认材质」 record, creating it if the document has none.
+ *
+ * MVP v0.5 D15 · a primitive's material is EXPLICIT. Core could invent a grey material
+ * for an unmaterialed primitive, and it does as a last resort — but as the normal path
+ * that would be a rendering state the user can see and cannot edit: the material panel
+ * shows nothing while the object is clearly not default-coloured. So the editor puts a
+ * real record in the document and points the node at it.
+ *
+ * Shared by design. Everything created with it changes together, which is what a user
+ * expects from something called 默认材质; the material panel's 「分离材质」 is how you opt
+ * out (D15).
+ *
+ * Mutates `doc` — call it inside a `commit` recipe, on the draft, never on a live document.
+ */
+export function ensureDefaultMaterial(doc: SceneDocument, ctx?: FactoryContext): string {
+  const existing = doc.materials.find((m) => m.name === DEFAULT_MATERIAL_NAME)
+  if (existing) return existing.id
+  const factory = ctxOf(ctx)
+  const created = createMaterial({
+    name: DEFAULT_MATERIAL_NAME,
+    // Neutral grey, matching core's last-resort fallback so a document that has one and a
+    // document that relies on the other look the same.
+    params: { color: '#b8bec4', roughness: 0.8, metalness: 0, maps: {} },
+    ctx: { newId: (kind) => factory.newId(kind, collectAllIds(doc)), now: factory.now },
+  })
+  doc.materials.push(created)
+  return created.id
 }
 
 export function createMaterial(options: {
