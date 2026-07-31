@@ -61,7 +61,7 @@
 - **自测** `pnpm -F @w3/player test && pnpm -F @w3/storage test package`
 
 ### [x] T-117 · CI 工作流落地
-- **依赖** v0 · **预估** 0.5d · **实际** 0.3h（不含推送验证）
+- **依赖** v0 · **预估** 0.5d · **实际** 0.8h（含三轮推送验证）
 - **独占** `.github/workflows/ci.yml`
 - **做** GitHub Actions：constitution → typecheck → lint → 全部单测 → build → size-limit；Playwright E2E 单列 job（可 nightly）。pnpm 缓存。补上 IMPL_NOTES §4 点名的「T-105 超标 CI fail 没有落点」。
 - **验收** 分支上推送一次全绿；临时把 size 预算调小验证 CI 会红（验证后还原）
@@ -72,6 +72,8 @@
   ② `check:constitution --require-build` 未构建即 fail。另加 `pnpm test:parity`
   （属于 `pnpm verify`，卡片未列但漏了就是 CI 里没有 C3 守卫）。
   体积闸门「会红」已本地验证：预算临时改 100 KB → `pnpm size` 打印 FAIL 并 exit 1（已还原）。
+  **推送验证已完成**：前两轮红（各抓到一条本机看不见的真问题），第三轮两个 job 全绿
+  （run 30660510375：verify 44s · E2E 2m1s）。
 
 ---
 

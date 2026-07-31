@@ -61,7 +61,7 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测 | 需人工断网后跑 `pnpm build` |
 | Player 体积预算 gzip ≤ 400KB | **未测量** | Player 尚未实现 | T-105 |
 | benchmark 实测（G0-7） | **未执行** | 需目标机器 | T-110 → 顺延为 G0.5-8 / H1 |
-| CI 工作流在 GitHub 上真跑一次 | ✅ **已真实执行** | 2026-07-31 推 main 首跑。**第一次是红的**，见下方「T-117 首跑抓到的两条」 | — |
+| CI 工作流在 GitHub 上真跑一次 | ✅ **已真实执行** | 2026-07-31 推 main。前两轮红，第三轮两个 job 全绿（run 30660510375：verify 44s · E2E 2m1s）。红的两条见下方「T-117 首跑抓到的两条」 | — |
 
 **Runtime 的可测边界**：three 的场景图、材质、Raycaster、相机数学、AnimationMixer 都不
 需要 GL 上下文，所以 T-033~T-040 是**真跑过的**，不是"看起来对"。只有 `WebGLRenderer`
