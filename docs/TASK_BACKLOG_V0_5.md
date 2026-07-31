@@ -60,12 +60,17 @@
 - **验收** 变异检验（p95 实现改回"最慢帧"→ 测试红）；from-the-future 包报中文明确错误
 - **自测** `pnpm -F @w3/player test && pnpm -F @w3/storage test package`
 
-### [ ] T-117 · CI 工作流落地
-- **依赖** v0 · **预估** 0.5d · **实际** ___
+### [x] T-117 · CI 工作流落地
+- **依赖** v0 · **预估** 0.5d · **实际** 0.3h（不含推送验证）
 - **独占** `.github/workflows/ci.yml`
 - **做** GitHub Actions：constitution → typecheck → lint → 全部单测 → build → size-limit；Playwright E2E 单列 job（可 nightly）。pnpm 缓存。补上 IMPL_NOTES §4 点名的「T-105 超标 CI fail 没有落点」。
 - **验收** 分支上推送一次全绿；临时把 size 预算调小验证 CI 会红（验证后还原）
 - **自测** 推送后观察 CI 结果
+- **实际情况**：步骤顺序较卡片有一处调整——`check:constitution --require-build` 会扫
+  `dist/`，未构建即 fail，所以 build 排在它前面（顺序理由写在 yml 顶部注释里）；
+  另加 `pnpm test:parity`（属于 `pnpm verify`，卡片未列但漏了就是没有 C3 守卫）。
+  体积闸门的「会红」已**本地**验证：预算临时改 100 KB → `pnpm size` 打印 FAIL 并
+  exit 1（已还原）。**推送验证待人工授权**，见 [IMPL_NOTES](IMPL_NOTES.md) §2。
 
 ---
 

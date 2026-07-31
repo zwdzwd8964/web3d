@@ -60,7 +60,8 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | Draco / KTX2 解码器实际加载 | **未执行** | E2E 用的 GLB 未压缩 | 需一个 Draco 压缩的测试资产 |
 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测 | 需人工断网后跑 `pnpm build` |
 | Player 体积预算 gzip ≤ 400KB | **未测量** | Player 尚未实现 | T-105 |
-| benchmark 实测（G0-7） | **未执行** | 需目标机器 | T-110 |
+| benchmark 实测（G0-7） | **未执行** | 需目标机器 | T-110 → 顺延为 G0.5-8 / H1 |
+| CI 工作流在 GitHub 上真跑一次 | **未执行** | `.github/workflows/ci.yml` 已写好、每一步都在本机逐条跑通，但**从未推送**，所以「CI 会绿 / 会红」目前是推断不是观测 | 人工授权推送后即可（T-117 验收项） |
 
 **Runtime 的可测边界**：three 的场景图、材质、Raycaster、相机数学、AnimationMixer 都不
 需要 GL 上下文，所以 T-033~T-040 是**真跑过的**，不是"看起来对"。只有 `WebGLRenderer`
@@ -141,7 +142,7 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 | minor | `from-the-future` 包在 `unpackScene` 就抛出，`assertCompatible` 的中文提示成了死代码 | `packages/storage/src/package.ts:143` | ✅ T-116 已修 |
 | minor | `BENCH_LIMITS.textures` 被断言「来自 policy」，但 `gradeScene` 不用它评级 | `packages/player/test/bench-metrics.test.ts:29` | ✅ T-116 已修 |
 | minor | benchmark 缺卡片明列的「逐级加载压力测试」 | `packages/player/src/bench/main.ts` | ✅ T-116 已补（ADR-0016） |
-| minor | T-105 的「超标 CI fail」没有落点：仓库里没有任何 CI 配置 | `package.json` | T-117 |
+| minor | T-105 的「超标 CI fail」没有落点：仓库里没有任何 CI 配置 | `package.json` | ✅ T-117 已补（`.github/workflows/ci.yml`；推送验证待授权） |
 
 > 上面写的是「剩余 11 条」，表里只有 9 行——v0 收尾时的计数与登记对不上，本身就是一条
 > 登记纪律缺陷。以表为准：9 条有位置、可复核；另 2 条无据可查，不再追认。

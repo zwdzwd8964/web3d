@@ -1,0 +1,123 @@
+# T-117 · CI
+#
+# What this file exists for: v0 shipped `check:constitution`, a size budget and a parity
+# suite, and nothing ran any of them unless a human remembered to. IMPL_NOTES §4 recorded
+# it plainly —「T-105 的『超标 CI fail』没有落点：仓库里没有任何 CI 配置」. A budget that
+# nothing enforces is a comment.
+#
+# Step order deviates from the task card on one point, deliberately: the card lists
+# constitution first, but `check:constitution --require-build` scans `dist/` and FAILS when
+# a package is not built (that strictness was itself a v0 fix — "not built" used to read as
+# "passed"). So build runs before it. Every other step is in the card's order.
+#
+# Not here, on purpose: the offline build (C6). A real 断网 build needs a pre-seeded store
+# and a network-denied runner; approximating it with a warm pnpm cache would prove almost
+# nothing while looking like proof. It stays an IMPL_NOTES §2 unverified item and belongs
+# to T-173, which owns 断网构建 + 断网 dev 冒烟.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    # Nightly, 02:00 UTC. The E2E job below is the reason: it is the slowest thing here and
+    # the one most likely to rot quietly.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches IMPL_NOTES §1's recorded environment. Pinned rather than `lts/*`: the point of
+  # CI is to fail for reasons in the diff.
+  NODE_VERSION: '24'
+
+jobs:
+  verify:
+    name: verify（typecheck · lint · 单测 · 构建 · 宪法 · 体积 · parity）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads `packageManager` from package.json, so the pnpm version cannot drift from
+      # what the lockfile was written with.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm -r typecheck
+
+      - name: lint
+        run: pnpm lint
+
+      - name: unit tests
+        run: pnpm -r test
+
+      - name: build
+        run: pnpm build
+
+      - name: constitution (C2 / C5 / C6 / C7 + 依赖方向)
+        run: pnpm check:constitution
+
+      # T-105's missing enforcement point. `check-size-budget.mjs` exits 1 both when the
+      # player is over budget AND when it was never built — "not built" is not "within
+      # budget", and reporting it as a pass is the vacuous green this repo has been
+      # burned by before.
+      - name: size budget (player gzip ≤ 400 KB)
+        run: pnpm size
+
+      - name: parity (编辑器预览 vs 播放器)
+        run: pnpm test:parity
+
+  e2e:
+    name: E2E（黄金路径）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Its own job because it needs a browser download and takes minutes, not seconds —
+    # keeping it out of `verify` is what keeps the fast feedback fast. It still runs on
+    # every push, plus nightly; the card allows nightly-only if the minutes ever hurt.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      # Chromium only: playwright.config.ts declares exactly one project, and it needs the
+      # full browser (`channel: 'chromium'`) rather than the headless shell — the shell
+      # crashes on launch with the SwiftShader flags WebGL requires here.
+      - name: install chromium
+        run: pnpm -F @w3/e2e exec playwright install --with-deps chromium
+
+      # The E2E drives the dev servers (playwright.config.ts starts them), and step 12
+      # publishes a .w3p the player then opens, so the workspace packages have to be built.
+      - name: build
+        run: pnpm build
+
+      - name: golden path
+        run: pnpm test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 7
