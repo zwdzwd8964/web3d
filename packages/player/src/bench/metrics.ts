@@ -167,6 +167,17 @@ export function gradeScene(stats: SceneStats): BenchRow[] {
       note: '每帧的绘制批次。集成显卡上这一项常比面数更早成为瓶颈。**该阈值为经验值，尚无实测来源。**',
     },
     {
+      metric: '贴图数量',
+      value: String(stats.textures),
+      limit: String(BENCH_LIMITS.textures),
+      // Same rule as 三角面数 and as the import health check: over the policy ceiling is a
+      // fail, exactly at it passes. `BENCH_LIMITS.textures` was read from the policy and
+      // then never used to grade anything — a limit that grades nothing is decoration, and
+      // the test asserting it "came from the policy" was guarding decoration.
+      verdict: stats.textures <= BENCH_LIMITS.textures ? 'pass' : 'fail',
+      note: '来源：DEFAULT_POLICY.maxTextures，与导入体检同一常量。贴图数同时推高绘制批次与常驻显存。',
+    },
+    {
       metric: '贴图显存（估算）',
       value: `${memMB.toFixed(1)} MB`,
       limit: `${(BENCH_LIMITS.textureBytes / (1024 * 1024)).toFixed(0)} MB`,
@@ -174,13 +185,72 @@ export function gradeScene(stats: SceneStats): BenchRow[] {
       note: '来源：DEFAULT_POLICY.maxTextureBytes。按 RGBA8 + 完整 mip 链估算，真实占用取决于驱动的内部格式，WebGL 不暴露。',
     },
     {
-      metric: '几何体 / 贴图 / 着色器',
-      value: `${stats.geometries} / ${stats.textures} / ${stats.programs}`,
+      metric: '几何体 / 着色器',
+      value: `${stats.geometries} / ${stats.programs}`,
       limit: '—',
       verdict: 'pass',
-      note: '三者都是常驻显存的对象数量，用于横向比较两个模型。',
+      note: '两者都是常驻显存的对象数量，用于横向比较两个模型。贴图数已单列并参与评级。',
     },
   ]
+}
+
+/**
+ * T-116 · ADR-0016 · one rung of the staged load ramp.
+ *
+ * `copies` counts the whole scene, so rung 1 is the scene as published.
+ */
+export interface StressLevel {
+  readonly copies: number
+  readonly fps: number
+  readonly drawCalls: number
+  readonly triangles: number
+}
+
+/** The rungs the bench page climbs, until one of them drops under `fpsFail`. */
+export const STRESS_COPIES: readonly number[] = [1, 2, 4, 8]
+
+/**
+ * The ramp, graded.
+ *
+ * The headline row is the ceiling: the LARGEST rung that still rendered at or above
+ * `fpsWarn`. Reporting the last rung measured instead would read as a capacity finding
+ * while actually reporting where the ramp stopped — and the ramp stops early precisely
+ * when things went badly.
+ *
+ * What this cannot tell you is written into the note rather than left for the reader to
+ * work out: copies share geometry and textures, so the ramp stresses draw calls and vertex
+ * throughput and leaves VRAM flat (ADR-0016, cost 1).
+ */
+export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
+  if (levels.length === 0) return []
+
+  const passing = levels.filter((l) => l.fps >= BENCH_LIMITS.fpsWarn)
+  const ceiling = passing.reduce<StressLevel | null>((best, l) => (best && best.copies >= l.copies ? best : l), null)
+
+  const rows: BenchRow[] = [
+    {
+      metric: '承载上限',
+      value: ceiling
+        ? `${ceiling.copies} 份场景（${ceiling.drawCalls} drawcall · ${ceiling.triangles.toLocaleString('en-US')} 面）`
+        : '不足 1 份',
+      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+      verdict: ceiling ? 'pass' : 'fail',
+      note:
+        '把整个场景复制若干份同时渲染，一级一级加到跌破帧率为止。副本共享几何与贴图，' +
+        '所以本项压的是 drawcall 与顶点吞吐，**不压显存**——同等倍数的真实模型通常还会带来成倍的贴图。',
+    },
+  ]
+
+  for (const level of levels) {
+    rows.push({
+      metric: `逐级加载 ×${level.copies}`,
+      value: `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall`,
+      limit: '—',
+      verdict: level.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : level.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
+      note: `${level.triangles.toLocaleString('en-US')} 面。`,
+    })
+  }
+  return rows
 }
 
 /** Copy-to-clipboard Markdown. The card asks for it: this is what gets pasted into a ticket. */

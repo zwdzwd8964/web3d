@@ -1,8 +1,17 @@
 import { detectCapability, renderCapabilityNotice } from '@w3/core'
 import { unpackScene } from '@w3/storage'
 import { createPlayerSession } from '../session.js'
-import { estimateTextureMemory, gradeFrames, gradeScene, summariseFrames, toMarkdown } from './metrics.js'
-import type { BenchRow } from './metrics.js'
+import {
+  BENCH_LIMITS,
+  STRESS_COPIES,
+  estimateTextureMemory,
+  gradeFrames,
+  gradeScene,
+  gradeStress,
+  summariseFrames,
+  toMarkdown,
+} from './metrics.js'
+import type { BenchRow, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -50,7 +59,9 @@ async function run(bytes: Uint8Array, sourceName: string) {
     show('<p class="bench__note">正在测量…（约 6 秒，期间相机会自动环绕）</p>')
     const frameTimes = await measure(runtime, session)
 
-    // Counters are read AFTER a render, because three resets `info.render` each frame.
+    // Counters are read AFTER a render, because three resets `info.render` each frame —
+    // and BEFORE the stress ramp, whose copies would otherwise be counted as if the
+    // customer's model contained them.
     const info = runtime.info
     const textures: { width: number; height: number }[] = []
     runtime.scene.traverse((object) => {
@@ -59,6 +70,9 @@ async function run(bytes: Uint8Array, sourceName: string) {
         if (map.image?.width) textures.push({ width: map.image.width, height: map.image.height })
       }
     })
+
+    show('<p class="bench__note">正在做逐级加载压力测试…（最多约 5 秒）</p>')
+    const stress = await stressRamp(runtime, session)
 
     const rows: BenchRow[] = [
       ...gradeFrames(summariseFrames(frameTimes)),
@@ -70,6 +84,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
         programs: info?.programs ?? 0,
         textureMemoryBytes: estimateTextureMemory(textures),
       }),
+      ...gradeStress(stress),
     ]
 
     renderReport(rows, sourceName)
@@ -84,17 +99,23 @@ async function run(bytes: Uint8Array, sourceName: string) {
 }
 
 /**
- * Six seconds of continuous rendering while orbiting.
+ * Continuous rendering while orbiting, for `durationMs`.
  *
  * Orbiting rather than a static view on purpose: a still camera lets the driver skip work
- * and reports a frame rate the user will never see. The first 30 frames are discarded —
+ * and reports a frame rate the user will never see. The first frames are discarded —
  * shader compilation and texture upload happen there, and they say nothing about
- * steady-state performance.
+ * steady-state performance. The ramp discards fewer of them because each rung is short and
+ * only the first rung pays the compilation cost.
  */
-function measure(runtime: ReturnType<typeof createPlayerSession>['runtime'], session: ReturnType<typeof createPlayerSession>['session']): Promise<number[]> {
+function measure(
+  runtime: ReturnType<typeof createPlayerSession>['runtime'],
+  session: ReturnType<typeof createPlayerSession>['session'],
+  durationMs = 6000,
+  warmupFrames = 30,
+): Promise<number[]> {
   return new Promise((resolve) => {
     const times: number[] = []
-    let warmup = 30
+    let warmup = warmupFrames
     let previous = performance.now()
     const started = previous
 
@@ -108,11 +129,78 @@ function measure(runtime: ReturnType<typeof createPlayerSession>['runtime'], ses
       else times.push(now - previous)
       previous = now
 
-      if (now - started < 6000) requestAnimationFrame(frame)
+      if (now - started < durationMs) requestAnimationFrame(frame)
       else resolve(times)
     }
     requestAnimationFrame(frame)
   })
+}
+
+/**
+ * T-116 · ADR-0016 · the staged load ramp, the sixth metric T-110 listed and never shipped.
+ *
+ * One rung at a time: duplicate the loaded scene until there are ×1, ×2, ×4, ×8 copies of
+ * it on screen, measuring each. It answers the question the customer's engineer actually
+ * asks at acceptance — "our model is three times this one, will it run" — which no
+ * single-point frame rate can.
+ *
+ * The copies are `clone(true)`, which SHARES geometry and material with the original. That
+ * is what makes this cheap and also what bounds what it proves: draw calls and vertex
+ * throughput scale, VRAM does not (ADR-0016). It is also why the cleanup below removes but
+ * never disposes — disposing a clone's geometry would destroy the original's.
+ *
+ * Nothing here touches the document. These are measuring weights, not scene content (C1).
+ */
+async function stressRamp(
+  runtime: ReturnType<typeof createPlayerSession>['runtime'],
+  session: ReturnType<typeof createPlayerSession>['session'],
+): Promise<StressLevel[]> {
+  const source = runtime.graph.root
+  const spread = Math.max(1, boundingSpan(source))
+  const copies: { removeFromParent: () => void }[] = []
+  const levels: StressLevel[] = []
+
+  try {
+    for (const target of STRESS_COPIES) {
+      // Lay the extra copies out in a row rather than on top of each other: overlapping
+      // geometry is a depth-test benchmark, not a scene-size one.
+      while (copies.length < target - 1) {
+        const clone = source.clone(true)
+        clone.position.x += spread * (copies.length + 1)
+        runtime.scene.add(clone)
+        copies.push(clone)
+      }
+
+      const stats = summariseFrames(await measure(runtime, session, 1200, 5))
+      const info = runtime.info
+      levels.push({
+        copies: target,
+        fps: stats.fps,
+        drawCalls: info?.calls ?? 0,
+        triangles: info?.triangles ?? 0,
+      })
+
+      // Past the fail line there is nothing left to learn from a bigger rung, and the
+      // page would keep the machine at single-digit frame rates to prove it.
+      if (stats.fps < BENCH_LIMITS.fpsFail) break
+    }
+  } finally {
+    for (const clone of copies) clone.removeFromParent()
+  }
+  return levels
+}
+
+/** Roughly how wide the scene is, so copies can be placed side by side without overlapping. */
+function boundingSpan(root: { traverse: (cb: (o: unknown) => void) => void }): number {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  root.traverse((object) => {
+    const position = (object as { position?: { x: number } }).position
+    if (!position) return
+    min = Math.min(min, position.x)
+    max = Math.max(max, position.x)
+  })
+  return Number.isFinite(min) && Number.isFinite(max) ? max - min + 1 : 1
 }
 
 function texturesOf(material: unknown): { image?: { width: number; height: number } }[] {

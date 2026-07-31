@@ -1,5 +1,5 @@
 import type { SceneDocument } from '@w3/schema'
-import { migrate } from '@w3/schema'
+import { CURRENT_VERSION, migrate } from '@w3/schema'
 import { unzipSync, zipSync } from 'fflate'
 import { hashToPath, isBlobHash, pathToHash } from './hash.js'
 import type { BlobHash } from './provider.js'
@@ -124,6 +124,31 @@ export function packScene(input: PackageInput): Uint8Array {
   return zipSync(files, { level: 6 })
 }
 
+/**
+ * The version gate, on the manifest, before anything is parsed from the package.
+ *
+ * It has to run HERE rather than only in the reader that consumes the result. The player
+ * owned an `assertCompatible` with exactly this message and it was dead code: by the time
+ * `createPlayerSession` called it, `unpackScene` had already refused the same package with
+ * a generic「scene.json 无法读取（from-the-future）」— technically a refusal, but it names
+ * a file instead of the actual problem, which is that the reader is out of date.
+ *
+ * The scene-side `from-the-future` check below stays as the backstop for the one case this
+ * cannot see: a manifest that disagrees with the document it ships.
+ *
+ * OLDER packages are never refused — SCHEMA_SPEC's migration chain is what makes C4
+ * ("老文件永远能打开") true, and a gate in the other direction would undo it.
+ */
+export function assertPackageCompatible(manifest: PackageManifest): void {
+  const { schemaVersion, coreVersion } = manifest
+  if (typeof schemaVersion !== 'number' || schemaVersion <= CURRENT_VERSION) return
+  throw new StorageError(
+    'conflict',
+    `这个包由更新版本的编辑器发布（文档格式 v${schemaVersion}），当前程序只支持到 v${CURRENT_VERSION}。` +
+      `请升级后重试。（发布时的 core 版本：${coreVersion}）`,
+  )
+}
+
 export function unpackScene(bytes: Uint8Array): UnpackedPackage {
   let entries: Record<string, Uint8Array>
   try {
@@ -143,6 +168,10 @@ export function unpackScene(bytes: Uint8Array): UnpackedPackage {
   } catch (cause) {
     throw new StorageError('corrupt', `${MANIFEST_FILENAME} is not valid JSON`, { cause })
   }
+
+  // Before the document is touched: a package from a newer build gets the message that
+  // says what to do about it, not one that says its scene.json is unreadable.
+  assertPackageCompatible(manifest)
 
   // `migrate`, not `validate`. `schemaVersion` is a `z.literal(CURRENT_VERSION)`, so a
   // package written by an older build fails validation outright — while constitution C4

@@ -91,6 +91,7 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 | 9 | v0 不引入 UI 组件库（§4 要求用成熟组件库） | ADR-0010 |
 | 10 | 材质写时复制改为无条件克隆（D3 写的是"被 >1 引用才克隆"） | ADR-0011 |
 | 7 | `checkIntegrity` 新增 `I3-actions-unchecked` 一档 info：未注入动作解析器时显式声明"动作参数内的引用未检查" | — （不改变任何检查项语义，仅拒绝把"没查"报成"通过"） |
+| 11 | T-110 明列的「逐级加载压力测试」在任何规范里都没有定义，实现为场景副本倍增阶梯（×1/×2/×4/×8） | ADR-0016 |
 
 `@w3/schema` 中另加了两个规范未列出的文件：`selectors.ts`（纯查询，T-014 点名要 `getAncestors`
 等）与 `rule.ts`（承载 EventDescriptor / Condition / Action 信封 / Rule 的数据形状——
@@ -135,15 +136,24 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 | major | E2E 第 9 步断言的是样例文档里原有的热点，「在选中对象上新建」整个坏掉也会绿 | `e2e/tests/golden-path-full.spec.ts:161` | ✅ T-115 已修 |
 | major | E2E 第 8 步用 `.first()` 而非数量前后对比，「新建补间」不生效也会绿 | 同上 `:155` | ✅ T-115 已修 |
 | major | E2E 第 6 步从头到尾没改过 roughness，定位到的「roughness 控件」其实是材质下拉框 | 同上 `:136` | ✅ T-115 已修 |
-| major | bench p95 断言用 `toBeGreaterThanOrEqual(16.7)`，把 p95 实现成「最慢帧」也全绿 | `packages/player/test/bench-metrics.test.ts:41` | T-116 |
+| major | bench p95 断言用 `toBeGreaterThanOrEqual(16.7)`，把 p95 实现成「最慢帧」也全绿 | `packages/player/test/bench-metrics.test.ts:41` | ✅ T-116 已修 |
 | major | 缩略图取景断言从不读 `view.target`，唯一的朝向断言又用了 y=z=0 的样本 | `packages/core/test/assets/thumbnail.test.ts:89` | ✅ T-115 已修 |
-| minor | `from-the-future` 包在 `unpackScene` 就抛出，`assertCompatible` 的中文提示成了死代码 | `packages/storage/src/package.ts:143` | T-116 |
-| minor | `BENCH_LIMITS.textures` 被断言「来自 policy」，但 `gradeScene` 不用它评级 | `packages/player/test/bench-metrics.test.ts:29` | T-116 |
-| minor | benchmark 缺卡片明列的「逐级加载压力测试」 | `packages/player/src/bench/main.ts` | T-116 |
+| minor | `from-the-future` 包在 `unpackScene` 就抛出，`assertCompatible` 的中文提示成了死代码 | `packages/storage/src/package.ts:143` | ✅ T-116 已修 |
+| minor | `BENCH_LIMITS.textures` 被断言「来自 policy」，但 `gradeScene` 不用它评级 | `packages/player/test/bench-metrics.test.ts:29` | ✅ T-116 已修 |
+| minor | benchmark 缺卡片明列的「逐级加载压力测试」 | `packages/player/src/bench/main.ts` | ✅ T-116 已补（ADR-0016） |
 | minor | T-105 的「超标 CI fail」没有落点：仓库里没有任何 CI 配置 | `package.json` | T-117 |
 
 > 上面写的是「剩余 11 条」，表里只有 9 行——v0 收尾时的计数与登记对不上，本身就是一条
 > 登记纪律缺陷。以表为准：9 条有位置、可复核；另 2 条无据可查，不再追认。
+
+**前五条都是「测试断言不到点上」**，也就是它们保护的功能改坏了也不会红。这类问题
+比功能缺陷更值得优先处理——一个假绿的测试会让后续每一次改动都失去保护。
+
+被证伪的 4 条不予采纳，其中一条我原本会误信：「parity 对资产解析分叉结构性失明」，
+验证者实测证明加一条含 `wait` 的规则时 parity 确实会红。
+
+**清偿进度（v0.5 M7）**：T-115 修 4 条、T-116 修 4 条，剩 T-117 的 CI 一条。
+八条修复各附一次变异检验（把被测行为改坏 → 测试转红），记录在对应提交信息里。
 
 ### T-115 期间新发现（未修，登记）
 
@@ -153,12 +163,6 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 
 发现方式：跑 E2E 时 dev server 转发的 `[runtime] applyPatch 回落到全量重建（第 1 次）：3 条
 patch 未被识别` 一直在日志里，但没有任何断言看它。**日志里说了、没人断言的东西，等于没说。**
-
-**前五条都是「测试断言不到点上」**，也就是它们保护的功能改坏了也不会红。这类问题
-比功能缺陷更值得优先处理——一个假绿的测试会让后续每一次改动都失去保护。
-
-被证伪的 4 条不予采纳，其中一条我原本会误信：「parity 对资产解析分叉结构性失明」，
-验证者实测证明加一条含 `wait` 的规则时 parity 确实会红。
 
 ### 晋级门槛现状（NORTH_STAR §3）
 

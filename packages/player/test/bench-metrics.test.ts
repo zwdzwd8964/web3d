@@ -1,6 +1,16 @@
 import { DEFAULT_POLICY } from '@w3/core'
 import { describe, expect, it } from 'vitest'
-import { BENCH_LIMITS, estimateTextureMemory, gradeFrames, gradeScene, summariseFrames, toMarkdown } from '../src/bench/metrics.js'
+import {
+  BENCH_LIMITS,
+  STRESS_COPIES,
+  estimateTextureMemory,
+  gradeFrames,
+  gradeScene,
+  gradeStress,
+  summariseFrames,
+  toMarkdown,
+} from '../src/bench/metrics.js'
+import type { StressLevel } from '../src/bench/metrics.js'
 import type { CapabilityReport } from '@w3/core'
 
 /**
@@ -29,22 +39,71 @@ describe('BENCH_LIMITS', () => {
     expect(BENCH_LIMITS.textures).toBe(DEFAULT_POLICY.maxTextures)
     expect(BENCH_LIMITS.textureBytes).toBe(DEFAULT_POLICY.maxTextureBytes)
   })
+
+  it('grades against every limit it declares', () => {
+    // `textures` was read from the policy, asserted here, and used by nothing: the report
+    // printed the texture count with limit「—」and verdict pass, forever. An assertion that
+    // a decorative constant has the right value is an assertion about decoration.
+    //
+    // Written as a sweep rather than as one more hand-listed row so the next limit added
+    // to the table cannot repeat the trick.
+    const graded = gradeScene({
+      triangles: DEFAULT_POLICY.maxTriangles + 1,
+      drawCalls: BENCH_LIMITS.drawCalls + 1,
+      textures: DEFAULT_POLICY.maxTextures + 1,
+      textureMemoryBytes: DEFAULT_POLICY.maxTextureBytes + 1,
+      geometries: 1,
+      programs: 1,
+    })
+    const limits = graded.filter((r) => r.limit !== '—')
+    expect(limits.map((r) => r.metric)).toEqual(['三角面数', 'Draw call', '贴图数量', '贴图显存（估算）'])
+    // Every declared limit, blown past, must produce a non-pass verdict.
+    expect(limits.filter((r) => r.verdict === 'pass')).toEqual([])
+  })
 })
 
 describe('summariseFrames', () => {
-  it('reports p95, not the mean — that is where stutter hides', () => {
-    // 60 fps with one 400 ms hitch: the mean says "fine", p95 and worst say otherwise.
-    const frames = [...Array(99).fill(16.7), 400]
-    const stats = summariseFrames(frames)
-    expect(stats.fps).toBeGreaterThan(40)
-    expect(stats.worstFrameMs).toBe(400)
-    expect(stats.p95FrameMs).toBeGreaterThanOrEqual(16.7)
+  it('picks the exact 95th-percentile frame from a known distribution', () => {
+    // 1..100 ms, one frame each. Nearest-rank at floor(n × 0.95): sorted[95] = 96 ms.
+    // The number is pinned rather than bounded because the previous assertion —
+    // `p95FrameMs >= 16.7` on a sample whose slowest frame was 400 ms — was satisfied by
+    // every plausible wrong answer, the worst frame and the mean included. A percentile
+    // that reads as "the slowest frame" turns the report's headline metric into a
+    // duplicate of the row below it, and nothing here noticed.
+    const stats = summariseFrames(Array.from({ length: 100 }, (_, i) => i + 1))
+    expect(stats.p95FrameMs).toBe(96)
+    expect(stats.worstFrameMs).toBe(100)
+    expect(stats.frames).toBe(100)
   })
 
-  it('grades that scene as a warning on frame time despite an acceptable average', () => {
-    const rows = gradeFrames(summariseFrames([...Array(20).fill(16.7), ...Array(2).fill(120)]))
-    const p95 = rows.find((r) => r.metric === 'P95 帧时间')!
-    expect(p95.verdict).not.toBe('pass')
+  it('reports p95, not the mean or the worst — that is where stutter hides', () => {
+    // 60 fps with one 400 ms hitch: the mean says "fine". At 1 in 100 the hitch is below
+    // the 95th percentile too, and the honest reading is that only 最慢单帧 catches it.
+    const stats = summariseFrames([...Array(99).fill(16.7), 400])
+    expect(stats.fps).toBeGreaterThan(40)
+    expect(stats.worstFrameMs).toBe(400)
+    expect(stats.p95FrameMs).toBeCloseTo(16.7, 6)
+    expect(stats.p95FrameMs).not.toBe(stats.worstFrameMs)
+  })
+
+  it('grades a scene that hitches 1 frame in 11 as not-passing on frame time', () => {
+    // 22 frames, two of them at 120 ms: sorted[20] = 120, over the 66 ms fail line.
+    const stats = summariseFrames([...Array(20).fill(16.7), ...Array(2).fill(120)])
+    expect(stats.p95FrameMs).toBe(120)
+    const p95 = gradeFrames(stats).find((r) => r.metric === 'P95 帧时间')!
+    expect(p95.verdict).toBe('fail')
+  })
+
+  it('degenerates to the slowest frame on samples too short to have a 95th', () => {
+    // Nearest-rank: at 20 frames or fewer, floor(n × 0.95) lands on the last element, so
+    // p95 and 最慢单帧 necessarily report the same number. That is a property of the
+    // estimator, not a defect — but it is why the bench collects hundreds of frames, and
+    // why the 100-frame case above is the one that can tell the two apart at all.
+    expect(summariseFrames([42]).p95FrameMs).toBe(42)
+    expect(summariseFrames([10, 20]).p95FrameMs).toBe(20)
+    expect(summariseFrames(Array.from({ length: 20 }, (_, i) => i + 1)).p95FrameMs).toBe(20)
+    // 21 frames is where it starts being a percentile again.
+    expect(summariseFrames(Array.from({ length: 21 }, (_, i) => i + 1)).p95FrameMs).toBe(20)
   })
 
   it('survives an empty sample rather than dividing by zero', () => {
@@ -76,11 +135,75 @@ describe('gradeScene', () => {
     expect(row.verdict).toBe('pass')
   })
 
+  it('fails a scene over the policy texture ceiling and passes one exactly at it', () => {
+    const over = gradeScene({ ...base, textures: DEFAULT_POLICY.maxTextures + 1 }).find((r) => r.metric === '贴图数量')!
+    const at = gradeScene({ ...base, textures: DEFAULT_POLICY.maxTextures }).find((r) => r.metric === '贴图数量')!
+    expect(over.verdict).toBe('fail')
+    expect(at.verdict).toBe('pass')
+    expect(over.limit).toBe(String(DEFAULT_POLICY.maxTextures))
+  })
+
   it('says out loud that the draw-call ceiling has no measured source', () => {
     // 附件A's acceptance is "每个数值都有实测或阈值来源，不是拍脑袋". A number without one
     // has to say so in the report itself, or it will be read as a finding.
     const row = gradeScene(base).find((r) => r.metric === 'Draw call')!
     expect(row.note).toContain('尚无实测来源')
+  })
+})
+
+/**
+ * T-116 · ADR-0016 · the staged load ramp T-110 listed and never shipped.
+ *
+ * The page part needs a browser; the part that turns rungs into a capacity claim does not,
+ * and that is the part that ends up in 附件A.
+ */
+describe('gradeStress', () => {
+  const rung = (copies: number, fps: number): StressLevel => ({
+    copies,
+    fps,
+    drawCalls: copies * 100,
+    triangles: copies * 50_000,
+  })
+  const ceilingOf = (levels: readonly StressLevel[]) => gradeStress(levels).find((r) => r.metric === '承载上限')!
+
+  it('reports the largest rung that held the frame rate, not the last one measured', () => {
+    // The ramp stops early exactly when things went badly, so "the last rung" and "the
+    // ceiling" are the same number only when nothing failed. Reading the last rung would
+    // turn a machine that collapsed at ×4 into a machine certified for ×4.
+    const row = ceilingOf([rung(1, 60), rung(2, 52), rung(4, 18)])
+    expect(row.value).toContain('2 份场景')
+    expect(row.value).toContain('200 drawcall')
+    expect(row.verdict).toBe('pass')
+  })
+
+  it('fails outright when even one copy cannot hold the frame rate', () => {
+    const row = ceilingOf([rung(1, 21)])
+    expect(row.value).toBe('不足 1 份')
+    expect(row.verdict).toBe('fail')
+  })
+
+  it('treats exactly the warn threshold as passing', () => {
+    expect(ceilingOf([rung(1, BENCH_LIMITS.fpsWarn)]).verdict).toBe('pass')
+    expect(ceilingOf([rung(1, BENCH_LIMITS.fpsWarn - 0.1)]).verdict).toBe('fail')
+  })
+
+  it('grades each rung on the same frame-rate thresholds as the headline metric', () => {
+    const rows = gradeStress([rung(1, 60), rung(2, 30), rung(4, 10)])
+    expect(rows.filter((r) => r.metric.startsWith('逐级加载')).map((r) => r.verdict)).toEqual(['pass', 'warn', 'fail'])
+  })
+
+  it('says in the report itself that the ramp does not stress VRAM', () => {
+    // ADR-0016 cost 1. 附件A quotes this row; the limitation has to travel with it, or the
+    // number gets read as "this machine handles a scene 4× the size" full stop.
+    expect(ceilingOf([rung(1, 60)]).note).toContain('不压显存')
+  })
+
+  it('produces nothing at all when the ramp never ran', () => {
+    expect(gradeStress([])).toEqual([])
+  })
+
+  it('climbs by doubling, so a machine 8× over the model still gets a bounded answer', () => {
+    expect([...STRESS_COPIES]).toEqual([1, 2, 4, 8])
   })
 })
 

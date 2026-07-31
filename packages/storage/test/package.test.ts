@@ -1,4 +1,4 @@
-import { createGoldenPathDocument } from '@w3/schema'
+import { CURRENT_VERSION, createGoldenPathDocument } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
@@ -7,11 +7,13 @@ import {
   MANIFEST_FILENAME,
   SCENE_FILENAME,
   THUMBNAIL_FILENAME,
+  assertPackageCompatible,
   createPackageResolver,
   packScene,
   referencedHashes,
   unpackScene,
 } from '../src/package.js'
+import type { PackageManifest } from '../src/package.js'
 import type { BlobHash } from '../src/provider.js'
 import { StorageError } from '../src/provider.js'
 
@@ -139,6 +141,80 @@ describe('unpackScene()', () => {
       'scene.json': encoder.encode(JSON.stringify({ schemaVersion: 1 })),
     })
     expect(() => unpackScene(bad)).toThrow(/failed validation/)
+  })
+})
+
+/**
+ * T-116 · the version gate, which used to be unreachable.
+ *
+ * `assertCompatible` in the player carried this message and could never produce it:
+ * `unpackScene` refused a future package first, blaming scene.json. "It throws either
+ * way" is not good enough — the whole reason T-101 specified a message was so the person
+ * holding the package learns that their player is out of date.
+ */
+describe('the from-the-future gate', () => {
+  const encoder = new TextEncoder()
+
+  /** A package whose manifest AND scene both claim a version the reader has never heard of. */
+  const futurePackage = (version: number) => {
+    const document = createGoldenPathDocument()
+    const manifest: PackageManifest = {
+      schemaVersion: version,
+      coreVersion: '9.9.9',
+      snapshotId: 'snp_a1b2c3d4',
+      projectId: document.projectId,
+      publishedAt: '2027-01-01T00:00:00.000Z',
+      assetCount: 0,
+    }
+    return zipSync({
+      [MANIFEST_FILENAME]: encoder.encode(JSON.stringify(manifest)),
+      [SCENE_FILENAME]: encoder.encode(JSON.stringify({ ...document, schemaVersion: version })),
+    })
+  }
+
+  it('refuses a newer package with a message about the reader, not about scene.json', () => {
+    const bytes = futurePackage(CURRENT_VERSION + 1)
+    expect(() => unpackScene(bytes)).toThrow(StorageError)
+    // Both numbers, so the mismatch is diagnosable without opening the zip, and an
+    // instruction — the previous message named a filename and stopped there.
+    expect(() => unpackScene(bytes)).toThrow(new RegExp(`文档格式 v${CURRENT_VERSION + 1}`))
+    expect(() => unpackScene(bytes)).toThrow(new RegExp(`只支持到 v${CURRENT_VERSION}`))
+    expect(() => unpackScene(bytes)).toThrow(/请升级后重试/)
+    expect(() => unpackScene(bytes)).not.toThrow(/scene\.json/)
+  })
+
+  it('reports it as a conflict, not as corruption — the file is fine, the reader is old', () => {
+    try {
+      unpackScene(futurePackage(CURRENT_VERSION + 5))
+      expect.unreachable('a package from the future must not open')
+    } catch (error) {
+      expect(error).toBeInstanceOf(StorageError)
+      expect((error as StorageError).code).toBe('conflict')
+    }
+  })
+
+  it('still opens a package at the current version, and would open an older one (C4)', () => {
+    expect(() => unpackScene(pack())).not.toThrow()
+    expect(() =>
+      assertPackageCompatible({
+        schemaVersion: CURRENT_VERSION - 1,
+        coreVersion: '0.0.0',
+        snapshotId: 'snp_a1b2c3d4',
+        projectId: 'prj_x',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        assetCount: 0,
+      }),
+    ).not.toThrow()
+  })
+
+  it('lets a manifest with no version through to the scene-side check', () => {
+    // A hand-made or truncated manifest must not be silently read as "from the future";
+    // the document itself is still the authority on what it is.
+    const bad = zipSync({
+      [MANIFEST_FILENAME]: encoder.encode('{}'),
+      [SCENE_FILENAME]: encoder.encode(JSON.stringify({ ...createGoldenPathDocument(), schemaVersion: 999 })),
+    })
+    expect(() => unpackScene(bad)).toThrow(/from-the-future/)
   })
 })
 

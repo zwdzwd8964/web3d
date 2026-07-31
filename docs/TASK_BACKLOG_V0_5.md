@@ -50,9 +50,12 @@
 - **验收** 四处变异检验转红记录在提交信息；全套 E2E 仍绿
 - **自测** `pnpm test:e2e && pnpm -F @w3/core test thumbnail`
 
-### [ ] T-116 · benchmark 假绿与包兼容提示清偿
-- **依赖** v0 · **预估** 0.8d · **实际** ___
+### [x] T-116 · benchmark 假绿与包兼容提示清偿
+- **依赖** v0 · **预估** 0.8d · **实际** 0.6h
 - **独占** `packages/player/test/bench-metrics.test.ts`, `packages/player/src/bench/main.ts`, `packages/player/src/bench/metrics.ts`, `packages/storage/src/package.ts`, `packages/storage/test/package.test.ts`
+  （+ `packages/player/src/compat.ts` 改为委派给 storage 的新版本闸门，避免同一句中文提示
+  在两个包里各写一份；+ [ADR-0016](adr/0016-逐级加载压力测试的含义.md)：③ 的「逐级加载压力测试」
+  在任何规范里都没有定义，按铁律 12 先写 ADR 再实现）
 - **做** ①p95 断言改为构造已知帧分布并断言精确分位值（当前 `toBeGreaterThanOrEqual(16.7)` 把 p95 写成"最慢帧"也全绿）；②`BENCH_LIMITS.textures` 真正参与 `gradeScene` 评级，或从断言中移除并注明理由；③补 T-110 卡片明列但缺失的「逐级加载压力测试」；④`unpackScene` 先 `assertCompatible` 再解析，让 from-the-future 包的中文提示不再是死代码，附一条对应测试。
 - **验收** 变异检验（p95 实现改回"最慢帧"→ 测试红）；from-the-future 包报中文明确错误
 - **自测** `pnpm -F @w3/player test && pnpm -F @w3/storage test package`
