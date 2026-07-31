@@ -26,8 +26,7 @@ beforeAll(() => registerBuiltinActions())
 beforeEach(async () => {
   clock = 0
   session = new ProjectSession()
-  const doc = createGoldenPathDocument()
-  await session.seedSampleAsset(doc)
+  const doc = await session.materialiseSample(createGoldenPathDocument())
 
   runtime = new SceneRuntime(doc, {
     resolver: session.resolver,

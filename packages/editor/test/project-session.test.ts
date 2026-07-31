@@ -56,11 +56,42 @@ describe('ProjectSession · one owner of asset bytes', () => {
     )
   })
 
-  it('seeds the sample document so a cold start is never an empty viewport', async () => {
-    const doc = createGoldenPathDocument()
-    await session.seedSampleAsset(doc)
+  it('materialises the sample so a cold start is never an empty viewport', async () => {
+    const doc = await session.materialiseSample(createGoldenPathDocument())
     const loaded = await session.loader.load(doc.assets[0]!)
     expect(loaded.objects.size).toBeGreaterThan(0)
+  })
+
+  it('materialising the sample makes it publishable, which it was not before', async () => {
+    const original = createGoldenPathDocument()
+    // The fabricated hash from SCHEMA_SPEC §12 names a file that has never existed, so
+    // the publish gate refused the default project on every fresh install.
+    expect(await storage.hasBlob(original.assets[0]!.hash)).toBe(false)
+
+    const doc = await session.materialiseSample(original)
+    expect(await storage.hasBlob(doc.assets[0]!.hash), '样例资产的字节必须真的在存储里').toBe(true)
+    expect(doc.assets[0]!.hash).not.toBe(original.assets[0]!.hash)
+    expect(doc.assets[0]!.url).toContain(doc.assets[0]!.hash.slice('sha256:'.length, 'sha256:'.length + 4))
+  })
+
+  it('replaces the fabricated statistics with measured ones', async () => {
+    const original = createGoldenPathDocument()
+    const doc = await session.materialiseSample(original)
+    // 8.4 MB / 128,400 triangles for a file of a few KB was misinformation in the asset
+    // panel either way; measuring it is both honest and free.
+    expect(doc.assets[0]!.stats.bytes).toBeLessThan(original.assets[0]!.stats.bytes)
+    expect(doc.assets[0]!.stats.tris).toBeGreaterThan(0)
+  })
+
+  it('is idempotent — a second boot does not re-store or re-hash', async () => {
+    const once = await session.materialiseSample(createGoldenPathDocument())
+    const twice = await session.materialiseSample(once)
+    expect(twice).toEqual(once)
+  })
+
+  it('leaves a non-sample project alone', async () => {
+    const other = { ...createGoldenPathDocument(), projectId: 'prj_zzzzzzzz' }
+    expect(await session.materialiseSample(other)).toBe(other)
   })
 
   it('round-trips a document through storage', async () => {

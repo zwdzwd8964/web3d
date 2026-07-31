@@ -82,6 +82,14 @@ export class Player {
 
     await this.session.start()
     runtime.start()
+
+    if (import.meta.env.DEV) {
+      // DEV-only, stripped from production builds. See the editor's equivalent.
+      ;(globalThis as Record<string, unknown>)['__w3DevLocate'] = (nodeId: string) =>
+        runtime.projectToScreen(nodeId)
+      ;(globalThis as Record<string, unknown>)['__w3DevNodes'] = () =>
+        pkg.document.nodes.map((n) => ({ id: n.id, name: n.name }))
+    }
   }
 
   /**
@@ -182,4 +190,5 @@ export class Player {
     this.overlay = null
   }
 }
+
 

@@ -1,0 +1,3 @@
+# The golden-path E2E writes its published package here at run time.
+# Not committed: it is a build artefact of the test, not a fixture.
+*.w3p

@@ -31,11 +31,22 @@ export default defineConfig({
 
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
 
-  webServer: {
-    command: 'pnpm -F @w3/editor dev --port 5273 --strictPort',
-    url: 'http://127.0.0.1:5273',
-    cwd: '..',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // Two servers: the editor publishes, the player opens what it published. Step 12 of the
+  // golden path is precisely the handover between them, so both have to be up.
+  webServer: [
+    {
+      command: 'pnpm -F @w3/editor dev --port 5273 --strictPort',
+      url: 'http://127.0.0.1:5273',
+      cwd: '..',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: 'pnpm -F @w3/player dev --port 5274 --strictPort',
+      url: 'http://127.0.0.1:5274',
+      cwd: '..',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })

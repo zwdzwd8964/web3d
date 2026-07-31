@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Web3D 播放器 · 性能实测</title>
+    <!-- C6: nothing external. This page has to run on an air-gapped client machine. -->
+  </head>
+  <body class="bench">
+    <div id="bench">
+      <header class="bench__bar">
+        <b>性能实测</b>
+        <label class="bench__pick">
+          选择 .w3p<input id="pick" type="file" accept=".w3p,application/zip" hidden />
+        </label>
+        <span class="bench__hint">无需编辑器，把包拖进来即可。结果可一键复制为 Markdown。</span>
+      </header>
+      <div id="stage" class="bench__stage"></div>
+      <div id="out" class="bench__out"></div>
+    </div>
+    <script type="module" src="/src/bench/main.ts"></script>
+  </body>
+</html>

@@ -24,3 +24,19 @@ export function getActiveRuntime(): SceneRuntime | null {
 export function fullRebuildCount(): number {
   return active?.fullRebuildCount ?? 0
 }
+
+
+/**
+ * DEV-only locator, for the golden-path E2E.
+ *
+ * Stripped from production builds by the guard. It forwards to `SceneRuntime.projectToScreen`
+ * — a real runtime capability — rather than reimplementing the projection, so the thing the
+ * test clicks is the thing the renderer says is there.
+ *
+ * Read-only: it exposes no way to change anything, so it cannot become a back door around
+ * the commit channel.
+ */
+if (import.meta.env.DEV) {
+  ;(globalThis as Record<string, unknown>)['__w3DevLocate'] = (nodeId: string) =>
+    active?.projectToScreen(nodeId) ?? null
+}

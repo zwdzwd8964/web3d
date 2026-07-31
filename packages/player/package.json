@@ -10,8 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "test:parity": "vitest run parity",
+    "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {

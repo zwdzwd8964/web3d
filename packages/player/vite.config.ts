@@ -19,6 +19,17 @@ export default defineConfig({
       '@w3/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),
     },
   },
-  build: { target: 'es2022', sourcemap: true },
+  build: {
+    target: 'es2022',
+    sourcemap: true,
+    rollupOptions: {
+      // Two entries: the player, and the standalone benchmark page (T-110). The card's
+      // acceptance is "能在客户机器上独立运行（单页，无需编辑器）", so it ships alongside.
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        bench: fileURLToPath(new URL('./bench.html', import.meta.url)),
+      },
+    },
+  },
   server: { port: 5181, host: '127.0.0.1' },
 })

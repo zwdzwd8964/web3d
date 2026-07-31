@@ -1,0 +1,121 @@
+/* Benchmark page chrome. Shares the player's tokens; adds only what a report needs. */
+
+body.bench {
+  overflow: auto;
+}
+
+#bench {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.bench__bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.bench__pick {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.bench__hint,
+.bench__note {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.bench__note--bad {
+  color: #e2603f;
+}
+
+/* Small on purpose: the measurement is about the renderer, not about filling a screen,
+   and a fixed size makes two runs on different monitors comparable. */
+.bench__stage {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  height: 360px;
+  margin: 12px 14px;
+  border: 1px solid var(--line);
+}
+
+.bench__out {
+  padding: 0 14px 24px;
+}
+
+.bench__env {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.bench__warn {
+  color: #f2b01e;
+}
+
+.bench__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bench__table th {
+  text-align: left;
+  color: var(--dim);
+  font-weight: 400;
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+}
+
+.bench__table td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+  vertical-align: top;
+}
+
+.bench__table tr[data-verdict='fail'] td:first-child {
+  color: #e2603f;
+}
+
+.bench__table tr[data-verdict='warn'] td:first-child {
+  color: #f2b01e;
+}
+
+.bench__note-cell {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.bench__copy {
+  margin: 12px 0 8px;
+  padding: 4px 12px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bench__md {
+  white-space: pre-wrap;
+  font: 12px/1.6 ui-monospace, Consolas, monospace;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px;
+  overflow-x: auto;
+}

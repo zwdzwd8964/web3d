@@ -1,5 +1,5 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
-import { AmbientLight, Color, DirectionalLight, GridHelper, Scene, WebGLRenderer } from 'three'
+import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
 import { ClipPlayer } from './animator/clip.js'
@@ -266,8 +266,77 @@ export class SceneRuntime implements RuntimeContext {
     this.listeners = []
   }
 
-  get info(): { geometries: number; textures: number } | null {
-    return this.renderer ? { ...this.renderer.info.memory } : null
+  /**
+   * Renderer counters, for the benchmark page (T-110) and for diagnosing a slow scene.
+   *
+   * `render.*` is reset by three at the start of every frame, so this has to be read
+   * AFTER a `tick()` or the numbers are all zero — the single most common way to
+   * misread this API.
+   *
+   * Widened from `memory` alone to carry `triangles` and `calls`: those two are what
+   * 技术方案 §3.2-5 asks the benchmark to report, and there is no other route to them.
+   * Additive — no existing caller changes.
+   */
+  get info(): {
+    geometries: number
+    textures: number
+    triangles: number
+    calls: number
+    programs: number
+  } | null {
+    if (!this.renderer) return null
+    const { memory, render, programs } = this.renderer.info
+    return {
+      geometries: memory.geometries,
+      textures: memory.textures,
+      triangles: render.triangles,
+      calls: render.calls,
+      programs: programs?.length ?? 0,
+    }
+  }
+
+  /**
+   * Where a node's centre currently sits on screen, in CSS pixels from the canvas corner.
+   *
+   * Returns null when the node has no geometry, or is behind the camera, or is outside
+   * the frustum — in all three cases there is nothing at that position to point at.
+   *
+   * A genuine runtime capability rather than test scaffolding: anything that wants to
+   * put a label, a tooltip or a callout next to an object needs exactly this, and the
+   * hotspot layer already does the same projection internally. It also happens to be the
+   * only honest way for a browser test to click a specific object — guessing pixel
+   * coordinates yields a test that survives one camera framing and silently stops
+   * exercising anything under the next.
+   */
+  projectToScreen(nodeId: string): { x: number; y: number } | null {
+    const object = this.graph.objectFor(nodeId)
+    const canvas = this.renderer?.domElement
+    if (!object || !canvas) return null
+
+    const box = new Box3().setFromObject(object)
+    if (box.isEmpty()) return null
+
+    this.camera.camera.updateMatrixWorld()
+    const projected = box.getCenter(new Vector3()).project(this.camera.camera)
+    if (projected.z > 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) return null
+
+    const rect = canvas.getBoundingClientRect()
+    return { x: ((projected.x + 1) / 2) * rect.width, y: ((-projected.y + 1) / 2) * rect.height }
+  }
+
+  /** The canvas this runtime draws into, or null when running head-less. */
+  get canvas(): HTMLCanvasElement | null {
+    return this.renderer?.domElement ?? null
+  }
+
+  /**
+   * Renders one frame without advancing animations.
+   *
+   * The benchmark drives its own loop so it can time each frame precisely; `start()`
+   * would put three's own rAF loop in the way of that measurement.
+   */
+  renderFrame(): void {
+    this.renderer?.render(this.scene, this.camera.camera)
   }
 
   /* --- RuntimeContext ------------------------------------------------------ */

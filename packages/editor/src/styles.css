@@ -956,3 +956,36 @@ code {
   max-height: 80vh;
   overflow-y: auto;
 }
+
+/* --- hotspots --------------------------------------------------------------- */
+
+.hotspot-list {
+  list-style: none;
+}
+
+.hotspot-list > li {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 2px;
+}
+
+.hotspot-list__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hotspot-list__body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 4px 0 2px 22px;
+}
+
+.fields__row--wide {
+  flex: 1 1 260px;
+}
+
+.fields__row--wide textarea {
+  flex: 1;
+  resize: vertical;
+}

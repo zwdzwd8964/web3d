@@ -130,6 +130,9 @@ export function HierarchyTree() {
                 <div
                   key={row.node.id}
                   className="tree-row"
+                  // Read by the golden-path E2E to locate a node in 3D. Cheap, stable,
+                  // and it makes "click 阀盖" mean the object rather than a guessed pixel.
+                  data-node-id={row.node.id}
                   data-selected={selection.includes(row.node.id)}
                   data-drop={isDropTarget ? dropTarget.position : undefined}
                   data-drop-ok={isDropTarget ? dropTarget.ok : undefined}

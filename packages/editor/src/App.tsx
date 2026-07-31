@@ -7,6 +7,7 @@ import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
 import { PublishDialog } from './dialogs/PublishDialog.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
+import { HotspotPanel } from './panels/HotspotPanel.js'
 import { IssuePanel } from './panels/IssuePanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
@@ -33,6 +34,7 @@ type BottomTab =
   | 'material'
   | 'animation'
   | 'viewpoint'
+  | 'hotspots'
   | 'rules'
   | 'variables'
   | 'issues'
@@ -201,6 +203,7 @@ function BottomDock() {
               ['material', '材质'],
               ['animation', '动画'],
               ['viewpoint', '视点'],
+              ['hotspots', '热点'],
               ['rules', '规则'],
               ['variables', '变量'],
               ['issues', '完整性'],
@@ -223,6 +226,7 @@ function BottomDock() {
         {tab === 'material' && <MaterialPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}
+        {tab === 'hotspots' && <HotspotPanel />}
         {tab === 'rules' && <RulePanel />}
         {tab === 'variables' && <VariablePanel />}
         {tab === 'issues' && <IssuePanel />}

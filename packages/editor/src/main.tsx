@@ -38,8 +38,10 @@ async function boot() {
   // Whatever was open last time. A refresh that silently discards the user's work is the
   // worst thing an editor can do, and it is exactly what this used to do.
   const restored = await restoreLastDocument(session)
-  const doc = restored ?? createGoldenPathDocument()
-  await session.seedSampleAsset(doc)
+  // The sample's asset is a placeholder until it is materialised: bytes generated, hashed,
+  // stored, and the record rewritten to match. Without it the default project renders but
+  // cannot be published, because the publish gate looks for a hash storage has never seen.
+  const doc = await session.materialiseSample(restored ?? createGoldenPathDocument())
 
   // D1 · patches reach the renderer incrementally. `load(doc)` on every edit would drop
   // the frame rate to unusable while a gizmo is being dragged.
