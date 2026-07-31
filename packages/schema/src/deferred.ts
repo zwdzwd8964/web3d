@@ -1,13 +1,18 @@
 import { z } from 'zod'
-import { AssetIdSchema, FlowIdSchema, MediaIdSchema, PageIdSchema, StepIdSchema } from './id.js'
+import { FlowIdSchema, PageIdSchema, StepIdSchema } from './id.js'
 import { ActionSchema } from './rule.js'
 
 /**
  * SCHEMA_SPEC §7 · defined in v0, executed in v1.
  *
- * These structures have no v0 runtime and no v0 editing UI, and they are still in the
- * schema. Introducing them in v1 would force a schemaVersion bump plus a migration for
- * zero functional gain; defining them now is free. (MVP_V0 §1.2.)
+ * These structures have no runtime and no editing UI, and they are still in the schema.
+ * Introducing them later would force a schemaVersion bump plus a migration for zero
+ * functional gain; defining them up front is free. (MVP_V0 §1.2.)
+ *
+ * `media` used to live here and **left in v2** (`media.ts`): v0.5 gave it a runtime, so it
+ * is no longer deferred. It went out through an additive migration that only had to fill
+ * in two new fields — which is precisely the payoff the paragraph above predicted, now
+ * collected once.
  *
  * Every enum here is closed on purpose — these are exactly the three requirements most
  * likely to inflate under pressure.
@@ -80,18 +85,4 @@ export const FlowSchema = z
   .describe('v0 未实现')
 export type Flow = z.infer<typeof FlowSchema>
 
-/* --- media ----------------------------------------------------------------- */
-
-export const MEDIA_TYPES = ['image', 'video', 'audio'] as const
-export const MediaTypeSchema = z.enum(MEDIA_TYPES)
-export type MediaType = z.infer<typeof MediaTypeSchema>
-
-export const MediaSchema = z
-  .object({
-    id: MediaIdSchema,
-    type: MediaTypeSchema,
-    assetId: AssetIdSchema,
-  })
-  .strict()
-  .describe('v0 未实现')
-export type Media = z.infer<typeof MediaSchema>
+/* --- media moved to media.ts in v2 (see the file header) ------------------- */

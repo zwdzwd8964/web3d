@@ -65,7 +65,7 @@ describe('packScene()', () => {
     const { manifest } = unpackScene(pack({ coreVersion: '1.4.2' }))
     expect(manifest).toMatchObject({
       coreVersion: '1.4.2',
-      schemaVersion: 1,
+      schemaVersion: CURRENT_VERSION,
       snapshotId: 'snp_a1b2c3d4',
       projectId: createGoldenPathDocument().projectId,
       assetCount: 1,
@@ -138,7 +138,7 @@ describe('unpackScene()', () => {
     const encoder = new TextEncoder()
     const bad = zipSync({
       'manifest.json': encoder.encode('{}'),
-      'scene.json': encoder.encode(JSON.stringify({ schemaVersion: 1 })),
+      'scene.json': encoder.encode(JSON.stringify({ schemaVersion: CURRENT_VERSION })),
     })
     expect(() => unpackScene(bad)).toThrow(/failed validation/)
   })

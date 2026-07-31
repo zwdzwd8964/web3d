@@ -13,6 +13,12 @@ import type { AssetObject } from './remap.js'
  *
  * Ids and timestamps are literal, not generated, so every consumer sees byte-identical
  * bytes. That is what makes a parity trace diffable and a fixture reviewable.
+ *
+ * **It tracks CURRENT_VERSION, while the v1 fixture on disk stays frozen at v1.** The two
+ * are held together by an assertion that `migrate(v1 fixture)` equals this function's
+ * output (fixtures.test.ts) — which turns "the sample and the fixture are one document"
+ * into a live check on the migration itself: the v2 field values below are exactly what
+ * v1 → v2 has to produce, written where a reviewer can read them.
  */
 
 const PUMP_HASH = `sha256:${'ab12cd34ef567890'.repeat(4)}`
@@ -37,7 +43,7 @@ export const GOLDEN_PATH_IDS = {
 /** Builds the SCHEMA_SPEC §12 document. Pure — returns a fresh object every call. */
 export function createGoldenPathDocument(): SceneDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     projectId: GOLDEN_PATH_IDS.project,
     name: '泵组拆装演示',
     meta: {
@@ -46,6 +52,7 @@ export function createGoldenPathDocument(): SceneDocument {
       createdAt: '2026-08-01T02:10:00.000Z',
       updatedAt: '2026-08-01T03:42:11.000Z',
       background: { type: 'color', color: '#1a1a1a' },
+      environment: { hdriAssetId: null, intensity: 1, exposure: 1 },
     },
 
     assets: [
@@ -91,6 +98,8 @@ export function createGoldenPathDocument(): SceneDocument {
         parent: null,
         order: 1000,
         assetRef: null,
+        primitive: null,
+        light: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,
@@ -107,6 +116,8 @@ export function createGoldenPathDocument(): SceneDocument {
           objectName: 'Body',
           missing: false,
         },
+        primitive: null,
+        light: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,
@@ -123,6 +134,8 @@ export function createGoldenPathDocument(): SceneDocument {
           objectName: 'ValveCover',
           missing: false,
         },
+        primitive: null,
+        light: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,

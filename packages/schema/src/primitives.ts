@@ -13,6 +13,10 @@ const Num = z.number().finite()
 export const Vec3Schema = z.tuple([Num, Num, Num])
 export type Vec3 = z.infer<typeof Vec3Schema>
 
+/** v2 · UV repeat / offset (材质 `params.uv`). 进化规划 §4.1.5. */
+export const Vec2Schema = z.tuple([Num, Num])
+export type Vec2 = z.infer<typeof Vec2Schema>
+
 /** Quaternion `[x, y, z, w]`. Euler angles are a UI concern only (SCHEMA_SPEC §4.1-3). */
 export const QuatSchema = z.tuple([Num, Num, Num, Num])
 export type Quat = z.infer<typeof QuatSchema>

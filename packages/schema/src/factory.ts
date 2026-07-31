@@ -1,11 +1,13 @@
 import type { Animation, TweenTarget } from './animation.js'
-import { CURRENT_VERSION } from './document.js'
+import { CURRENT_VERSION, DEFAULT_ENVIRONMENT } from './document.js'
 import type { SceneDocument } from './document.js'
 import type { Hotspot } from './hotspot.js'
 import type { IdFactory } from './id.js'
 import { defaultIdFactory } from './id.js'
+import type { Light } from './light.js'
 import type { Material, MaterialParams } from './material.js'
 import type { AssetRef, Node, NodeOverrides } from './node.js'
+import type { Primitive } from './primitive.js'
 import type { Easing, Transform, Vec3 } from './primitives.js'
 import { ORDER_STEP, identityTransform } from './primitives.js'
 import type { Action, Condition, EventDescriptor, ExecutionMode, OnErrorMode, ReentryPolicy, Rule } from './rule.js'
@@ -53,6 +55,7 @@ export function createEmptyDocument(options: CreateDocumentOptions): SceneDocume
       createdAt: stamp,
       updatedAt: stamp,
       background: { type: 'color', color: '#1a1a1a' },
+      environment: { ...DEFAULT_ENVIRONMENT },
     },
     assets: [],
     nodes: [],
@@ -73,6 +76,9 @@ export interface CreateNodeOptions {
   readonly parent?: string | null
   readonly order?: number
   readonly assetRef?: AssetRef | null
+  /** v2 · at most one carrier may be non-null (I11). */
+  readonly primitive?: Primitive | null
+  readonly light?: Light | null
   readonly transform?: Transform
   readonly visible?: boolean
   readonly locked?: boolean
@@ -88,6 +94,8 @@ export function createNode(options: CreateNodeOptions): Node {
     parent: options.parent ?? null,
     order: options.order ?? ORDER_STEP,
     assetRef: options.assetRef ?? null,
+    primitive: options.primitive ?? null,
+    light: options.light ?? null,
     transform: options.transform ?? identityTransform(),
     visible: options.visible ?? true,
     locked: options.locked ?? false,

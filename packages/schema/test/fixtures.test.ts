@@ -77,11 +77,33 @@ describe('schema fixtures', () => {
 })
 
 describe('the golden path fixture and the in-code sample are one document', () => {
-  it('SCHEMA_SPEC §12 transcription matches createGoldenPathDocument() exactly', () => {
+  it('SCHEMA_SPEC §12, migrated to today’s version, matches createGoldenPathDocument()', () => {
+    // The fixture is frozen at v1 (append-only) while the builder tracks CURRENT_VERSION,
+    // so the two are now related BY THE MIGRATION rather than by transcription. Which
+    // makes this a stronger assertion than it was: it says the v1 -> v2 migration produces
+    // exactly the document the code claims v2 looks like, field for field.
+    //
+    // If they ever diverge, every consumer of the builder (core ECA tests, player parity,
+    // the editor sample project) is testing a different scene than the fixture suite is.
     const onDisk = JSON.parse(readFileSync(join(FIXTURE_ROOT, 'v1/golden-path.json'), 'utf8'))
-    // If these ever diverge, every consumer that uses the builder (core ECA tests,
-    // player parity, the editor sample project) is testing a different scene than the
-    // fixture regression suite is.
-    expect(onDisk).toEqual(JSON.parse(JSON.stringify(createGoldenPathDocument())))
+    const migrated = migrate(onDisk)
+    expect(migrated.ok, migrated.ok ? '' : JSON.stringify(migrated.error, null, 2)).toBe(true)
+    if (!migrated.ok) return
+    expect(JSON.parse(JSON.stringify(migrated.value.document))).toEqual(
+      JSON.parse(JSON.stringify(createGoldenPathDocument())),
+    )
+  })
+
+  it('the v1 fixture on disk is still a v1 document — append-only means never edited', () => {
+    // The failure this guards is subtle and fatal: "fixing up" a historical fixture so it
+    // satisfies the current schema makes the C4 suite green while proving nothing at all.
+    // A v1 file that no longer declares v1, or that has grown v2 fields, has been edited.
+    const onDisk = JSON.parse(readFileSync(join(FIXTURE_ROOT, 'v1/golden-path.json'), 'utf8'))
+    expect(onDisk.schemaVersion).toBe(1)
+    expect(onDisk.meta.environment, 'v1 文档不该有 environment —— 这份 fixture 被改过').toBeUndefined()
+    for (const node of onDisk.nodes) {
+      expect(node.primitive, 'v1 节点不该有 primitive —— 这份 fixture 被改过').toBeUndefined()
+      expect(node.light).toBeUndefined()
+    }
   })
 })

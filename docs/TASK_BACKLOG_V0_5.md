@@ -79,13 +79,24 @@
 
 ## E12 · schema v2
 
-### [ ] T-120 · schema v2 三件套 ★
-- **依赖** 无（与 T-115 ~ T-117 可并行开工） · **预估** 1.5d · **实际** ___
+### [x] T-120 · schema v2 三件套 ★
+- **依赖** 无（与 T-115 ~ T-117 可并行开工） · **预估** 1.5d · **实际** 1.6h
 - **独占** `packages/schema/src/{node,light,primitive,material,document,deferred,media,migrate,primitives}.ts`, `packages/schema/test/fixtures/v2/golden-path-2.json`, `packages/schema/test/migrate.test.ts`, `docs/SCHEMA_SPEC.md`
+  （版本 bump 的必然波及，逐一登记：`schema/src/{factory,index}.ts` 与
+  `schema/test/{fixtures,validate,remap,index-builder}.test.ts` —— `Node` 类型多两个必填字段，
+  凡是手写节点字面量的地方都要补；`core/src/assets/instantiate.ts` 同理；
+  `core/test/{assets/pipeline,runtime/apply-patch,runtime/scene-graph}.test.ts`、
+  `storage/test/package.test.ts` 里的 `schemaVersion: 1` 字面量改为读 `CURRENT_VERSION`；
+  **`editor/src/main.tsx` 是唯一一处真缺陷**，见下）
 - **做** 按进化规划 **§4.1 逐字**落地：节点承载体 `primitive` / `light`（新文件 `primitive.ts` / `light.ts`）、`meta.environment` 与 `background` 增 `'hdri'`、材质 physical 参数与 `uv` 块、`MediaSchema` 从 `deferred.ts` 出列进 `media.ts`（+`name` / `durationS`）、`Vec2`。`CURRENT_VERSION = 2` + 迁移 `1→2`（纯函数补默认值，**不注入灯节点**，D14）+ fixture `v2/golden-path-2.json`（黄金路径 II 终态文档）。v1 fixture 只增不改不删。**同步回写 SCHEMA_SPEC.md** 对应章节（§1/§4/§6/§7/§10，标注 v2 增量）。
 - **验收** 三件套齐；v1 与 v2 fixture 均 `migrate → validate → checkIntegrity` 零 error；文档 JSON 往返 `toEqual`；无手写 interface、无裸 `z.string()` 当枚举
 - **自测** `pnpm -F @w3/schema test`
 - **⚠ 完成后停下来汇报，等人工确认再继续。** 字段形状错了，后面六个里程碑全错，且单测发现不了。
+- **本卡抓到的一条真缺陷**：`editor/src/main.tsx` 的恢复路径用 `validate` 而不是 `migrate`。
+  v1 是唯一版本时看不出来，v2 一上线就变成"升级后所有工程消失"——文档还在盘上，用户看到的
+  是样例场景，与数据丢失无法区分（直接违 C4）。已改为 `migrate` 并记录升级日志；
+  用一次性 Playwright 脚本播种 v1 工程实测通过（把 `migrate` 改回旧行为 → 转红），
+  常设回归测试归 T-172。
 
 ### [ ] T-121 · 完整性检查增量 I11–I15
 - **依赖** T-120 · **预估** 0.5d · **实际** ___

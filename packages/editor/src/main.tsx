@@ -1,5 +1,5 @@
 import { registerBuiltinActions } from '@w3/core'
-import { createGoldenPathDocument, validate } from '@w3/schema'
+import { createGoldenPathDocument, migrate } from '@w3/schema'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
@@ -63,10 +63,21 @@ async function boot() {
 }
 
 /**
- * Loads the most recently updated project, if one validates.
+ * Loads the most recently updated project, migrating it forward if it is older.
  *
- * A stored document that fails validation is reported and skipped rather than thrown:
- * being unable to open the editor at all because of one bad record is far worse than
+ * `migrate`, not `validate` — and the difference is the whole of constitution C4. Because
+ * `schemaVersion` is `z.literal(CURRENT_VERSION)`, a document saved by an older build
+ * fails validation outright. This path used to call `validate` and fall back to the
+ * sample, which was invisible while v1 was the only version in existence and became
+ * "every existing project disappeared on upgrade" the moment v2 shipped — the user's work
+ * is still on disk, but what they SEE is the sample scene, which is indistinguishable
+ * from data loss.
+ *
+ * The migrated document is not written back here. It reaches storage on the first
+ * autosave, so an upgrade that the user then abandons leaves the original record intact.
+ *
+ * A stored document that cannot be migrated at all is reported and skipped rather than
+ * thrown: being unable to open the editor because of one bad record is far worse than
  * starting from the sample, and the record is left in place so it can still be recovered.
  */
 async function restoreLastDocument(session: ProjectSession) {
@@ -78,12 +89,15 @@ async function restoreLastDocument(session: ProjectSession) {
     const stored = await session.load(latest.projectId)
     if (!stored) return null
 
-    const result = validate(stored)
+    const result = migrate(stored)
     if (!result.ok) {
-      console.warn('[project] 上次保存的文档未通过校验，已改为打开样例场景。原文档未删除。', result.error)
+      console.warn('[project] 上次保存的文档无法打开，已改为打开样例场景。原文档未删除。', result.error)
       return null
     }
-    return result.value
+    if (result.value.applied.length > 0) {
+      console.info(`[project] 文档已从 v${result.value.fromVersion} 升级到 v${result.value.toVersion}`, result.value.applied)
+    }
+    return result.value.document
   } catch (error) {
     console.warn('[project] 读取上次的文档失败，已改为打开样例场景。', error)
     return null

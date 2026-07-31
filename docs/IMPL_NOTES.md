@@ -170,6 +170,16 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 > 顺带记一条不修的观察（低）：编辑器在软件渲染下**不提示**，只有播放器提示。
 > 作者机器与客户机器的假设不同，可以辩护；登记在此，v1 若统一再说。
 
+### T-120 抓到的一条（已修）
+
+| 严重度 | 发现 | 位置 | 处置 |
+|---|---|---|---|
+| blocker | **编辑器恢复上次工程用 `validate` 而不是 `migrate`**。`schemaVersion` 是 `z.literal(CURRENT_VERSION)`，所以 v2 一上线，用户盘上每一份 v1 工程都校验失败 → 静默回落到样例场景。文档没丢，但用户看到的是别的场景，与数据丢失无法区分。v1 是唯一版本时这条完全看不出来 | `packages/editor/src/main.tsx:92` | 已改为 `migrate` + 升级日志。用一次性 Playwright 脚本往 IndexedDB 播种一份 v1 工程实测：打开、日志显示 v1→v2、层级树节点数不变（D14 没注入灯）；把 `migrate` 改回旧行为 → 转红。常设回归测试归 T-172 |
+
+> 这条是 schema bump 的连带缺陷，不是 schema 本身的错——但它说明**版本号 +1 的影响面不止
+> `@w3/schema`**。下次 bump 前先搜一遍 `validate(` 的调用点：每一处"读外部来的文档"都必须
+> 是 `migrate`。
+
 ### T-115 期间新发现（未修，登记）
 
 | 严重度 | 发现 | 位置 | 处置 |

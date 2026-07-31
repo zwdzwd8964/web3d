@@ -24,7 +24,12 @@ describe('validate()', () => {
 
   it('pins schemaVersion to the literal current version', () => {
     expect(createGoldenPathDocument().schemaVersion).toBe(CURRENT_VERSION)
-    expect(validate(broken((d) => (d.schemaVersion = 2))).ok).toBe(false)
+    // Written against CURRENT_VERSION rather than against literals, so the next bump does
+    // not turn this into "rejects version 2" on a build where 2 is the current one.
+    // A previous version is rejected HERE on purpose: reading old documents is `migrate`'s
+    // job (C4), and `validate` accepting them would let a v1 document through unmigrated.
+    expect(validate(broken((d) => (d.schemaVersion = CURRENT_VERSION + 1))).ok).toBe(false)
+    expect(validate(broken((d) => (d.schemaVersion = CURRENT_VERSION - 1))).ok).toBe(false)
     expect(validate(broken((d) => (d.schemaVersion = 0))).ok).toBe(false)
   })
 

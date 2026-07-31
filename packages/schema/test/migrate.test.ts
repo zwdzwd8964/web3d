@@ -36,6 +36,65 @@ const unwrap = <T, E>(r: { ok: true; value: T } | { ok: false; error: E }): T =>
   return r.value
 }
 
+/**
+ * A v1-SHAPED document, hand-written rather than derived from the sample.
+ *
+ * `createGoldenPathDocument()` tracks CURRENT_VERSION, so it stopped being a v1 document
+ * the moment v2 shipped. Deriving a "v1" from it by overwriting `schemaVersion` would
+ * produce a document that already has every v2 field — and the v1 -> v2 migration would
+ * then be tested against input it will never see. This is what a v1 document actually
+ * looked like: no `primitive`, no `light`, no `meta.environment`, media without a name.
+ *
+ * The frozen `fixtures/v1/golden-path.json` is the other half of this coverage
+ * (fixtures.test.ts) — that one is a real historical file rather than a reconstruction.
+ */
+const v1Document = () => ({
+  schemaVersion: 1,
+  projectId: 'prj_a1b2c3d4',
+  name: '旧文档',
+  meta: {
+    unit: 'm',
+    upAxis: 'Y',
+    createdAt: '2026-08-01T02:10:00.000Z',
+    updatedAt: '2026-08-01T03:42:11.000Z',
+    background: { type: 'color', color: '#1a1a1a' },
+  },
+  assets: [
+    {
+      id: 'ast_9k2m4p7q',
+      type: 'audio',
+      name: 'alarm.wav',
+      hash: `sha256:${'ab12cd34ef567890'.repeat(4)}`,
+      url: 'assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.wav',
+      version: 1,
+      lineageId: 'ast_9k2m4p7q',
+      stats: { tris: 0, materials: 0, textures: 0, bytes: 220544, textureBytes: 0, nodes: 0, animations: [] },
+    },
+  ],
+  nodes: [
+    {
+      id: 'nd_r5t8y1u3',
+      name: '泵组',
+      parent: null,
+      order: 1000,
+      assetRef: null,
+      transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+      visible: true,
+      locked: false,
+      overrides: {},
+    },
+  ],
+  materials: [],
+  animations: [],
+  hotspots: [],
+  viewpoints: [],
+  variables: [],
+  rules: [],
+  pages: [],
+  flows: [],
+  media: [{ id: 'med_q1s3u5w7', type: 'audio', assetId: 'ast_9k2m4p7q' }],
+})
+
 describe('migrate()', () => {
   it('passes a current-version document through unchanged', () => {
     const doc = createGoldenPathDocument()
@@ -53,9 +112,14 @@ describe('migrate()', () => {
     expect(JSON.stringify(doc)).toBe(before)
   })
 
-  it('is an identity function at v1, and that is asserted rather than assumed', () => {
-    expect(CURRENT_VERSION).toBe(1)
-    expect(MIGRATIONS).toHaveLength(0)
+  it('ships one migration per version step, with no gaps', () => {
+    // The invariant, not the count: a bump that forgets its migration is anti-pattern A4,
+    // and the failure mode is silent — `migrate()` only complains when someone opens an
+    // old document, which is typically the customer, during their trial.
+    expect(MIGRATIONS).toHaveLength(CURRENT_VERSION - 1)
+    for (let v = 1; v < CURRENT_VERSION; v++) {
+      expect(MIGRATIONS.filter((m) => m.from === v), `no migration from v${v}`).toHaveLength(1)
+    }
   })
 
   it('needsMigration is false at the current version and for malformed input', () => {
@@ -88,11 +152,101 @@ describe('migrate()', () => {
     expect(r.error.validation?.length).toBeGreaterThan(0)
   })
 
+  /**
+   * v1 -> v2, the real one.
+   *
+   * Every assertion here reads `applyMigrationChain`'s RAW output rather than `migrate`'s
+   * validated document, and that is the whole point. All the v2 fields except
+   * `media[].name` carry zod defaults, so `validate()` would fill them in even if `up()`
+   * were `d => d` — a migration that does nothing would pass any test written against
+   * `migrate()`. The raw output is where "the migration actually did it" is observable,
+   * and it is also what the NEXT migration in the chain will receive.
+   */
+  describe('v1 -> v2 (v0.5 的一次性字段增量, D11)', () => {
+    const raw = () => unwrap(applyMigrationChain(v1Document())).raw as Record<string, any>
+
+    it('writes the carrier fields onto every node instead of leaving them to zod', () => {
+      const nodes = raw().nodes as Record<string, unknown>[]
+      for (const node of nodes) {
+        expect(Object.hasOwn(node, 'primitive'), 'primitive 缺席 = 下一条迁移会读到 undefined').toBe(true)
+        expect(Object.hasOwn(node, 'light')).toBe(true)
+        expect(node.primitive).toBeNull()
+        expect(node.light).toBeNull()
+      }
+    })
+
+    it('writes the default environment block onto meta', () => {
+      expect((raw().meta as Record<string, unknown>).environment).toEqual({
+        hdriAssetId: null,
+        intensity: 1,
+        exposure: 1,
+      })
+    })
+
+    it('names each media record after the asset it points at', () => {
+      expect((raw().media as Record<string, unknown>[])[0]).toEqual({
+        id: 'med_q1s3u5w7',
+        type: 'audio',
+        assetId: 'ast_9k2m4p7q',
+        name: 'alarm.wav',
+      })
+    })
+
+    it('falls back to the media id when the asset reference is already dangling', () => {
+      // Not a hypothetical: v1 never had UI to create media, so any media record found in
+      // a v1 document was hand-written. `name` has no default and cannot have one, so the
+      // choice is between a traceable id and refusing to open the document at all.
+      const doc = v1Document()
+      doc.media = [{ id: 'med_q1s3u5w7', type: 'audio', assetId: 'ast_00000000' }]
+      const migrated = unwrap(applyMigrationChain(doc)).raw as Record<string, any>
+      expect(migrated.media[0].name).toBe('med_q1s3u5w7')
+    })
+
+    it('does not inject light nodes (D14)', () => {
+      // The default rig is a display default, like the background colour. Materialising it
+      // would make every existing project sprout three tree entries the user never made,
+      // cannot explain, and turns the scene black by deleting.
+      const before = v1Document().nodes.length
+      const nodes = raw().nodes as Record<string, unknown>[]
+      expect(nodes).toHaveLength(before)
+      expect(nodes.some((n) => n.light !== null)).toBe(false)
+    })
+
+    it('fills gaps without normalising what is already there', () => {
+      const doc = v1Document() as Record<string, any>
+      doc.meta.environment = { hdriAssetId: null, intensity: 2.5, exposure: 1 }
+      doc.nodes[0].primitive = { kind: 'sphere', radius: 2 }
+      doc.media[0].name = '用户改过的名字'
+      const migrated = unwrap(applyMigrationChain(doc)).raw as Record<string, any>
+      expect(migrated.meta.environment.intensity).toBe(2.5)
+      expect(migrated.nodes[0].primitive).toEqual({ kind: 'sphere', radius: 2 })
+      expect(migrated.media[0].name).toBe('用户改过的名字')
+    })
+
+    it('produces a document that validates and equals what a second run produces', () => {
+      const first = unwrap(migrate(v1Document()))
+      expect(first.fromVersion).toBe(1)
+      expect(first.toVersion).toBe(2)
+      expect(first.applied).toHaveLength(1)
+      expect(first.applied[0]).toMatch(/^v1 -> v2: /)
+      expect(JSON.stringify(unwrap(migrate(v1Document())).document)).toBe(JSON.stringify(first.document))
+    })
+
+    it('leaves the input untouched', () => {
+      const doc = v1Document()
+      const before = JSON.stringify(doc)
+      migrate(doc)
+      expect(JSON.stringify(doc)).toBe(before)
+    })
+  })
+
   describe('the chain, driven with a synthetic set of migrations', () => {
     const opts = { migrations: syntheticChain, targetVersion: 3 }
+    // The synthetic chain starts at v1, so it needs a v1-versioned input. Only
+    // `meta.background` is touched by it, so the v1 document above is a fine vehicle.
 
     it('walks every step in order and records what it applied', () => {
-      const result = unwrap(applyMigrationChain(createGoldenPathDocument(), opts))
+      const result = unwrap(applyMigrationChain(v1Document(), opts))
       expect(result.fromVersion).toBe(1)
       expect(result.toVersion).toBe(3)
       expect(result.applied).toEqual([
@@ -112,8 +266,8 @@ describe('migrate()', () => {
     })
 
     it('the chain’s output is still validated by migrate() — nothing is trusted', () => {
-      // The synthetic chain intentionally produces a shape v1 does not accept.
-      const r = migrate(createGoldenPathDocument(), opts)
+      // The synthetic chain intentionally produces a shape no version accepts.
+      const r = migrate(v1Document(), opts)
       expect(r.ok).toBe(false)
       if (r.ok) return
       expect(r.error.kind).toBe('invalid-result')

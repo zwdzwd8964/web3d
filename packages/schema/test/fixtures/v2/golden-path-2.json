@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 2,
+  "projectId": "prj_s7t9v2x4",
+  "name": "设备展台",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-09-01T01:00:00.000Z",
+    "updatedAt": "2026-09-01T02:35:40.000Z",
+    "background": {
+      "type": "hdri",
+      "color": "#1a1a1a"
+    },
+    "environment": {
+      "hdriAssetId": "ast_h4j6l8n1",
+      "intensity": 1,
+      "exposure": 1
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_9k2m4p7q",
+      "type": "model",
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
+      "version": 1,
+      "lineageId": "ast_9k2m4p7q",
+      "stats": {
+        "tris": 128400,
+        "materials": 12,
+        "textures": 6,
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
+        ]
+      },
+      "audit": {
+        "checkedAt": "2026-09-01T01:04:12.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
+    },
+    {
+      "id": "ast_h4j6l8n1",
+      "type": "hdri",
+      "name": "工业厂房.hdr",
+      "hash": "sha256:c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738",
+      "url": "assets/c1/d2/c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738.hdr",
+      "version": 1,
+      "lineageId": "ast_h4j6l8n1",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 1,
+        "bytes": 6291456,
+        "textureBytes": 11184811,
+        "nodes": 0,
+        "animations": []
+      },
+      "audit": {
+        "checkedAt": "2026-09-01T02:02:30.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "bytes",
+            "value": 6291456,
+            "limit": 8388608,
+            "level": "pass",
+            "advice": ""
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/c1/d2/c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738c1d2e3f405162738.thumb.png"
+    },
+    {
+      "id": "ast_t2v4x6z8",
+      "type": "texture",
+      "name": "brushed-metal.png",
+      "hash": "sha256:d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263",
+      "url": "assets/d4/c3/d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263.png",
+      "version": 1,
+      "lineageId": "ast_t2v4x6z8",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 1,
+        "bytes": 512000,
+        "textureBytes": 5592406,
+        "nodes": 0,
+        "animations": []
+      },
+      "audit": {
+        "checkedAt": "2026-09-01T01:48:05.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "textureSize",
+            "value": 1024,
+            "limit": 2048,
+            "level": "pass",
+            "advice": ""
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/d4/c3/d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263d4c3b2a190817263.thumb.png"
+    },
+    {
+      "id": "ast_w3y5a7c9",
+      "type": "image",
+      "name": "warning.png",
+      "hash": "sha256:e5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5c",
+      "url": "assets/e5/f6/e5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5c.png",
+      "version": 1,
+      "lineageId": "ast_w3y5a7c9",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 1,
+        "bytes": 86200,
+        "textureBytes": 1398102,
+        "nodes": 0,
+        "animations": []
+      },
+      "thumbnailUrl": "assets/e5/f6/e5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5ce5f60718293a4b5c.thumb.png"
+    },
+    {
+      "id": "ast_a5c7e9g2",
+      "type": "audio",
+      "name": "alarm.wav",
+      "hash": "sha256:f6a5b4c3d2e1f009f6a5b4c3d2e1f009f6a5b4c3d2e1f009f6a5b4c3d2e1f009",
+      "url": "assets/f6/a5/f6a5b4c3d2e1f009f6a5b4c3d2e1f009f6a5b4c3d2e1f009f6a5b4c3d2e1f009.wav",
+      "version": 1,
+      "lineageId": "ast_a5c7e9g2",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 0,
+        "bytes": 220544,
+        "textureBytes": 0,
+        "nodes": 0,
+        "animations": []
+      },
+      "audit": {
+        "checkedAt": "2026-09-01T02:20:11.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "bytes",
+            "value": 220544,
+            "limit": 10485760,
+            "level": "pass",
+            "advice": ""
+          }
+        ]
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_s1u3w5y7",
+      "name": "展台",
+      "parent": null,
+      "order": 1000,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          2,
+          0.2,
+          2
+        ]
+      },
+      "light": null,
+      "transform": {
+        "p": [
+          0,
+          0.1,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_m5p7r9t2"
+      }
+    },
+    {
+      "id": "nd_p2r4t6v8",
+      "name": "泵体",
+      "parent": null,
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "transform": {
+        "p": [
+          0,
+          0.2,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {}
+    },
+    {
+      "id": "nd_c3e5g7j9",
+      "name": "泵体 副本",
+      "parent": null,
+      "order": 3000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "transform": {
+        "p": [
+          0.5,
+          0.2,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {}
+    },
+    {
+      "id": "nd_l4n6q8s1",
+      "name": "聚光灯",
+      "parent": null,
+      "order": 4000,
+      "assetRef": null,
+      "primitive": null,
+      "light": {
+        "kind": "spot",
+        "color": "#ffd9a0",
+        "intensity": 3,
+        "range": 0,
+        "decay": 2,
+        "angleDeg": 30,
+        "penumbra": 0.2,
+        "shadow": {
+          "enabled": true,
+          "quality": "medium",
+          "bias": -0.0005
+        }
+      },
+      "transform": {
+        "p": [
+          1.2,
+          2,
+          1.2
+        ],
+        "r": [
+          -0.42219,
+          0.28146,
+          0,
+          0.861705
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {}
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_m5p7r9t2",
+      "name": "默认材质",
+      "base": "standard",
+      "preset": "brushed-metal",
+      "params": {
+        "color": "#c8ccd0",
+        "roughness": 0.35,
+        "metalness": 1,
+        "maps": {
+          "map": "ast_t2v4x6z8"
+        },
+        "uv": {
+          "repeat": [
+            2,
+            2
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "rotationDeg": 0
+        }
+      }
+    }
+  ],
+  "animations": [],
+  "hotspots": [
+    {
+      "id": "hs_h6k8m1p3",
+      "name": "运行警告",
+      "anchor": {
+        "nodeId": "nd_p2r4t6v8",
+        "offset": [
+          0,
+          0.45,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "运行警告",
+        "text": "泵体温度超过 80℃ 时该指示灯闪烁，须立即停机检查。",
+        "mediaId": "med_w7y9b2d4"
+      },
+      "style": {
+        "marker": "pin",
+        "color": "#ffb020"
+      }
+    }
+  ],
+  "viewpoints": [],
+  "variables": [],
+  "rules": [
+    {
+      "id": "rl_r9t2v4x6",
+      "name": "点击泵体发出警告",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_p2r4t6v8"
+        }
+      },
+      "if": [],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playMedia",
+          "params": {
+            "mediaId": "med_a8c1e3g5",
+            "await": false
+          }
+        },
+        {
+          "action": "setLight",
+          "params": {
+            "nodeId": "nd_l4n6q8s1",
+            "intensity": 6
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_p2r4t6v8",
+            "preset": "outline_red"
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [],
+  "flows": [],
+  "media": [
+    {
+      "id": "med_w7y9b2d4",
+      "type": "image",
+      "assetId": "ast_w3y5a7c9",
+      "name": "warning.png"
+    },
+    {
+      "id": "med_a8c1e3g5",
+      "type": "audio",
+      "assetId": "ast_a5c7e9g2",
+      "name": "alarm.wav",
+      "durationS": 2.4
+    }
+  ]
+}

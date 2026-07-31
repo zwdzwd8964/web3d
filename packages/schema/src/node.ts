@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { AssetIdSchema, MaterialIdSchema, NodeIdSchema } from './id.js'
+import { LightSchema } from './light.js'
+import { PrimitiveSchema } from './primitive.js'
 import { TransformSchema } from './primitives.js'
 
 /**
@@ -31,6 +33,12 @@ export const AssetRefSchema = z
   .strict()
 export type AssetRef = z.infer<typeof AssetRefSchema>
 
+/**
+ * `castShadow` / `receiveShadow` were defined in v1 and did nothing until v2 wired up the
+ * shadow pipeline. Their SHAPE is unchanged — v2 only gave them an effect. Semantics: with
+ * shadows on, meshes cast and receive by default and these two turn an individual node
+ * off; absent still means "inherit", exactly like every other override.
+ */
 export const NodeOverridesSchema = z
   .object({
     materialId: MaterialIdSchema.optional(),
@@ -51,8 +59,21 @@ export const NodeSchema = z
      * midpoint, and a batch renumber runs when the gap is exhausted.
      */
     order: z.number().int(),
-    /** null = a pure grouping node (an empty Group), created by the user. */
+    /**
+     * The three CARRIERS. A node has at most one; all three null is a pure grouping node
+     * (an empty Group), which is what the user gets when they create a folder in the tree.
+     *
+     * Mutual exclusion is enforced by integrity check I11 (error level), NOT by a zod
+     * union. A union would make the field positions depend on which carrier is present,
+     * and every patch path — `/nodes/3/light/intensity` — would stop being stable and
+     * readable. Keeping the fields side by side costs one integrity rule and buys a patch
+     * path that D1's incremental sync can dispatch on.
+     */
     assetRef: AssetRefSchema.nullable(),
+    /** v2 · a parametric box / sphere / … created in the editor, no asset involved. */
+    primitive: PrimitiveSchema.nullable().default(null),
+    /** v2 · a light. D12: a light is a node, so it inherits everything nodes already have. */
+    light: LightSchema.nullable().default(null),
     transform: TransformSchema,
     visible: z.boolean().default(true),
     /** Editor-only: blocks picking and gizmo. Still rendered, still scriptable. */

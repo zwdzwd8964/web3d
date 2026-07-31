@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import { AnimationSchema } from './animation.js'
 import { AssetSchema } from './asset.js'
-import { FlowSchema, MediaSchema, PageSchema } from './deferred.js'
+import { FlowSchema, PageSchema } from './deferred.js'
 import { HotspotSchema } from './hotspot.js'
-import { ProjectIdSchema } from './id.js'
+import { AssetIdSchema, ProjectIdSchema } from './id.js'
 import { MaterialSchema } from './material.js'
+import { MediaSchema } from './media.js'
 import { NodeSchema } from './node.js'
 import { HexColorSchema, TimestampSchema } from './primitives.js'
 import { RuleSchema } from './rule.js'
@@ -28,19 +29,48 @@ import { ViewpointSchema } from './viewpoint.js'
  * never by changing the persisted shape.
  */
 
-export const CURRENT_VERSION = 1
+export const CURRENT_VERSION = 2
 
 export const SCENE_UNITS = ['m', 'cm', 'mm'] as const
 export const UP_AXES = ['Y', 'Z'] as const
-export const BACKGROUND_TYPES = ['color', 'transparent'] as const
+/** v2 adds `'hdri'`: the environment map doubles as the visible backdrop. */
+export const BACKGROUND_TYPES = ['color', 'transparent', 'hdri'] as const
 
 export const BackgroundSchema = z
   .object({
     type: z.enum(BACKGROUND_TYPES),
+    /** Kept even when `type` is not `'color'`, so switching back restores the user's pick. */
     color: HexColorSchema.default('#1a1a1a'),
   })
   .strict()
 export type Background = z.infer<typeof BackgroundSchema>
+
+/**
+ * v2 · image-based lighting.
+ *
+ * `hdriAssetId` is the switch for the whole feature: non-null means core builds a PMREM
+ * environment from that `.hdr` and — per D14 — the built-in default light rig stands down.
+ * Null restores v0's look exactly, which is what gate G0.5-6 asserts.
+ *
+ * **`toneMapping` is deliberately NOT a field.** Which tone-mapping curve to use is a
+ * rendering decision that follows from whether there is an HDRI at all (ACESFilmic when
+ * there is, v0's setting when there is not). Exposing it would let a user produce a washed
+ * out scene through a control they cannot connect to the symptom — the same reasoning that
+ * keeps texture colour space out of the document (MVP_V0 D3).
+ *
+ * `exposure` IS a field: it is an artistic choice about the scene, not about the renderer.
+ */
+export const EnvironmentSchema = z
+  .object({
+    /** Points at an asset with `type: 'hdri'`. null = no IBL. Checked by I12. */
+    hdriAssetId: AssetIdSchema.nullable().default(null),
+    intensity: z.number().min(0).max(4).default(1),
+    exposure: z.number().min(0.1).max(4).default(1),
+  })
+  .strict()
+export type Environment = z.infer<typeof EnvironmentSchema>
+
+export const DEFAULT_ENVIRONMENT: Environment = { hdriAssetId: null, intensity: 1, exposure: 1 }
 
 /**
  * `unit` and `upAxis` record the DOCUMENT's target coordinate system. An asset whose
@@ -54,6 +84,7 @@ export const MetaSchema = z
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
     background: BackgroundSchema.default({ type: 'color', color: '#1a1a1a' }),
+    environment: EnvironmentSchema.default({ hdriAssetId: null, intensity: 1, exposure: 1 }),
   })
   .strict()
 export type Meta = z.infer<typeof MetaSchema>
@@ -77,6 +108,7 @@ export const SceneDocumentSchema = z
     // Defined in v0, no runtime until v1 — see deferred.ts and SCHEMA_SPEC §7.
     pages: z.array(PageSchema).default([]),
     flows: z.array(FlowSchema).default([]),
+    /** Defined in v0, given a runtime in v0.5 — see media.ts and SCHEMA_SPEC §6.7. */
     media: z.array(MediaSchema).default([]),
   })
   .strict()

@@ -1,4 +1,4 @@
-import { createSequentialIdFactory } from '@w3/schema'
+import { CURRENT_VERSION, createSequentialIdFactory } from '@w3/schema'
 import { Box3, Matrix4, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 import { auditGlb, estimateTextureBytes, grade, measure, readGlb } from '../../src/assets/audit.js'
@@ -359,7 +359,7 @@ describe('the pipeline feeds the renderer', () => {
 
     const graph = new SceneGraph({ assets: { get: (id) => (id === 'ast_9k2m4p7q' ? loaded : undefined) } })
     graph.build({
-      schemaVersion: 1,
+      schemaVersion: CURRENT_VERSION,
       projectId: 'prj_a1b2c3d4',
       name: '导入结果',
       meta: {
@@ -368,6 +368,7 @@ describe('the pipeline feeds the renderer', () => {
         createdAt: at(),
         updatedAt: at(),
         background: { type: 'color', color: '#1a1a1a' },
+        environment: { hdriAssetId: null, intensity: 1, exposure: 1 },
       },
       assets: [],
       nodes,

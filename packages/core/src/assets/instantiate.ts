@@ -107,6 +107,10 @@ export function instantiate(scene: Object3D, options: InstantiateOptions): Insta
         objectName: object.name === '' ? object.type : object.name,
         missing: false,
       },
+      // v2 carriers. An imported node is an asset instance, never a primitive or a light
+      // (I11 makes that mutual exclusion an integrity rule, not a convention).
+      primitive: null,
+      light: null,
       transform: decompose(local),
       visible: object.visible,
       locked: false,

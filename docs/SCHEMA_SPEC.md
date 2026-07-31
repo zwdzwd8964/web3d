@@ -1,8 +1,12 @@
-# 场景文档模型规范 · SceneDocument v1
+# 场景文档模型规范 · SceneDocument v2
 
 **包**：`@w3/schema`
 **上位文档**：[NORTH_STAR.md](NORTH_STAR.md)（C1 / C4 / C9）
 **性质**：**实现规范，逐字实现。** 需要偏离时先写 ADR 并征得确认，不要自行调整字段名或结构。
+
+**版本**：当前 `schemaVersion: 2`。v2 增量由 [MVP_V0_5_进化规划.md](MVP_V0_5_进化规划.md) §4
+（已冻结）批准，T-120 落地并回写本文。文中 v2 新增处一律标 **`v2`**；未标注的即 v1 原文，
+**形状一字未改**——这是 C4 的直接体现：v1→v2 是一次纯增量迁移，没有任何字段被重命名或改形。
 
 > 技术方案 §1.2 的原话："整个系统的所有功能都是在读写同一份 JSON。这份 schema 设计错了，18 个功能全都要跟它打架。"
 
@@ -22,7 +26,7 @@
 
 ```ts
 export const SceneDocumentSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),                     // v2
   projectId:     Id('prj'),
   name:          z.string().min(1).max(120),
   meta:          MetaSchema,
@@ -39,7 +43,7 @@ export const SceneDocumentSchema = z.object({
   // v0 定义结构但无运行时实现，见 §7
   pages:  z.array(PageSchema).default([]),
   flows:  z.array(FlowSchema).default([]),
-  media:  z.array(MediaSchema).default([]),
+  media:  z.array(MediaSchema).default([]),        // v2 起有运行时，见 §6.7
 })
 export type SceneDocument = z.infer<typeof SceneDocumentSchema>
 ```
@@ -55,13 +59,28 @@ const MetaSchema = z.object({
   createdAt: z.string().datetime(),      // ISO 8601 UTC
   updatedAt: z.string().datetime(),
   background: z.object({
-    type:  z.enum(['color', 'transparent']),
+    type:  z.enum(['color', 'transparent', 'hdri']),   // v2 新增 'hdri'
     color: HexColor.default('#1a1a1a'),
   }).default({ type: 'color', color: '#1a1a1a' }),
+
+  // v2 · 基于图像的照明（IBL）
+  environment: z.object({
+    hdriAssetId: Id('ast').nullable().default(null),   // 指向 type: 'hdri' 的资产；null = 无 IBL
+    intensity:   z.number().min(0).max(4).default(1),
+    exposure:    z.number().min(0.1).max(4).default(1),
+  }).default({ hdriAssetId: null, intensity: 1, exposure: 1 }),
 })
 ```
 
 `unit` 与 `upAxis` 记录的是**文档的目标坐标系**。资产导入时若不匹配，在导入阶段一次性归一化到文档坐标系（见 §5.2），运行时不再做任何坐标换算。
+
+**`background.color` 在 `type` 不是 `'color'` 时也保留**，这样切回纯色时用户原来的选择还在。
+
+**`toneMapping` 不是文档字段**（v2 明确决定）。用哪条色调映射曲线由"有没有 HDRI"推出：
+`hdriAssetId` 非空时 core 切 ACESFilmic，为空时还原 v0 的设置——所以老文档观感逐参数不变
+（晋级门槛 G0.5-6 有回归断言）。暴露它只会让用户通过一个他无法与症状联系起来的控件把画面
+调坏，与"色彩空间不进文档"（§6.1、MVP 规划 D3）是同一条理由。`exposure` **是**字段：
+它是关于场景的艺术选择，不是关于渲染器的实现细节。
 
 ---
 
@@ -157,12 +176,15 @@ const NodeSchema = z.object({
   parent: Id('nd').nullable(),               // null = 根节点
   order:  z.number().int(),                  // 同级排序，见下
 
+  // ── 三种承载体，至多一个非空；三者皆 null = 纯逻辑分组节点（空 Group）──
   assetRef: z.object({
     assetId:    Id('ast'),
     objectPath: z.string(),                  // 'Root/Pump/Body'
     objectName: z.string(),                  // 'Body'
     missing:    z.boolean().default(false),  // 重映射失败的孤儿标记
-  }).nullable(),                             // null = 纯逻辑分组节点（空 Group）
+  }).nullable(),
+  primitive: PrimitiveSchema.nullable().default(null),   // v2，见 §4.3
+  light:     LightSchema.nullable().default(null),       // v2，见 §4.4
 
   transform: z.object({
     p: Vec3.default([0, 0, 0]),
@@ -188,10 +210,98 @@ const NodeSchema = z.object({
 3. **`r` 是四元数 `[x,y,z,w]`，不是欧拉角。** UI 上给用户看欧拉角，读写时转换。存欧拉角会引入万向锁和插值歧义。
 4. **`parent` + `order` 决定树形。** `order` 是同级内的浮点或整数排序键；拖拽改序时只改 `order`，不做数组重排（否则一次拖拽产生 N 条 patch）。建议用间隔为 1000 的整数，插入时取中值，间隔耗尽时批量重编号。
 5. **`assetRef` 三份冗余缺一不可**（技术方案 §1.2 纪律 2）。`assetId` 定位文件，`objectPath` 定位层级位置，`objectName` 兜底。缺任何一个，§5.3 的重映射就降级到猜。
+6. **（v2）三种承载体互斥，由完整性检查 I11 把守（error 级），不用 zod 联合。** 用联合会
+   让字段位置随承载体类型变化，patch 路径 `/nodes/3/light/intensity` 就不再稳定可读——而
+   增量同步（MVP 规划 D1）正是按路径分发的。并排放三个字段，代价是一条完整性规则，换来的是
+   一条可分发的路径。
+7. **（v2）`overrides.castShadow / receiveShadow` 形状未变，v2 起才真正生效。** 阴影管线开启时
+   mesh 缺省投射且接收，这两个字段用于关掉个别节点；缺失仍然表示"继承"。
 
 ### 4.2 循环检测
 
 `parent` 链必须是森林，不得成环。`checkIntegrity`（§9）中强制检测；拖拽改父的 UI 必须在放下前就阻止把节点拖进自己的子树。
+
+### 4.3 primitive — 参数化原始体（v2）
+
+```ts
+const PrimitiveSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('box'),      size: Vec3.default([1, 1, 1]) }),
+  z.object({ kind: z.literal('sphere'),   radius: z.number().positive().default(0.5) }),
+  z.object({ kind: z.literal('cylinder'), radiusTop: z.number().nonnegative().default(0.5),
+             radiusBottom: z.number().nonnegative().default(0.5),
+             height: z.number().positive().default(1) }),
+  z.object({ kind: z.literal('cone'),     radius: z.number().positive().default(0.5),
+             height: z.number().positive().default(1) }),
+  z.object({ kind: z.literal('torus'),    radius: z.number().positive().default(0.5),
+             tube: z.number().positive().default(0.15) }),
+  z.object({ kind: z.literal('plane'),    width: z.number().positive().default(1),
+             height: z.number().positive().default(1) }),
+  z.object({ kind: z.literal('capsule'),  radius: z.number().positive().default(0.3),
+             length: z.number().positive().default(0.6) }),
+])
+```
+
+**只存语义尺寸，不存分段数。** 分段数是渲染实现细节，由 core 固化——放进文档会让同一份文档
+在两个 core 版本下长得不一样，且给用户一个"只能把画面变慢"的旋钮。与色彩空间不进文档
+（§6.1、D3）是同一条处理哲学。
+
+`kind` 是封闭判别联合：第八种原始体 = 改 schema = 自动触发分诊 Q3（北极星 §4）。
+
+原始体节点的材质**必须显式**：编辑器创建时确保文档里存在一条名为「默认材质」的共享 material
+记录并把 `overrides.materialId` 指向它（MVP v0.5 规划 D15）。core 只在 override 缺失时兜底
+渲染中性灰并 warn——**没有隐藏材质态**，否则用户在材质面板里看到空白却改不动它。
+
+### 4.4 light — 灯光（v2）
+
+```ts
+const Shadow = z.object({
+  enabled: z.boolean().default(false),
+  quality: z.enum(['low', 'medium', 'high']).default('medium'),   // core 映射 512/1024/2048
+  bias:    z.number().min(-0.01).max(0.01).default(-0.0005),
+}).default({ enabled: false, quality: 'medium', bias: -0.0005 })
+
+const LightSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('ambient'),
+             color: HexColor.default('#ffffff'),
+             intensity: z.number().min(0).max(10).default(0.6) }),
+  z.object({ kind: z.literal('hemisphere'),
+             skyColor: HexColor.default('#ffffff'), groundColor: HexColor.default('#444444'),
+             intensity: z.number().min(0).max(10).default(0.6) }),
+  z.object({ kind: z.literal('directional'),
+             color: HexColor.default('#ffffff'),
+             intensity: z.number().min(0).max(20).default(1.5),
+             shadow: Shadow }),
+  z.object({ kind: z.literal('point'),
+             color: HexColor.default('#ffffff'),
+             intensity: z.number().min(0).max(20).default(1),
+             range: z.number().nonnegative().default(0),          // 0 = 无限
+             decay: z.number().min(0).max(4).default(2),
+             shadow: Shadow }),
+  z.object({ kind: z.literal('spot'),
+             color: HexColor.default('#ffffff'),
+             intensity: z.number().min(0).max(20).default(2),
+             range: z.number().nonnegative().default(0),
+             decay: z.number().min(0).max(4).default(2),
+             angleDeg: z.number().min(1).max(89).default(30),
+             penumbra: z.number().min(0).max(1).default(0.2),
+             shadow: Shadow }),
+])
+```
+
+三条纪律：
+
+1. **灯是节点，不是独立集合**（D12）。它因此白得层级树、transform、gizmo、撤销、显隐、
+   `locked`、`refsTo`、增量 patch 的全部机制。顶层加 `lights: []` 的代价是这些每一样都要为灯
+   再写一遍。
+2. **方向性灯（directional / spot）沿节点局部 -Z 照射，文档里没有 `target` 对象**（D13）。
+   把 three 的双对象模型抄进文档，等于让两个对象联动编辑、联动撤销、联动复制。core 每帧由
+   节点世界矩阵推出 target，那是实现细节。
+3. **`angleDeg` 存角度**（用户可读），core 转弧度。`quality` 存三档而不是像素数——贴图尺寸是
+   core 的渲染决定。
+
+**默认灯架不进文档**（D14）：文档不含任何灯节点且 `environment.hdriAssetId` 为空时，core 挂
+v0 的默认三灯 rig（不进文档、不可拾取、层级树不可见）；出现第一盏灯或设了环境，rig 整体退场；
+删光了再回来。它与"默认背景色"同级，是**展示性缺省**，不是业务状态。
 
 ---
 
@@ -282,11 +392,36 @@ const MaterialSchema = z.object({
       aoMap:        Id('ast').optional(),
       emissiveMap:  Id('ast').optional(),
     }).default({}),
+
+    // v2 · physical 专属（base !== 'physical' 时出现 → 完整性检查 I15 warn）
+    transmission:       z.number().min(0).max(1).optional(),
+    ior:                z.number().min(1).max(2.5).optional(),
+    thickness:          z.number().min(0).optional(),
+    clearcoat:          z.number().min(0).max(1).optional(),
+    clearcoatRoughness: z.number().min(0).max(1).optional(),
+
+    // v2 · 一套 UV 变换作用于该材质**全部**已挂贴图槽位
+    uv: z.object({
+      repeat:      Vec2.default([1, 1]),
+      offset:      Vec2.default([0, 0]),
+      rotationDeg: z.number().min(-360).max(360).default(0),
+    }).optional(),
   }).default({}),
 })
 ```
 
 `params` 中缺失的字段 = 继承源材质。这与 node overrides 是同一条纪律。**色彩空间不是文档字段**，由 core 按贴图槽位固定处理（见 MVP 规划 D3）——它是渲染实现细节，不该让用户配错。
+
+**六个 `maps` 槽位的形状从 v1 起就没变过，v2 只是把它们接通了。** 这是"字段先定义、运行时后
+补"这条做法唯一一次真正收账：接贴图没有触发任何迁移。
+
+**UV 逐槽位独立不做**（v0.5 灰区裁决）：面板复杂度 ×6，而真实需求 <5%。`rotationDeg` 存角度，
+与 `angleDeg` 同理。
+
+**`preset` 是溯源标记，不是引用**（D16）：应用材质预设 = 把预设的**全量参数** commit 进
+material 记录，同时记下预设名。文档因此自洽——删掉整个预设库目录，已发布的 `.w3p` 照常渲染。
+如果只存 `preset: 'brushed-metal'` 运行时去库里查，发布包在没有库文件的环境下就渲染错误，
+且预设库一改历史项目全变。
 
 ### 6.2 animations（技术方案 R03 的防线）
 
@@ -361,7 +496,7 @@ const HotspotSchema = z.object({
     type:  z.literal('panel'),                    // v0 只有 panel，封闭枚举留扩展
     title: z.string().default(''),
     text:  z.string().default(''),
-    mediaId: Id('med').optional(),                // v0 不实现，字段先留
+    mediaId: Id('med').optional(),                // v2 起生效：image 面板内展示，video 原生 controls
   }),
   style: z.object({
     marker: z.enum(['dot', 'pin', 'number']).default('dot'),
@@ -411,11 +546,34 @@ const RuleSchema = z.object({
 
 条件用 `if` + `ifAny` 两个平铺数组，**不做任意嵌套的布尔表达式树**。理由：嵌套表达式的编辑 UI 复杂度是平铺的数倍，而实际需求 95% 是"几个条件都满足"。需要复杂逻辑时，用中间变量拆成两条规则——这也让规则表更容易转成验收用例（技术方案 R14）。
 
+### 6.7 media（v2 出列，`media.ts`）
+
+```ts
+const MediaSchema = z.object({
+  id:        Id('med'),
+  type:      z.enum(['image', 'video', 'audio']),
+  assetId:   Id('ast'),
+  name:      z.string().min(1),                       // v2：库面板展示名，默认原文件名
+  durationS: z.number().positive().optional(),        // v2：audio/video 导入时读取；image 无
+})
+```
+
+媒体记录是资产之上的薄层：资产拥有字节、hash 与导入体检，记录拥有**这个场景**怎么称呼它、
+它播多久。同一个文件被用两次就是两条记录、一份 blob。
+
+**`durationS` 进文档，不是播放时现读**（v0.5 规划 D19）。`playMedia` 的 `await: true` 必须能在
+无 GPU、无声卡、用假时钟的纯 Node 单测里挂起正确的时长——那里没有 `<audio>` 也没有 `ended`
+事件。导入时读出来写进文档，是媒体动作能满足 C8 的唯一办法。缺失时动作立即 resolve 并 warn，
+不会把 sequence 永久挂住。
+
 ---
 
-## 7. v0 定义但不实现的结构
+## 7. 定义但不实现的结构
 
 **必须写进 schema，不实现运行时。** 理由见 MVP 规划 §1.2：晚加就要多一次 schemaVersion 迁移，而现在定义是零成本的。
+
+> **`media` 已于 v2 出列**（见 §6.7）——它是这条做法的第一次兑现：接通多媒体只需要一次纯增量
+> 迁移补两个字段，`hotspots[].content.mediaId` 一个字都没改。
 
 ```ts
 const PageSchema = z.object({
@@ -439,11 +597,6 @@ const FlowSchema = z.object({
   })).default([]),
 }).describe('v0 未实现')
 
-const MediaSchema = z.object({
-  id: Id('med'),
-  type: z.enum(['image', 'video', 'audio']),
-  assetId: Id('ast'),
-}).describe('v0 未实现')
 ```
 
 `constraints`（约束关系对接，技术方案 R04 待甲方确认）**不定义**。它的形状完全取决于澄清结果，猜一个错的结构比没有更糟。
@@ -500,20 +653,27 @@ export function checkIntegrity(doc: SceneDocument): IntegrityIssue[]
 | I8 | 规则 `enabled` 但 `then` 中引用了已 `missing` 的节点 | warn |
 | I9 | 存在从未被任何规则/流程触发的动画（孤立配置） | info |
 | I10 | 存在不可达的节点（parent 指向已被过滤的分支）| error |
+| I11 | **（v2）** `assetRef` / `primitive` / `light` 至多一个非空 | error |
+| I12 | **（v2）** `environment.hdriAssetId` 指向存在且 `type === 'hdri'` 的资产；`background.type === 'hdri'` 时 `hdriAssetId` 必须非空 | error |
+| I13 | **（v2）** `params.maps.*` 全部指向存在且 `type === 'texture'` 的资产 | error |
+| I14 | **（v2）** `media.assetId` 的资产类型与 `media.type` 匹配；`hotspot.content.mediaId` 指向存在的 media 且 `type ∈ {image, video}`；`playMedia` 引用的 media `type === 'audio'` | error |
+| I15 | **（v2）** physical 专属参数出现在 `base !== 'physical'` 的材质上 | warn |
 
 **发布前 error 级别一条都不许有**（MVP 规划 D8）。warn 级别展示但不阻断。
+
+I11–I15 由 T-121 实现；T-120 只落地字段形状与迁移。
 
 ---
 
 ## 10. 版本与迁移（宪法 C4）
 
 ```ts
-type Migration = { from: number; to: number; up: (doc: any) => any }
-const MIGRATIONS: Migration[] = [ /* 按 from 升序 */ ]
+type Migration = { from: number; to: number; describe: string; up: (doc: any) => any }
+const MIGRATIONS: Migration[] = [ V1_TO_V2 ]        // 按 from 升序
 
 /** 把任意历史版本的文档升到 CURRENT_VERSION。链式执行。 */
 export function migrate(raw: unknown): Result<SceneDocument, MigrationError>
-export const CURRENT_VERSION = 1
+export const CURRENT_VERSION = 2
 ```
 
 ### 规程（不可协商）
@@ -525,6 +685,31 @@ export const CURRENT_VERSION = 1
 5. 迁移**只向上，不向下**。老播放器打不开新文档，靠 `manifest.coreVersion` 给出明确报错，不做降级转换。
 
 v0 起始就是 `schemaVersion: 1`，且 `MIGRATIONS` 数组即使为空也要建好、`migrate()` 即使是恒等函数也要写好并被测试覆盖。技术方案 §1.2 纪律 5 的原话是"第一天就写"——第一天不写，第三周才写的时候已经有三份不同形状的文档在硬盘上了。
+
+### v1 → v2（v0.5，一次 bump 承载全部增量）
+
+v0.5 的四条能力线（原始体 / 灯光 / 材质纹理 / 多媒体）在**同一次** bump 里落地（规划 D11）。
+每条能力各 bump 一次的代价是四条迁移链、四代 fixture 目录永久维护；一次 bump 的代价是字段清单
+必须提前冻结（规划 §4）。**开工后发现漏字段，登记进 v1 待办，不追加进 v2**——连环 bump 是 C4
+最大的敌人。
+
+迁移内容（纯增量，无重命名、无改形）：
+
+| 补什么 | 补成什么 |
+|---|---|
+| `nodes[].primitive` | `null` |
+| `nodes[].light` | `null` |
+| `meta.environment` | `{ hdriAssetId: null, intensity: 1, exposure: 1 }` |
+| `media[].name` | 关联 asset 的 `name`；引用已悬空时退回该 media 的 id（可追溯） |
+
+两条实现纪律：
+
+1. **显式写值，不靠 zod 默认值兜底。** 除 `media[].name` 外每个新字段都有 default，所以
+   `up: d => d` 也能让 `migrate()` 返回合法文档——只看 `migrate()` 的测试会全绿。但下一条迁移
+   （v2→v3）拿到的是 `up()` 的**原始输出**而不是 zod 的产物，字段缺席就会读到 `undefined`。
+   因此测试断言 `applyMigrationChain(...).raw`，不断言 `migrate(...).document`。
+2. **不注入灯节点**（D14）。默认三灯 rig 是展示性缺省，不是场景内容；把它写成三个文档节点，
+   老项目的层级树会凭空多出三个用户没建过、解释不清、删了就变黑的条目。
 
 ---
 
@@ -554,6 +739,15 @@ previewAbort(): void
 ## 12. 一份完整示例
 
 黄金路径第 10 步结束时，文档应长成这样。**agent 应把它作为 `packages/schema/test/fixtures/v1/golden-path.json` 落地**，它同时是 §10 的第一份 fixture 和一致性测试的输入。
+
+> **下面这份是 v1 原文，且磁盘上的 `v1/golden-path.json` 必须与它保持一致——永远不要为了让它
+> 通过新 schema 而"修一下"。** fixture 只增不改不删（§10 规程 2）：一份被改过的历史 fixture
+> 会让 C4 回归套件保持全绿而什么也证明不了。v2 的对应物是
+> `fixtures/v2/golden-path-2.json`（黄金路径 II 终态：原始体展台 + 贴面放置的泵体 + 副本 +
+> 聚光灯带阴影 + HDRI 环境 + 贴图与 UV + 图片/音频媒体 + `playMedia`/`setLight` 规则）。
+> `createGoldenPathDocument()` 跟随 `CURRENT_VERSION`，与本节的 v1 原文由
+> **`migrate(v1 fixture) === createGoldenPathDocument()`** 这条断言绑在一起——它把"示例与
+> fixture 是同一份文档"变成了对迁移本身的实时检查。
 
 ```jsonc
 {
@@ -662,8 +856,11 @@ previewAbort(): void
 - [ ] 所有枚举都是 `z.enum`，没有裸 `z.string()` 当类型标记用
 - [ ] `newId` 有碰撞检查；变量 ID 有保留字检查
 - [ ] `migrate()` 存在且被测试覆盖，即使当前是恒等函数
-- [ ] `fixtures/v1/golden-path.json` 已落地并通过 `validate` + `checkIntegrity`
-- [ ] `checkIntegrity` 的 I1–I10 每项至少一条针对性单测（含反例）
+- [ ] **（v2）** 每个已发布版本都有 fixture，且历史 fixture 从未被编辑过
+- [ ] **（v2）** 迁移的断言读 `applyMigrationChain(...).raw`，不是 `migrate(...).document`——
+      带默认值的新字段会让"什么都不做的迁移"看起来是对的
+- [ ] `fixtures/v1/golden-path.json` 与 `fixtures/v2/golden-path-2.json` 均通过 `validate` + `checkIntegrity`
+- [ ] `checkIntegrity` 的 I1–I15 每项至少一条针对性单测（含反例）
 - [ ] `remapAssetRefs` 五种结果分类各有一条单测，且断言"孤儿节点未被删除"
 - [ ] 文档 `JSON.parse(JSON.stringify(doc))` 往返后 `toEqual` 原文档
 - [ ] `buildIndex` 的 `refsTo` 能正确回答"删除 nd_x 会影响哪些规则"

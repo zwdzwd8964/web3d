@@ -118,7 +118,7 @@ describe('refsTo — the reverse index behind "what breaks if I delete this?"', 
   it('indexes media, flow and hotspot-content references too', () => {
     const withExtras = {
       ...doc,
-      media: [{ id: 'med_a1b2c3d4', type: 'image' as const, assetId: GOLDEN_PATH_IDS.asset }],
+      media: [{ id: 'med_a1b2c3d4', type: 'image' as const, assetId: GOLDEN_PATH_IDS.asset, name: 'warning.png' }],
       flows: [{ id: 'flw_a1b2c3d4', name: '流程', variableId: 'step', steps: [] }],
     }
     const index = buildIndex(withExtras)

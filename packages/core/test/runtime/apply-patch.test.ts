@@ -127,6 +127,8 @@ describe('incremental paths (D1)', () => {
       parent: IDS.pump,
       order: 3000,
       assetRef: null,
+      primitive: null,
+      light: null,
       transform: { p: [0, 0, 0] as [number, number, number], r: [0, 0, 0, 1] as [number, number, number, number], s: [1, 1, 1] as [number, number, number] },
       visible: true,
       locked: false,

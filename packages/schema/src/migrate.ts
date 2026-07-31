@@ -30,12 +30,77 @@ export interface Migration {
 }
 
 /**
- * Empty at schemaVersion 1: there is no earlier version to come from. The array and
- * `migrate()` still exist and are still covered by tests, because SCHEMA_SPEC §10 is
- * explicit that day one is when this gets built — by week three there are already three
- * differently-shaped documents on disk.
+ * v1 → v2 · the v0.5 field set, in ONE bump (D11).
+ *
+ * Additive only: every new field gets its documented default and nothing existing is
+ * touched. That is what makes the whole of v0.5 — primitives, lights, environment,
+ * material maps, media — cost a single migration and a single fixture generation instead
+ * of four of each.
+ *
+ * **It writes the defaults explicitly rather than leaving the fields absent for zod to
+ * fill.** Zod would fill them, and `migrate()` would still return a valid document, so
+ * this function could be `d => d` and every test that only looks at `migrate()` would
+ * stay green. Two reasons it must not be:
+ *
+ *   1. the next migration (v2 → v3) receives this function's RAW output, not zod's — it
+ *      would find `undefined` where the v2 shape promises a value;
+ *   2. `media[].name` has no default and cannot have one, because the sensible value comes
+ *      from a different collection. A v1 document that actually used `media` would fail
+ *      validation outright without this step.
+ *
+ * **No light node is injected** (D14). The default three-light rig is a display default,
+ * like the default background colour — not scene content. Materialising it into three
+ * document nodes would make every existing project sprout three tree entries the user
+ * never created, cannot explain, and turns the scene black by deleting.
  */
-export const MIGRATIONS: readonly Migration[] = []
+const V1_TO_V2: Migration = {
+  from: 1,
+  to: 2,
+  describe: '新增原始体/灯光承载体、环境与背景 HDRI、材质贴图变换与 physical 参数、媒体记录名称与时长',
+  up(doc) {
+    const assetNames = new Map<string, string>()
+    for (const asset of asArray(doc.assets)) {
+      const record = asRecord(asset)
+      if (typeof record?.id === 'string' && typeof record.name === 'string') assetNames.set(record.id, record.name)
+    }
+
+    const meta = asRecord(doc.meta) ?? {}
+    return {
+      ...doc,
+      meta: {
+        ...meta,
+        // Spread-then-default, never overwrite: a document that somehow already carries an
+        // environment block keeps it. Migrations fill gaps; they do not normalise.
+        environment: { hdriAssetId: null, intensity: 1, exposure: 1, ...(asRecord(meta.environment) ?? {}) },
+      },
+      nodes: asArray(doc.nodes).map((node) => ({ primitive: null, light: null, ...(asRecord(node) ?? {}) })),
+      media: asArray(doc.media).map((entry) => {
+        const record = asRecord(entry) ?? {}
+        if (typeof record.name === 'string' && record.name.length > 0) return record
+        const assetId = typeof record.assetId === 'string' ? record.assetId : ''
+        // The asset's filename is the name the user recognises. When the reference is
+        // already dangling the id is kept instead of inventing a label — an unhelpful but
+        // TRACEABLE name, on a document that integrity check I14 is about to flag anyway.
+        const fallback = typeof record.id === 'string' ? record.id : '媒体'
+        return { ...record, name: assetNames.get(assetId) ?? fallback }
+      }),
+    }
+  },
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
+/**
+ * The shipped chain, in ascending `from` order.
+ *
+ * It was built and tested while still empty at schemaVersion 1 (SCHEMA_SPEC §10 is
+ * explicit that day one is when this gets built), which is why adding the first real entry
+ * here was a five-line change rather than a project.
+ */
+export const MIGRATIONS: readonly Migration[] = [V1_TO_V2]
 
 export interface MigrationFailure {
   readonly kind: 'malformed' | 'from-the-future' | 'missing-step' | 'bad-chain' | 'invalid-result'
