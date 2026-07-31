@@ -1,12 +1,18 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
+import { createRequire } from 'node:module'
 import { defineConfig } from 'vite'
+
+// Stamped into every published manifest (D8): the only thread available later for
+// diagnosing "old package, new player".
+const coreVersion = createRequire(import.meta.url)('../core/package.json').version
 
 // C6 · zero external runtime dependencies:
 //  - no CDN, no Google Fonts, no remote decoder;
 //  - vendor/ (Draco + KTX2) is copied into the build output by scripts/sync-vendor.mjs
 //    and served from the app's own origin.
 export default defineConfig({
+  define: { __W3_CORE_VERSION__: JSON.stringify(coreVersion) },
   plugins: [react()],
   publicDir: fileURLToPath(new URL('./public', import.meta.url)),
   resolve: {

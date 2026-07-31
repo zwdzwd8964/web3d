@@ -136,6 +136,24 @@ importers:
         specifier: 6.2.5
         version: 6.2.5
 
+  test/parity:
+    devDependencies:
+      '@w3/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@w3/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@w3/player':
+        specifier: workspace:*
+        version: link:../../packages/player
+      '@w3/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
+      '@w3/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+
   tools/lint:
     devDependencies:
       '@eslint/js':

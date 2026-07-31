@@ -949,3 +949,10 @@ code {
   flex-direction: column;
   gap: 3px;
 }
+
+.modal__body--wide {
+  max-width: 640px;
+  width: min(640px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}

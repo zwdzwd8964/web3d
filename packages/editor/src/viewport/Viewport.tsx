@@ -85,7 +85,17 @@ export function Viewport() {
         container: overlay,
         // Edit mode selects; it does not fire rules (ECA_SPEC §7). Clicking a marker
         // selects the node it is anchored to, which is what you want when placing them.
+        // C3 · in preview a hotspot click is an ECA event, exactly as in the player.
+        // It used to always select the anchored node, which meant a `hotspotClick` rule
+        // silently did nothing in the editor and worked in the player — the textbook
+        // shape of "编辑器里是这样、发布出来不一样", and invisible to parity because both
+        // sides of the harness were dispatching it directly.
         onActivate: (hotspotId) => {
+          const controller = controllerRef.current
+          if (controller?.isActive) {
+            controller.dispatchHotspotClick(hotspotId)
+            return
+          }
           const hotspot = store.getState().doc.hotspots.find((h) => h.id === hotspotId)
           if (hotspot) toggleSelection(hotspot.anchor.nodeId, false)
         },
@@ -151,7 +161,7 @@ export function Viewport() {
   useEffect(() => {
     const controller = controllerRef.current
     if (!controller || !ready) return
-    if (previewActive) controller.enter(store.getState().doc)
+    if (previewActive) void controller.enter(store.getState().doc)
     else if (controller.isActive) controller.exit()
   }, [previewActive, ready, store])
 
@@ -204,8 +214,37 @@ export function Viewport() {
       moved = 0
       canvas.setPointerCapture(event.pointerId)
     }
+    /**
+     * Hover, in preview only.
+     *
+     * Throttled to ~15 Hz: this raycasts, and a raycast per pointermove on a 30k-triangle
+     * model is a measurable frame cost for an event whose rules cannot possibly need
+     * sub-frame precision.
+     */
+    let lastHoverAt = 0
+    const reportHover = (event: PointerEvent) => {
+      const controller = controllerRef.current
+      const runtime = runtimeRef.current
+      if (!controller?.isActive || !runtime) return
+      const stamp = event.timeStamp
+      if (stamp - lastHoverAt < 66) return
+      lastHoverAt = stamp
+
+      const rect = canvas.getBoundingClientRect()
+      const hit = runtime.picker.pick(
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        rect.width,
+        rect.height,
+        runtime.camera.camera,
+        store.getState().doc,
+      )
+      controller.dispatchPointerOver(hit?.nodeId ?? null)
+    }
+
     const move = (event: PointerEvent) => {
       const runtime = runtimeRef.current
+      reportHover(event)
       if (!dragging || !runtime || gizmoDragging.current) return
       const dx = event.clientX - dragging.x
       const dy = event.clientY - dragging.y
@@ -249,7 +288,11 @@ export function Viewport() {
       runtimeRef.current?.camera.dolly(event.deltaY > 0 ? 1.1 : 0.9)
     }
     const contextMenu = (event: Event) => event.preventDefault()
+    // Leaving the canvas is a hoverLeave; without it the last hovered object stays
+    // "entered" forever and its leave rule never runs.
+    const leave = () => controllerRef.current?.dispatchPointerOver(null)
 
+    canvas.addEventListener('pointerleave', leave)
     canvas.addEventListener('pointerdown', down)
     canvas.addEventListener('pointermove', move)
     canvas.addEventListener('pointerup', up)
@@ -261,6 +304,7 @@ export function Viewport() {
       canvas.removeEventListener('pointerup', up)
       canvas.removeEventListener('wheel', wheel)
       canvas.removeEventListener('contextmenu', contextMenu)
+      canvas.removeEventListener('pointerleave', leave)
     }
   }, [store, toggleSelection, clearSelection, ready])
 

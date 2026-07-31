@@ -1,14 +1,17 @@
 import { checkIntegrity, errorsOf, warningsOf } from '@w3/schema'
+import { createActionRefResolver } from '@w3/core'
 import { useEffect, useMemo, useState } from 'react'
 import { Splitter } from './layout/Splitter.js'
 import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
+import { PublishDialog } from './dialogs/PublishDialog.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
 import { IssuePanel } from './panels/IssuePanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
 import { RuleLogPanel } from './panels/RuleLogPanel.js'
+import { SnapshotPanel } from './panels/SnapshotPanel.js'
 import { RulePanel } from './panels/RulePanel.js'
 import { VariablePanel } from './panels/VariablePanel.js'
 import { ViewpointPanel } from './panels/ViewpointPanel.js'
@@ -25,7 +28,17 @@ import { fullRebuildCount } from './viewport/runtime-registry.js'
  * assets and rules along the bottom.
  */
 
-type BottomTab = 'assets' | 'material' | 'animation' | 'viewpoint' | 'rules' | 'variables' | 'issues' | 'log' | 'history'
+type BottomTab =
+  | 'assets'
+  | 'material'
+  | 'animation'
+  | 'viewpoint'
+  | 'rules'
+  | 'variables'
+  | 'issues'
+  | 'log'
+  | 'history'
+  | 'snapshots'
 
 export function App() {
   useShortcuts()
@@ -96,6 +109,7 @@ function TopBar() {
         重做
       </button>
       <SaveControl />
+      <PublishButton />
       <div className="topbar__spacer" />
       <ModeSwitch />
     </header>
@@ -135,6 +149,19 @@ const SAVE_LABELS: Record<ReturnType<typeof useAutoSave>['state'], string> = {
   saving: '保存中…',
   saved: '已保存',
   error: '保存失败',
+}
+
+/** T-100 · the publish gate lives in the top bar, next to save. */
+function PublishButton() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" className="tbtn" onClick={() => setOpen(true)} title="检查并导出 .w3p">
+        发布
+      </button>
+      {open && <PublishDialog onClose={() => setOpen(false)} />}
+    </>
+  )
 }
 
 /**
@@ -178,6 +205,7 @@ function BottomDock() {
               ['variables', '变量'],
               ['issues', '完整性'],
               ['log', '规则日志'],
+              ['snapshots', '快照'],
               ['history', '历史'],
             ] as const
           ).map(([id, label]) => (
@@ -199,6 +227,7 @@ function BottomDock() {
         {tab === 'variables' && <VariablePanel />}
         {tab === 'issues' && <IssuePanel />}
         {tab === 'log' && <RuleLogPanel />}
+        {tab === 'snapshots' && <SnapshotPanel />}
         {tab === 'history' && <HistoryPanel />}
       </div>
     </section>
@@ -212,7 +241,10 @@ function StatusBar() {
   const revision = useDocumentSelector((s) => s.revision)
 
   // Cheap enough per revision at v0 sizes; T-092 turns it into a clickable issue list.
-  const issues = useMemo(() => checkIntegrity(doc), [doc])
+  // Same resolver the publish gate and the issue panel use. Without it the status bar
+  // cannot see references inside rule action params, so it would read 「0 阻断」 while
+  // publishing refused the document — the worst possible pair of signals.
+  const issues = useMemo(() => checkIntegrity(doc, { actionRefs: createActionRefResolver() }), [doc])
   const errors = errorsOf(issues).length
   const warnings = warningsOf(issues).length
   // Read straight through: this component already re-renders on every `revision` change,

@@ -1,8 +1,13 @@
 /**
  * @w3/player — the read-only player.
  *
- * NOT IMPLEMENTED YET. Task cards T-101 … T-105 cover this package. The parity suite
- * (T-103) lives here too and is the gate that proves constitution C3; it cannot be
- * written before T-102 extracts the shared playback session.
+ * The SPA entry is `main.ts`; this module is the programmatic surface, used by the parity
+ * suite (T-103) and by anyone embedding the player in another page.
  */
-export const NOT_IMPLEMENTED = 'T-101..T-105' as const
+
+export { Player } from './app.js'
+export type { PlayerOptions } from './app.js'
+export { assertCompatible } from './compat.js'
+export { createPlayerSession } from './session.js'
+export type { PlayerSession, PlayerSessionOptions } from './session.js'
+export { resolveSource } from './source.js'

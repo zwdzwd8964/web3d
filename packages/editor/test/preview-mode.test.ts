@@ -43,8 +43,8 @@ beforeEach(async () => {
 const doc = () => runtime.doc
 
 describe('entering and leaving preview', () => {
-  it('enables the engine and fires sceneReady', () => {
-    controller.enter(doc())
+  it('enables the engine and fires sceneReady', async () => {
+    await controller.enter(doc())
     expect(controller.isActive).toBe(true)
     expect(store.getState().active).toBe(true)
     // The sample document's rules are click-driven, so the log may be empty — what must
@@ -52,11 +52,11 @@ describe('entering and leaving preview', () => {
     expect(() => controller.dispatchClick(doc().nodes[0]!.id)).not.toThrow()
   })
 
-  it('T-093 验收 · leaving preview restores the edit state completely', () => {
+  it('T-093 验收 · leaving preview restores the edit state completely', async () => {
     const cover = doc().nodes.find((n) => n.name === '阀盖')!
     const before = runtime.isVisible(cover.id)
 
-    controller.enter(doc())
+    await controller.enter(doc())
     // Rules move, hide and recolour things. None of that is in the document, so none of
     // it may survive the exit.
     runtime.setVisible(cover.id, !before)
@@ -71,14 +71,14 @@ describe('entering and leaving preview', () => {
     expect(runtime.highlights.activeNodeIds).toEqual([])
   })
 
-  it('entering twice is a no-op rather than two engines on one runtime', () => {
-    controller.enter(doc())
-    controller.enter(doc())
+  it('entering twice is a no-op rather than two engines on one runtime', async () => {
+    await controller.enter(doc())
+    await controller.enter(doc())
     controller.exit()
     expect(controller.isActive).toBe(false)
   })
 
-  it('exiting without entering does not throw', () => {
+  it('exiting without entering does not throw', async () => {
     expect(() => controller.exit()).not.toThrow()
   })
 })
@@ -89,7 +89,7 @@ describe('the golden path rule actually fires', () => {
     const rule = doc().rules.find((r) => r.when.event === 'click')
     expect(rule, '样例文档应当有一条点击规则').toBeDefined()
 
-    controller.enter(doc())
+    await controller.enter(doc())
     controller.dispatchClick(cover.id)
 
     // Actions are async; let the executor's promises settle.
@@ -125,17 +125,17 @@ describe('the golden path rule actually fires', () => {
 })
 
 describe('the log', () => {
-  it('is cleared on entry, so the previous session cannot be mistaken for this one', () => {
-    controller.enter(doc())
+  it('is cleared on entry, so the previous session cannot be mistaken for this one', async () => {
+    await controller.enter(doc())
     store.getState().append({ ruleId: 'rul_11111111', status: 'completed', startedAt: 0, endedAt: 1, steps: [] })
     expect(store.getState().log).toHaveLength(1)
 
     controller.exit()
-    controller.enter(doc())
+    await controller.enter(doc())
     expect(store.getState().log).toHaveLength(0)
   })
 
-  it('is capped, so a repeating timer rule cannot grow it without bound', () => {
+  it('is capped, so a repeating timer rule cannot grow it without bound', async () => {
     for (let i = 0; i < 250; i++) {
       store.getState().append({ ruleId: `rul_${i}`, status: 'completed', startedAt: i, endedAt: i, steps: [] })
     }
@@ -146,21 +146,21 @@ describe('the log', () => {
 })
 
 describe('live variables', () => {
-  it('mirrors runtime values into the store only while previewing', () => {
+  it('mirrors runtime values into the store only while previewing', async () => {
     const withVar = { ...doc(), variables: [{ id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
 
     controller.syncVariables(withVar)
     expect(store.getState().variables).toEqual({}) // not previewing
 
-    controller.enter(withVar)
+    await controller.enter(withVar)
     runtime.setVar('step', 3)
     controller.syncVariables(withVar)
     expect(store.getState().variables['step']).toBe(3)
   })
 
-  it('does not hand out a new object when nothing changed', () => {
+  it('does not hand out a new object when nothing changed', async () => {
     const withVar = { ...doc(), variables: [{ id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
-    controller.enter(withVar)
+    await controller.enter(withVar)
     controller.syncVariables(withVar)
     const first = store.getState().variables
     controller.syncVariables(withVar)

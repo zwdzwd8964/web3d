@@ -1,0 +1,125 @@
+{
+  "$comment": [
+    "ECA_SPEC §9.3 · the fixed input script both sides replay.",
+    "",
+    "A data file rather than code so the two sides provably receive the SAME input: built",
+    "in the test body it would be one object handed to two functions, and nothing would",
+    "stop a later edit from branching it.",
+    "",
+    "atMs drives an injected fake clock. Both sides advance to the same instants, so",
+    "ExecResult.startedAt / endedAt are comparable across sides — which is what lets the",
+    "comparison be strict rather than 'equal apart from timing'.",
+    "",
+    "Ids are the golden-path sample's, transcribed from SCHEMA_SPEC §12:",
+    "  nd_b3n5m7k9 阀盖 (has the click rule)   nd_r5t8y1u3 泵组 (has none)",
+    "  hs_q1s3u5w7 拆卸提示                      step (number, default 1)",
+    "hover 与 hotspotClick 必须在脚本里：它们是唯一两条曾经在两侧含义不同的输入路径，",
+    "脚本不含它们时 parity 会一直绿着，而分叉照旧存在。"
+  ],
+  "steps": [
+    {
+      "atMs": 0,
+      "note": "点击阀盖：step == 1 成立，整条 sequence 应当跑完（含 1.2s 动画）",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 400,
+      "note": "序列执行中再点一次：D9 的 restart 重入必须在两侧一致地生效",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 2600,
+      "note": "上一条结束后再点：step 已变 2，条件不满足，应当 skipped-condition",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 3000,
+      "note": "点一个没有任何规则的对象：两侧都应当什么都不发生",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_r5t8y1u3"
+      }
+    },
+    {
+      "atMs": 3400,
+      "note": "热点点击：编辑器预览曾经是「选中锚定节点」、播放器是「触发规则」——两侧含义不同的 C3 分叉",
+      "event": {
+        "kind": "hotspotClick",
+        "hotspotId": "hs_q1s3u5w7"
+      }
+    },
+    {
+      "atMs": 3800,
+      "note": "直接改变量：variableChange 事件在两侧的传播必须一致",
+      "event": {
+        "kind": "setVar",
+        "variableId": "step",
+        "value": 1
+      }
+    },
+    {
+      "atMs": 4200,
+      "note": "变量回到 1 之后再点，条件重新成立，整条链应当再跑一次",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 4400,
+      "note": "指针移到阀盖上：hoverEnter 曾经全仓无发射点，规则配得出来却永远不触发",
+      "event": {
+        "kind": "pointerOver",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 4500,
+      "note": "直接滑到另一个对象：必须先 leave 旧的再 enter 新的",
+      "event": {
+        "kind": "pointerOver",
+        "nodeId": "nd_r5t8y1u3"
+      }
+    },
+    {
+      "atMs": 4600,
+      "note": "移出画布：最后一个对象必须收到 hoverLeave，否则它永远停在『已进入』",
+      "event": {
+        "kind": "pointerOver",
+        "nodeId": null
+      }
+    },
+    {
+      "atMs": 4700,
+      "note": "同一个目标报两次：不许产生第二次 hoverEnter",
+      "event": {
+        "kind": "pointerOver",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 4800,
+      "note": "重复上报，应当被去重",
+      "event": {
+        "kind": "pointerOver",
+        "nodeId": "nd_b3n5m7k9"
+      }
+    },
+    {
+      "atMs": 7000,
+      "note": "留出时间让最后一条 sequence 跑完，否则两侧只是同样地『还没结束』",
+      "event": {
+        "kind": "idle"
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Web3D 播放器</title>
+    <!--
+      Constitution C6: nothing external. No <link>, no font, no analytics. The only
+      request this page ever makes is for its own bundle and, when ?src is given, for a
+      same-origin .w3p — which is what makes an air-gapped intranet deployment work.
+    -->
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

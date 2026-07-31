@@ -1,5 +1,5 @@
 import type { SceneDocument } from '@w3/schema'
-import { validate } from '@w3/schema'
+import { migrate } from '@w3/schema'
 import { unzipSync, zipSync } from 'fflate'
 import { hashToPath, isBlobHash, pathToHash } from './hash.js'
 import type { BlobHash } from './provider.js'
@@ -128,15 +128,20 @@ export function unpackScene(bytes: Uint8Array): UnpackedPackage {
     throw new StorageError('corrupt', `${MANIFEST_FILENAME} is not valid JSON`, { cause })
   }
 
-  const parsed = validate(JSON.parse(decoder.decode(sceneBytes)))
+  // `migrate`, not `validate`. `schemaVersion` is a `z.literal(CURRENT_VERSION)`, so a
+  // package written by an older build fails validation outright — while constitution C4
+  // says "任何历史版本的已发布快照，必须永远能被当前代码打开". Reading it through the
+  // migration chain is what makes that true rather than accidentally true because v1 is
+  // currently the only version in existence.
+  //
+  // It also fixes the version gate at the other end: a package from the FUTURE now comes
+  // back as `from-the-future` with both version numbers, instead of a generic validation
+  // failure listing fields the reader has never heard of.
+  const parsed = migrate(JSON.parse(decoder.decode(sceneBytes)))
   if (!parsed.ok) {
     throw new StorageError(
-      'corrupt',
-      `${SCENE_FILENAME} failed validation (${parsed.error.length} issue(s)): ` +
-        parsed.error
-          .slice(0, 3)
-          .map((e) => `${e.path} ${e.message}`)
-          .join('; '),
+      parsed.error.kind === 'from-the-future' ? 'conflict' : 'corrupt',
+      `${SCENE_FILENAME} 无法读取（${parsed.error.kind}）：${parsed.error.message}`,
     )
   }
 
@@ -147,7 +152,7 @@ export function unpackScene(bytes: Uint8Array): UnpackedPackage {
   }
 
   const thumbnail = entries[THUMBNAIL_FILENAME]
-  return { manifest, document: parsed.value, blobs, ...(thumbnail ? { thumbnail } : {}) }
+  return { manifest, document: parsed.value.document, blobs, ...(thumbnail ? { thumbnail } : {}) }
 }
 
 /**

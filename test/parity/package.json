@@ -1,0 +1,17 @@
+{
+  "name": "@w3/parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "G0-4 · the constitution C3 gate. Lives outside packages/ because it is the one place allowed to import BOTH the editor and the player.",
+  "scripts": {
+    "test:parity": "vitest run"
+  },
+  "devDependencies": {
+    "@w3/core": "workspace:*",
+    "@w3/editor": "workspace:*",
+    "@w3/player": "workspace:*",
+    "@w3/schema": "workspace:*",
+    "@w3/storage": "workspace:*"
+  }
+}

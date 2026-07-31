@@ -2,6 +2,7 @@ packages:
   - 'packages/*'
   - 'tools/*'
   - 'e2e'
+  - 'test/parity'
 
 # --- workspace-wide settings (pnpm >= 10 reads these here, not from .npmrc) ---
 

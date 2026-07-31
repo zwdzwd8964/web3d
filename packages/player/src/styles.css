@@ -1,0 +1,90 @@
+/*
+ * Player chrome.
+ *
+ * Hand-written and tiny on purpose: the gzip budget is 400 KB for the whole bundle
+ * (T-105), and a CSS framework would be a meaningful fraction of it for a page that is
+ * one canvas and a few markers. System fonts only — C6.
+ */
+
+:root {
+  --ink: #14171a;
+  --chalk: #e6eaed;
+  --dim: #8b969e;
+  --line: #2a3238;
+  --sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans SC', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  background: var(--ink);
+  color: var(--chalk);
+  font: 14px/1.6 var(--sans);
+  overflow: hidden;
+  /* A double-tap on a marker must not zoom the page out from under the scene. */
+  touch-action: none;
+}
+
+#app {
+  position: relative;
+}
+
+.player__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Markers sit above the canvas but must never eat a camera drag; each marker
+   re-enables pointer events for itself. */
+.player__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.player__drop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--dim);
+  text-align: center;
+  padding: 24px;
+}
+
+.player__drop b {
+  color: var(--chalk);
+  font-size: 16px;
+}
+
+.player__hint {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.player__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  color: #e2603f;
+}
