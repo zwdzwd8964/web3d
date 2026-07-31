@@ -98,12 +98,18 @@
   用一次性 Playwright 脚本播种 v1 工程实测通过（把 `migrate` 改回旧行为 → 转红），
   常设回归测试归 T-172。
 
-### [ ] T-121 · 完整性检查增量 I11–I15
-- **依赖** T-120 · **预估** 0.5d · **实际** ___
+### [x] T-121 · 完整性检查增量 I11–I15
+- **依赖** T-120 · **预估** 0.5d · **实际** 0.5h
 - **独占** `packages/schema/src/integrity.ts`, `packages/schema/test/integrity.test.ts`
+  （+ `index-builder.ts` 的 `RefTarget` 增可选 `expectType`：I14 第三句「playMedia 只能引用
+  audio」是**动作知识**，硬编码动作名会把 ECA 语义塞进唯一不许认识 ECA 的包。改为解析器
+  报约束、schema 只负责执行，与 id 解析同一套分工）
 - **做** 进化规划 §4.2 的五项：I11 承载体互斥、I12 环境引用与背景依赖、I13 贴图槽位资产类型、I14 媒体类型匹配（含 `playMedia` 目标必须为 audio）、I15 physical 参数错配（warn）。
 - **验收** 每项至少一条正例 + 一条反例单测
 - **自测** `pnpm -F @w3/schema test integrity`
+- **实际情况**：I13 比 v0 的同类检查更严——原来 I3 里那段允许 `image`，v0.5 明确把
+  `texture`（材质采样）与 `image`（媒体展示）分开，两条规则并存会让人说不清哪条才算数，
+  所以把类型判断整体挪进 I13。8 次变异检验逐条转红。
 
 ### [ ] T-122 · 工厂、选择器与索引增量
 - **依赖** T-120 · **预估** 0.5d · **实际** ___

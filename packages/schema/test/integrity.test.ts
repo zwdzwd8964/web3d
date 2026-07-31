@@ -3,6 +3,7 @@ import type { SceneDocument } from '../src/document.js'
 import type { ActionRefResolver } from '../src/index-builder.js'
 import { checkIntegrity, errorsOf, formatIntegrityIssues, hasErrors, warningsOf } from '../src/integrity.js'
 import { createGoldenPathDocument } from '../src/samples.js'
+import goldenPathTwo from './fixtures/v2/golden-path-2.json' with { type: 'json' }
 
 /**
  * T-016 · SCHEMA_SPEC §9. Every check I1–I10 gets a positive case (clean document has
@@ -133,10 +134,7 @@ describe('I3 · every reference resolves', () => {
     expect(issue?.refKind).toBe('hotspot')
   })
 
-  it('negative: a texture slot pointing at a model asset', () => {
-    const doc = mutated((d) => (d.materials[0].params.maps.map = d.assets[0].id))
-    expect(check(doc).some((i) => /非贴图资产/.test(i.message))).toBe(true)
-  })
+  // 贴图槽位的资产类型检查在 v2 移到了 I13（更严：只收 texture），见下方 I13 一节。
 
   it('negative: a flow step pointing at a step that does not exist', () => {
     const doc = mutated((d) => {
@@ -331,6 +329,236 @@ describe('I10 · unreachable nodes', () => {
     const doc = mutated((d) => (d.nodes[0].parent = d.nodes[2].id))
     const issue = check(doc).find((i) => i.code === 'I10')
     expect(issue?.level).toBe('error')
+  })
+})
+
+/* ========================================================================== */
+/* v2 增量 · I11 – I15（v0.5 进化规划 §4.2）                                    */
+/* ========================================================================== */
+
+/** The v2 fixture, as a mutable plain object: it is the only document with lights, */
+/** primitives, an environment, textures and media all present at once.             */
+function v2Doc(mutate: (doc: any) => void = () => undefined): SceneDocument {
+  const doc = structuredClone(goldenPathTwo) as any
+  mutate(doc)
+  return doc as SceneDocument
+}
+
+const checkV2 = (doc: SceneDocument) => checkIntegrity(doc, { actionRefs })
+
+describe('the v2 fixture is clean to begin with', () => {
+  it('reports no errors and no warnings, so every negative case below means something', () => {
+    // Without this, an I11–I15 negative case could be "green" because the fixture was
+    // already dirty in some other way and the assertion happened to match.
+    const issues = checkV2(v2Doc())
+    expect(errorsOf(issues), formatIntegrityIssues(issues)).toHaveLength(0)
+    expect(warningsOf(issues), formatIntegrityIssues(issues)).toHaveLength(0)
+  })
+})
+
+describe('I11 · at most one carrier per node', () => {
+  it('positive: the v2 fixture has an assetRef node, a primitive node and a light node, each with one', () => {
+    const doc = v2Doc()
+    expect(doc.nodes.some((n) => n.assetRef !== null)).toBe(true)
+    expect(doc.nodes.some((n) => n.primitive !== null)).toBe(true)
+    expect(doc.nodes.some((n) => n.light !== null)).toBe(true)
+    expect(checkV2(doc).some((i) => i.code === 'I11')).toBe(false)
+  })
+
+  it('negative: a node that is both a primitive and a light', () => {
+    const doc = v2Doc((d) => {
+      d.nodes[0].light = { kind: 'ambient', color: '#ffffff', intensity: 0.6 }
+    })
+    const issue = checkV2(doc).find((i) => i.code === 'I11')
+    expect(issue?.level).toBe('error')
+    expect(issue?.path).toBe('nodes[0]')
+    expect(issue?.message).toContain('primitive')
+    expect(issue?.message).toContain('light')
+  })
+
+  it('negative: a node that is both an asset instance and a light', () => {
+    const doc = v2Doc((d) => {
+      d.nodes[1].light = { kind: 'ambient', color: '#ffffff', intensity: 0.6 }
+    })
+    expect(checkV2(doc).find((i) => i.code === 'I11')?.refId).toBe(v2Doc().nodes[1]!.id)
+  })
+
+  it('positive: three nulls is a grouping node, not a violation', () => {
+    const doc = v2Doc((d) => {
+      d.nodes[0].primitive = null
+    })
+    expect(checkV2(doc).some((i) => i.code === 'I11')).toBe(false)
+  })
+})
+
+describe('I12 · environment reference and the background that depends on it', () => {
+  it('positive: the fixture points at a real hdri asset', () => {
+    expect(checkV2(v2Doc()).some((i) => i.code === 'I12')).toBe(false)
+  })
+
+  it('negative: hdriAssetId points at nothing', () => {
+    const doc = v2Doc((d) => (d.meta.environment.hdriAssetId = 'ast_99999999'))
+    const issue = checkV2(doc).find((i) => i.code === 'I12')
+    expect(issue?.level).toBe('error')
+    expect(issue?.path).toBe('meta.environment.hdriAssetId')
+  })
+
+  it('negative: hdriAssetId points at an asset that is not an hdri', () => {
+    const doc = v2Doc((d) => {
+      d.meta.environment.hdriAssetId = d.assets.find((a: any) => a.type === 'texture').id
+    })
+    const issue = checkV2(doc).find((i) => i.code === 'I12')
+    expect(issue?.level).toBe('error')
+    expect(issue?.message).toContain('type=texture')
+  })
+
+  it('negative: background is hdri while the environment is empty — publishes, then renders black', () => {
+    const doc = v2Doc((d) => (d.meta.environment.hdriAssetId = null))
+    const issue = checkV2(doc).find((i) => i.code === 'I12')
+    expect(issue?.level).toBe('error')
+    expect(issue?.path).toBe('meta.background.type')
+  })
+
+  it('positive: clearing both together is a legitimate scene', () => {
+    const doc = v2Doc((d) => {
+      d.meta.environment.hdriAssetId = null
+      d.meta.background.type = 'color'
+    })
+    expect(checkV2(doc).some((i) => i.code === 'I12')).toBe(false)
+  })
+})
+
+describe('I13 · texture slots point at texture assets', () => {
+  it('positive: the fixture maps a real texture asset', () => {
+    expect(v2Doc().materials[0]!.params.maps.map).toBeDefined()
+    expect(checkV2(v2Doc()).some((i) => i.code === 'I13')).toBe(false)
+  })
+
+  it('negative: a slot pointing at the model asset', () => {
+    const doc = v2Doc((d) => {
+      d.materials[0].params.maps.normalMap = d.assets.find((a: any) => a.type === 'model').id
+    })
+    const issue = checkV2(doc).find((i) => i.code === 'I13')
+    expect(issue?.level).toBe('error')
+    expect(issue?.path).toBe('materials[0].params.maps.normalMap')
+    expect(issue?.message).toContain('type=model')
+  })
+
+  it('negative: an `image` asset is NOT a texture — v0.5 splits the two on purpose', () => {
+    // The check this replaced accepted `image` here. A media image and a material texture
+    // go through different import paths and get different colour-space handling.
+    const doc = v2Doc((d) => {
+      d.materials[0].params.maps.map = d.assets.find((a: any) => a.type === 'image').id
+    })
+    expect(checkV2(doc).find((i) => i.code === 'I13')?.level).toBe('error')
+  })
+
+  it('a dangling slot is I3’s error, not a second one from I13', () => {
+    const doc = v2Doc((d) => (d.materials[0].params.maps.map = 'ast_99999999'))
+    const codes = checkV2(doc).map((i) => i.code)
+    expect(codes).toContain('I3')
+    expect(codes).not.toContain('I13')
+  })
+})
+
+describe('I14 · media types line up', () => {
+  it('positive: the fixture’s image and audio records match their assets', () => {
+    expect(checkV2(v2Doc()).some((i) => i.code === 'I14')).toBe(false)
+  })
+
+  it('negative: an audio media record pointing at an image asset', () => {
+    const doc = v2Doc((d) => {
+      const audio = d.media.find((m: any) => m.type === 'audio')
+      audio.assetId = d.assets.find((a: any) => a.type === 'image').id
+    })
+    const issue = checkV2(doc).find((i) => i.code === 'I14')
+    expect(issue?.level).toBe('error')
+    expect(issue?.message).toContain('type=image')
+  })
+
+  it('negative: a hotspot panel showing an audio media record', () => {
+    const doc = v2Doc((d) => {
+      d.hotspots[0].content.mediaId = d.media.find((m: any) => m.type === 'audio').id
+    })
+    const issue = checkV2(doc).find((i) => i.code === 'I14')
+    expect(issue?.level).toBe('error')
+    expect(issue?.path).toBe('hotspots[0].content.mediaId')
+  })
+
+  it('positive: a video media record in a hotspot panel is fine', () => {
+    const doc = v2Doc((d) => {
+      d.media[0].type = 'video'
+      d.assets.find((a: any) => a.type === 'image').type = 'video'
+    })
+    expect(checkV2(doc).some((i) => i.code === 'I14')).toBe(false)
+  })
+
+  it('negative: playMedia pointing at a non-audio media, reported through the resolver’s constraint', () => {
+    // The resolver — core's registry in production — is what knows that `playMedia` needs
+    // audio. @w3/schema only enforces the constraint it is handed, which is why the action
+    // name appears nowhere in integrity.ts.
+    const playMediaAware: ActionRefResolver = (action) => {
+      if (action.action !== 'playMedia') return actionRefs(action)
+      const id = (action.params as Record<string, unknown>).mediaId
+      return typeof id === 'string' ? [{ kind: 'media', id, expectType: 'audio' }] : []
+    }
+    const doc = v2Doc((d) => {
+      d.rules[0].then[0].params.mediaId = d.media.find((m: any) => m.type === 'image').id
+    })
+    const issue = checkIntegrity(doc, { actionRefs: playMediaAware }).find((i) => i.code === 'I14')
+    expect(issue?.level).toBe('error')
+    expect(issue?.message).toContain('playMedia')
+    expect(issue?.message).toContain('audio')
+    // …and the unmodified fixture, whose playMedia does point at audio, stays clean.
+    expect(checkIntegrity(v2Doc(), { actionRefs: playMediaAware }).some((i) => i.code === 'I14')).toBe(false)
+  })
+
+  it('a constraint on an id that does not resolve stays quiet — I3 already said it', () => {
+    const strict: ActionRefResolver = () => [{ kind: 'media', id: 'med_99999999', expectType: 'audio' }]
+    const codes = checkIntegrity(v2Doc(), { actionRefs: strict }).map((i) => i.code)
+    expect(codes).toContain('I3')
+    expect(codes).not.toContain('I14')
+  })
+})
+
+describe('I15 · physical-only parameters on a non-physical material', () => {
+  it('positive: the fixture’s standard material declares none of them', () => {
+    expect(checkV2(v2Doc()).some((i) => i.code === 'I15')).toBe(false)
+  })
+
+  it('negative: transmission and ior on a standard material are warned about, not blocked', () => {
+    const doc = v2Doc((d) => {
+      d.materials[0].params.transmission = 0.9
+      d.materials[0].params.ior = 1.5
+    })
+    const issues = checkV2(doc)
+    const issue = issues.find((i) => i.code === 'I15')
+    expect(issue?.level).toBe('warn')
+    expect(issue?.message).toContain('transmission')
+    expect(issue?.message).toContain('ior')
+    // The document still renders, so it must still publish (D8 blocks on errors only).
+    expect(hasErrors(issues)).toBe(false)
+  })
+
+  it('positive: the same parameters on a physical material are exactly right', () => {
+    const doc = v2Doc((d) => {
+      d.materials[0].base = 'physical'
+      d.materials[0].params.transmission = 0.9
+    })
+    expect(checkV2(doc).some((i) => i.code === 'I15')).toBe(false)
+  })
+
+  it('reports one issue per material, listing every stray parameter', () => {
+    const doc = v2Doc((d) => {
+      d.materials[0].params.clearcoat = 1
+      d.materials[0].params.clearcoatRoughness = 0.2
+      d.materials[0].params.thickness = 0.5
+    })
+    const issues = checkV2(doc).filter((i) => i.code === 'I15')
+    expect(issues).toHaveLength(1)
+    // Listed in the schema's own order, not the order the user happened to set them —
+    // so the message reads the same for the same set of strays.
+    expect(issues[0]!.message).toContain('thickness、clearcoat、clearcoatRoughness')
   })
 })
 

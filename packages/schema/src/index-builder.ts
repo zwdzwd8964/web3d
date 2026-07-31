@@ -20,6 +20,16 @@ import type { Viewpoint } from './viewpoint.js'
 export interface RefTarget {
   readonly kind: string
   readonly id: string
+  /**
+   * v2 · what `type` the target record must declare, when the referrer constrains it.
+   *
+   * `playMedia` may only point at an audio media record (v0.5 规划 §4.2 I14) — but that is
+   * ACTION knowledge, and it lives in core's registry (ECA_SPEC §4.1). Hard-coding the
+   * action name in this package would put ECA semantics inside the one package that must
+   * not know ECA exists. So the resolver reports the constraint and `checkIntegrity`
+   * enforces it, exactly like it already does for the ids themselves.
+   */
+  readonly expectType?: string
 }
 
 /** One inbound reference: who points at something, and from where. */

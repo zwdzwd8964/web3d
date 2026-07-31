@@ -1,5 +1,6 @@
 import type { SceneDocument } from './document.js'
 import type { ActionRefResolver, RefTarget } from './index-builder.js'
+import { PHYSICAL_ONLY_PARAMS } from './material.js'
 import type { Condition, Rule, ValueExpr } from './rule.js'
 import { getUnreachableNodes } from './selectors.js'
 import { isValueOfType } from './variable.js'
@@ -83,6 +84,30 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     }
   }
 
+  /** v2 · the `type` a record declares about itself, for the kinds that have one. */
+  const typeOf = (kind: string, id: string): string | undefined => {
+    if (kind === 'asset') return doc.assets.find((a) => a.id === id)?.type
+    if (kind === 'media') return doc.media.find((m) => m.id === id)?.type
+    return undefined
+  }
+
+  /**
+   * v2 · enforces a `RefTarget.expectType` constraint reported by the action resolver.
+   *
+   * Silent when the id does not resolve (requireRef already said so — two errors about
+   * one typo is noise) and when the kind has no `type` of its own.
+   */
+  const requireType = (code: string, target: { kind: string; id: string; expectType?: string }, by: string, path: string) => {
+    if (!target.expectType) return
+    const actual = typeOf(target.kind, target.id)
+    if (actual === undefined || actual === target.expectType) return
+    const label = KIND_LABEL[target.kind] ?? target.kind
+    add(code, 'error', path, `动作「${by}」只能引用 ${target.expectType} 类型的${label}，实际是 ${actual}`, {
+      kind: target.kind,
+      id: target.id,
+    })
+  }
+
   /* --- I1 · ids unique within each collection ---------------------------- */
   const collections: [string, readonly { id: string }[]][] = [
     ['assets', doc.assets],
@@ -161,17 +186,15 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     requireRef('I3', 'material', node.overrides.materialId, `nodes[${i}].overrides.materialId`)
   })
 
+  // Existence only; the slot's ASSET TYPE is I13's job (v2) and is stricter than the
+  // check that used to live here — it accepted `image` as well, and v0.5 splits the two
+  // deliberately: `texture` is what a material samples, `image` is what a media record
+  // shows (SCHEMA_SPEC §6.7). Two checks with two different rules on one field is how a
+  // reviewer ends up unable to say which one is the rule.
   doc.materials.forEach((material, i) => {
     for (const [slot, assetId] of Object.entries(material.params.maps)) {
       if (assetId == null) continue
       requireRef('I3', 'asset', assetId, `materials[${i}].params.maps.${slot}`)
-      const asset = doc.assets.find((a) => a.id === assetId)
-      if (asset && asset.type !== 'texture' && asset.type !== 'image') {
-        add('I3', 'error', `materials[${i}].params.maps.${slot}`, `贴图槽位引用了非贴图资产（type=${asset.type}）`, {
-          kind: 'asset',
-          id: assetId,
-        })
-      }
     }
   })
 
@@ -244,6 +267,11 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
       rule.then.forEach((action, j) => {
         for (const target of options.actionRefs!(action)) {
           requireRef('I3', target.kind, target.id, `rules[${i}].then[${j}].params`)
+          // I14, third clause · the referrer may constrain the target's own `type`.
+          // Reported here rather than in the I14 block below because only this loop has
+          // the action that imposed the constraint, and naming it is what makes the
+          // message actionable ("playMedia 只能播放音频" beats "类型不匹配").
+          requireType('I14', target, action.action, `rules[${i}].then[${j}].params`)
           if (target.kind === 'animation') referencedAnimations.add(target.id)
           if (rule.enabled && target.kind === 'node' && missingNodeIds.has(target.id)) {
             add(
@@ -298,6 +326,112 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
       id: node.id,
     })
   }
+
+  /* ======================================================================== */
+  /* v2 增量 · I11 – I15（v0.5 进化规划 §4.2）                                 */
+  /* ======================================================================== */
+
+  /* --- I11 · at most one carrier per node ---------------------------------- */
+  // The rule the schema deliberately does NOT express as a zod union: a union would make
+  // the field layout depend on the carrier, and D1's patch dispatch reads
+  // `/nodes/3/light/intensity` as a stable path (SCHEMA_SPEC §4.1-6).
+  doc.nodes.forEach((node, i) => {
+    const carriers: string[] = []
+    if (node.assetRef !== null) carriers.push('assetRef')
+    if (node.primitive !== null) carriers.push('primitive')
+    if (node.light !== null) carriers.push('light')
+    if (carriers.length > 1) {
+      add(
+        'I11',
+        'error',
+        `nodes[${i}]`,
+        `对象「${node.name}」同时设置了 ${carriers.join(' 与 ')}：一个对象至多只能有一种承载体`,
+        { kind: 'node', id: node.id },
+      )
+    }
+  })
+
+  /* --- I12 · environment reference and the background that depends on it ---- */
+  const hdriId = doc.meta.environment.hdriAssetId
+  if (hdriId != null) {
+    requireRef('I12', 'asset', hdriId, 'meta.environment.hdriAssetId')
+    const hdri = doc.assets.find((a) => a.id === hdriId)
+    if (hdri && hdri.type !== 'hdri') {
+      add('I12', 'error', 'meta.environment.hdriAssetId', `环境贴图必须是 hdri 资产（当前 type=${hdri.type}）`, {
+        kind: 'asset',
+        id: hdriId,
+      })
+    }
+  }
+  if (doc.meta.background.type === 'hdri' && hdriId == null) {
+    // Not a cosmetic mismatch: with no environment map there is nothing to draw as the
+    // backdrop, so the scene publishes and then renders black with no error anywhere.
+    add('I12', 'error', 'meta.background.type', '背景设为 hdri，但 meta.environment.hdriAssetId 为空，没有可用的环境贴图')
+  }
+
+  /* --- I13 · texture slots point at texture assets -------------------------- */
+  doc.materials.forEach((material, i) => {
+    for (const [slot, assetId] of Object.entries(material.params.maps)) {
+      if (assetId == null) continue
+      const asset = doc.assets.find((a) => a.id === assetId)
+      // Missing is I3's business; this check is only about the type of what IS there.
+      if (asset && asset.type !== 'texture') {
+        add('I13', 'error', `materials[${i}].params.maps.${slot}`, `贴图槽位必须引用 texture 资产（当前 type=${asset.type}）`, {
+          kind: 'asset',
+          id: assetId,
+        })
+      }
+    }
+  })
+
+  /* --- I14 · media types line up ------------------------------------------- */
+  // The third clause — "playMedia may only point at audio" — is enforced in the rules
+  // loop above via `RefTarget.expectType`, because only there is the action that imposed
+  // the constraint available to name in the message.
+  doc.media.forEach((media, i) => {
+    const asset = doc.assets.find((a) => a.id === media.assetId)
+    if (asset && asset.type !== media.type) {
+      add('I14', 'error', `media[${i}].assetId`, `媒体声明为 ${media.type}，但引用的资产 type=${asset.type}`, {
+        kind: 'asset',
+        id: media.assetId,
+      })
+    }
+  })
+
+  const mediaById = new Map(doc.media.map((m) => [m.id, m]))
+  doc.hotspots.forEach((hotspot, i) => {
+    const mediaId = hotspot.content.mediaId
+    if (mediaId == null) return
+    const media = mediaById.get(mediaId)
+    // Existence is I3's; if it is missing this stays quiet rather than piling on.
+    if (media && media.type !== 'image' && media.type !== 'video') {
+      add(
+        'I14',
+        'error',
+        `hotspots[${i}].content.mediaId`,
+        `热点面板只能展示图片或视频，「${media.name}」是 ${media.type}`,
+        { kind: 'media', id: mediaId },
+      )
+    }
+  })
+
+  /* --- I15 · physical-only parameters on a non-physical material ------------ */
+  // Warn, not error: the renderer ignores them, so the document is renderable — it is the
+  // user's intent that is broken, and blocking a publish over an ignored number would be
+  // out of proportion.
+  doc.materials.forEach((material, i) => {
+    if (material.base === 'physical') return
+    const stray = PHYSICAL_ONLY_PARAMS.filter((key) => material.params[key] !== undefined)
+    if (stray.length > 0) {
+      add(
+        'I15',
+        'warn',
+        `materials[${i}].params`,
+        `材质「${material.name}」的 base 是 ${material.base}，以下参数只有 physical 材质才生效，当前被忽略：${stray.join('、')}`,
+        { kind: 'material', id: material.id },
+      )
+    }
+  })
 
   return issues
 }
