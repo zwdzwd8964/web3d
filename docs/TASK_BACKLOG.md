@@ -294,7 +294,7 @@
 - **验收** 折叠后层级树可读；`objectPath` 未受折叠影响
 - **自测** `pnpm -F @w3/core test instantiate`
 
-### [ ] T-053 · 客户端缩略图
+### [x] T-053 · 客户端缩略图
 - **依赖** T-052, T-036 · **预估** 0.5d · **实际** ___
 - **独占** `packages/core/src/assets/thumbnail.ts`
 - **做** 离屏渲染 + 自动取景 → PNG blob。**不做服务端 headless WebGL**（技术方案 §1.5）
@@ -503,42 +503,42 @@
 
 ## E9 · 发布与播放器
 
-### [ ] T-100 · 发布流程
+### [x] T-100 · 发布流程
 - **依赖** T-024, T-016 · **预估** 0.8d · **实际** ___
 - **独占** `packages/editor/src/publish/publish.ts`, `src/dialogs/PublishDialog.tsx`
 - **做** [MVP 规划](MVP_V0_孵化规划.md) D8。`validate` + `checkIntegrity` → **error 阻断并列出清单** → 收集引用到的资产 → 打包 `.w3p` → 下载
 - **验收** 有 error 时无法发布且提示可定位；产出包只含被引用的资产
 - **自测** `pnpm dev` 发布一次并解压检查
 
-### [ ] T-101 · Player 应用
+### [x] T-101 · Player 应用
 - **依赖** T-100, T-086 · **预估** 1d · **实际** ___
 - **独占** `packages/player/src/**`
 - **做** 读 `.w3p`（或 URL 参数指向的包）→ 解包 → 挂 `SceneRuntime`（`mode: 'play'`）→ `EcaEngine.attach` + `enabled: true` → 热点层 → 面板 UI。**只读，无任何编辑能力。**
 - **验收** **`@w3/core` 零改动**；`manifest.schemaVersion` 高于当前时报明确错误
 - **自测** `pnpm dev:player`
 
-### [ ] T-102 · 编辑器预览复用同一路径
+### [x] T-102 · 编辑器预览复用同一路径
 - **依赖** T-101, T-093 · **预估** 0.5d · **实际** ___
 - **独占** `packages/editor/src/preview/preview-session.ts`
 - **做** 抽出 `createPlaybackSession(doc, ctx)` 供两侧共用。**编辑器预览与 Player 走完全相同的初始化与事件路径**（宪法 C3）
 - **验收** 两侧代码路径可追溯到同一函数
 - **自测** `pnpm -r typecheck`
 
-### [ ] T-103 · Parity 测试 ★关键
+### [x] T-103 · Parity 测试 ★关键
 - **依赖** T-102 · **预估** 0.8d · **实际** ___
 - **独占** `test/parity/parity.test.ts`, `test/parity/event-script.json`
 - **做** [ECA_SPEC](ECA_SPEC.md) §9.3。golden-path.json + 固定事件脚本 → 两侧各跑 → 断言 `ExecResult` 序列逐项相等
 - **验收** 通过。**不过就停下来修架构，不要继续加功能**
 - **自测** `pnpm test:parity`
 
-### [ ] T-104 · 本地版本快照
+### [x] T-104 · 本地版本快照
 - **依赖** T-100 · **预估** 0.5d · **实际** ___
 - **独占** `packages/editor/src/publish/snapshots.ts`, `src/panels/SnapshotPanel.tsx`
 - **做** 发布时存快照到 `StorageProvider`；列表展示、预览、回滚到某快照
 - **验收** 回滚后文档与快照 `toEqual`
 - **自测** `pnpm -F @w3/editor test snapshots`
 
-### [ ] T-105 · Player 体积预算
+### [x] T-105 · Player 体积预算
 - **依赖** T-101 · **预估** 0.3d · **实际** ___
 - **独占** `size-limit.config.js`, CI 配置
 - **做** 配 size-limit，阈值 gzip 400KB（不含资产与 vendor 解码器）
@@ -549,7 +549,7 @@
 
 ## E10 · 验收与文档
 
-### [ ] T-110 · benchmark 页面
+### [x] T-110 · benchmark 页面
 - **依赖** T-101 · **预估** 0.5d · **实际** ___
 - **独占** `packages/player/src/bench/**`
 - **做** 技术方案 §3.2-5：WebGL2 检测、帧率、drawcall、三角形数、贴图显存估算、逐级加载压力测试。结果可一键复制成 Markdown。
@@ -563,21 +563,21 @@
 - **验收** 强制降级模式下黄金路径可完成
 - **自测** URL 参数 `?forceWebGL1=1` 走一遍
 
-### [ ] T-112 · 黄金路径 E2E
+### [x] T-112 · 黄金路径 E2E
 - **依赖** T-103 · **预估** 1d · **实际** ___
 - **独占** `e2e/golden-path.spec.ts`, `e2e/fixtures/pump.glb`
 - **做** Playwright 覆盖 [MVP 规划](MVP_V0_孵化规划.md) §2 的 12 步。**同时断言 `fullRebuildCount === 0`**
 - **验收** 12 步全绿且稳定（连跑 5 次不 flaky）
 - **自测** `pnpm test:e2e`
 
-### [ ] T-113 · 《附件A 数字资产规范》草案
+### [x] T-113 · 《附件A 数字资产规范》草案
 - **依赖** T-050, T-110 · **预估** 0.5d · **实际** ___
 - **独占** `docs/附件A_数字资产规范_草案.md`
 - **做** 从 `policy.ts` 的阈值 + benchmark 实测结果反推出可写进合同的数值：格式、单文件大小、面数、贴图数量与分辨率、坐标系与单位、命名规范（技术方案 R01 与性能验收的唯一保险）
 - **验收** 每个数值都有实测或阈值来源，不是拍脑袋
 - **自测** 人工评审
 
-### [ ] T-114 · README 与二次开发说明
+### [x] T-114 · README 与二次开发说明
 - **依赖** T-112 · **预估** 0.5d · **实际** ___
 - **独占** `README.md`, `docs/DEVELOPMENT.md`, `docs/METRICS.md`, `docs/BENCHMARK.md`
 - **做** 架构概览、包边界图、本地开发、构建部署、**如何新增一种动作**（[ECA_SPEC](ECA_SPEC.md) §10 的操作版）。填 METRICS 表（北极星 §7）与 BENCHMARK 实测结果。
