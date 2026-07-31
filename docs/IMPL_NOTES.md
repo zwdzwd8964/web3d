@@ -125,6 +125,29 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 **应当停工问人**，而不是自行写 ADR 放行。已写 [ADR-0014](adr/0014-共用播放会话放在-core.md)
 记录选择与代价，但**未自行销案**，等人工确认。
 
+### 对抗式审查未修完的 11 条（人工审阅项）
+
+2026-07-31 的一轮对抗式审查（4 维度并行找问题，每条发现由三个视角独立试图证伪）
+产出 22 条发现，存活 18 条。已修 7 条（见提交 `ebcc9cf`），**剩余 11 条如实登记在此**：
+
+| 严重度 | 发现 | 位置 |
+|---|---|---|
+| major | E2E 第 9 步断言的是样例文档里原有的热点，「在选中对象上新建」整个坏掉也会绿 | `e2e/tests/golden-path-full.spec.ts:161` |
+| major | E2E 第 8 步用 `.first()` 而非数量前后对比，「新建补间」不生效也会绿 | 同上 `:155` |
+| major | E2E 第 6 步从头到尾没改过 roughness，定位到的「roughness 控件」其实是材质下拉框 | 同上 `:136` |
+| major | bench p95 断言用 `toBeGreaterThanOrEqual(16.7)`，把 p95 实现成「最慢帧」也全绿 | `packages/player/test/bench-metrics.test.ts:41` |
+| major | 缩略图取景断言从不读 `view.target`，唯一的朝向断言又用了 y=z=0 的样本 | `packages/core/test/assets/thumbnail.test.ts:89` |
+| minor | `from-the-future` 包在 `unpackScene` 就抛出，`assertCompatible` 的中文提示成了死代码 | `packages/storage/src/package.ts:143` |
+| minor | `BENCH_LIMITS.textures` 被断言「来自 policy」，但 `gradeScene` 不用它评级 | `packages/player/test/bench-metrics.test.ts:29` |
+| minor | benchmark 缺卡片明列的「逐级加载压力测试」 | `packages/player/src/bench/main.ts` |
+| minor | T-105 的「超标 CI fail」没有落点：仓库里没有任何 CI 配置 | `package.json` |
+
+**前五条都是「测试断言不到点上」**，也就是它们保护的功能改坏了也不会红。这类问题
+比功能缺陷更值得优先处理——一个假绿的测试会让后续每一次改动都失去保护。
+
+被证伪的 4 条不予采纳，其中一条我原本会误信：「parity 对资产解析分叉结构性失明」，
+验证者实测证明加一条含 `wait` 的规则时 parity 确实会红。
+
 ### 晋级门槛现状（NORTH_STAR §3）
 
 | # | 门槛 | 状态 | 证据 |
