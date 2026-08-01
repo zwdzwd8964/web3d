@@ -10,6 +10,7 @@ import { ProjectSession } from './project/session.js'
 import { StoreProvider } from './store/StoreContext.js'
 import { createDocumentStore } from './store/document-store.js'
 import { createPatchForwarder } from './viewport/runtime-bridge.js'
+import { setActiveDocumentReader } from './viewport/runtime-registry.js'
 import { getActiveRuntime } from './viewport/runtime-registry.js'
 import './styles.css'
 
@@ -48,6 +49,8 @@ async function boot() {
   const store = createDocumentStore(doc, {
     onPatch: createPatchForwarder(getActiveRuntime),
   })
+  // DEV-only, and only ever read: the golden-path E2E asserts numbers no panel displays.
+  setActiveDocumentReader(() => store.getState().doc)
 
   createRoot(container).render(
     <StrictMode>

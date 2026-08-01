@@ -235,6 +235,27 @@
 
 ## E14 · 对象库与放置体验
 
+### [ ] T-137 · 灯光创建与灯光面板（M12 / T-170 审查补票）
+- **依赖** T-131, T-136 · **预估** 0.8d · **实际** ___
+- **独占** `packages/editor/src/panels/LightPanel.tsx`（增）, `packages/editor/src/lib/light-edit.ts`（增）, `packages/editor/src/panels/LibraryPanel.tsx`（对象页签的"灯光"分区）, 对应测试
+- **为什么存在** T-170 写到第 ⑥ 步「新建聚光灯节点」时发现：**编辑器里没有任何创建灯光的入口**。
+  T-130 ~ T-136 在 core 里把灯光栈整个建完了——五种灯的工厂、阴影管线、IBL 环境、默认灯架条件
+  退场、`setLight` 动作、helper 与射线拾取，全部有测试且全绿——而**没有一张卡负责"用户怎么新建
+  一盏灯"**。台账从 T-136 直接跳到 T-140（原始体）。`createLightNode` 在 `@w3/schema` 里躺着，
+  全仓零调用者。
+  这不是某张卡漏做了，是**规划本身缺了一格**：灯光那条链上每一环都被指派了，唯独"入口"没有。
+  与 M10 抓到的三条同形（卡面写了没接线），但更靠上游——这次是卡面本身就没写。
+- **做**
+  1. 资源库「对象」页签增"灯光"分区：五种灯（环境光 / 平行光 / 点光 / 聚光 / 半球光），
+     双击或拖放创建，走与原始体同一条放置流程（T-142 / T-146），一条 commit。
+  2. `LightPanel`：选中灯节点时显示 kind / color / intensity，聚光灯多 angleDeg / penumbra，
+     点光与聚光多 range / decay，阴影开关 + quality + bias。全部走 commit / preview（拖滑块
+     一条撤销）。
+  3. 层级树给灯节点一个可区分的图标——灯没有网格，在树里与空组看起来一样。
+- **验收** 新建五种灯各能在视口里看出光照变化；聚光灯开阴影后展台上出现影子；
+  拖 gizmo 旋转即改变照射方向（D13，无 target 对象）；删除最后一盏灯后默认灯架回来（D14 回归）
+- **自测** `pnpm -F @w3/editor test light-edit` + `pnpm dev` 目视
+
 ### [x] T-140 · PrimitiveFactory：七种原始体
 - **依赖** T-130 · **预估** 0.5d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/primitive-factory.ts`, `packages/core/test/runtime/primitive-factory.test.ts`
@@ -555,8 +576,14 @@
 
 ## E17 · 质量收口
 
-### [ ] T-170 · 黄金路径 II E2E
-- **依赖** 全部功能卡 · **预估** 1d · **实际** ___
+### [ ] T-170 · 黄金路径 II E2E　**← 阻塞中，缺 T-137**
+- **依赖** 全部功能卡（**含新开的 T-137**） · **预估** 1d · **实际** 进行中 1.0h
+- **当前状态**：`e2e/tests/golden-path-2.spec.ts` 已建，**12 步里 4 步可跑**（①②③④），标了
+  `test.fixme` 以免把 `pnpm test:e2e` 变成一个大家学会忽略的东西。
+  第 ⑤ 步差 T-154 的「分离后应用 / 应用到全部」二选一没答；第 ⑥⑨⑩⑪ 步**做不出来**——
+  编辑器里没有创建灯光的入口（见 T-137）。
+  已完成且可复用的部分：`e2e/fixtures/gen-media-fixtures.mjs`（程序化生成 warning.png 与
+  1.5s 精确时长的 alarm.wav）、`__w3DevMediaPlaying` 与 `__w3DevDoc` 两个 DEV 只读钩子。
 - **独占** `e2e/tests/golden-path-2.spec.ts`, `e2e/fixtures/gen-media-fixtures.mjs`（生成 warning.png / alarm.wav）
 - **做** 进化规划 §2 的 12 步逐步覆盖；音频断言用运行时状态（`isMediaPlaying`）不断言声卡；断言 `fullRebuildCount === 0`；**黄金路径 I 的 spec 文件不改且保持全绿**；每步断言附变异检验（V6，防止重蹈 T-115 修的覆辙）。
 - **验收** 连跑 5 次零 flaky；两条黄金路径同时全绿

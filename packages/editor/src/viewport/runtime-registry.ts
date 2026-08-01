@@ -11,6 +11,13 @@ import type { SceneRuntime } from '@w3/core'
  * renderer handle is neither persistable nor state.
  */
 let active: SceneRuntime | null = null
+/** Set by the app so the DEV document hook can read the store without importing it. */
+let activeDoc: (() => unknown) | null = null
+
+/** Registers the live document reader. DEV hooks only; production never calls it. */
+export function setActiveDocumentReader(read: (() => unknown) | null): void {
+  activeDoc = read
+}
 
 export function setActiveRuntime(runtime: SceneRuntime | null): void {
   active = runtime
@@ -39,6 +46,29 @@ export function fullRebuildCount(): number {
 if (import.meta.env.DEV) {
   ;(globalThis as Record<string, unknown>)['__w3DevLocate'] = (nodeId: string) =>
     active?.projectToScreen(nodeId) ?? null
+
+  /**
+   * DEV-only read-back of the live document.
+   *
+   * For the assertions the DOM cannot make: 「包围盒底面对齐地面」 is a number in
+   * `transform.p`, and no panel shows it to three decimal places. Read-only — it hands back
+   * the same frozen object the store holds, and there is no setter anywhere near it.
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevDoc'] = () => activeDoc?.() ?? null
+
+  /**
+   * DEV-only read-back of the runtime's media state.
+   *
+   * Golden path II step 11 asserts that clicking the pump starts the alarm. It must NOT
+   * assert the sound card: CI has no audio device, so 「真的响了」 is unassertable and any
+   * attempt at it is a flaky test wearing a confident face (进化规划 §2 says so outright).
+   * What IS a real claim is that the runtime considers it playing — the same state
+   * `stopMedia('all')` acts on and the same one the player would report.
+   *
+   * Read-only, like the other two hooks.
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevMediaPlaying'] = (mediaId: string): boolean =>
+    active?.isMediaPlaying(mediaId) ?? false
 
   /**
    * DEV-only read-back of the material the RENDERER is holding for a node.
