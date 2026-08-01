@@ -139,3 +139,48 @@ test('⑤ 预设应用到共享材质前先问，「分离后应用」只改这�
   await expect(page.getByText('个对象共用', { exact: false })).toHaveCount(0)
   await expect(page.getByText('物理参数')).toBeVisible()
 })
+
+test('⑥ 环境页签点一张 HDRI：一条撤销，整体还原', async ({ page }) => {
+  // 「一条 commit」 is the card's own wording, and this is the only way to see it: the
+  // environment map and the backdrop move together, and an undo that splits them leaves the
+  // scene lit by a sky it is no longer showing.
+  await page.goto('/')
+  await expect(page.locator('canvas.viewport__canvas')).toBeVisible()
+  await page.waitForTimeout(SETTLE * 3)
+
+  await page.getByRole('button', { name: '资源库' }).click()
+  await page.getByRole('button', { name: '环境' }).click()
+
+  const items = page.locator('.library-grid__item')
+  await expect(items.first()).toBeVisible()
+  const undoDepth = async () =>
+    Number(await page.locator('.statusbar span', { hasText: '历史' }).locator('b').first().innerText())
+  const before = await undoDepth()
+
+  await items.first().click()
+  await expect.poll(async () => await undoDepth(), { timeout: 20_000 }).toBe(before + 1)
+  await expect(page.getByRole('button', { name: '清除环境' })).toBeVisible()
+
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(SETTLE)
+
+  // Gone in one step — both halves of it.
+  await expect(page.getByRole('button', { name: '清除环境' })).toHaveCount(0)
+  expect(await undoDepth()).toBe(before)
+  expect(await rebuilds(page), '换环境不该重建场景').toBe(0)
+})
+
+test('⑦ 纹理页签点一张：引入并挂到选中对象的基础色', async ({ page }) => {
+  await selectCover(page)
+  await page.getByRole('button', { name: '资源库' }).click()
+  await page.getByRole('button', { name: '纹理' }).click()
+  await expect(page.getByText('引入后直接挂到', { exact: false })).toBeVisible()
+
+  await page.locator('.library-grid__item').first().click()
+  await page.waitForTimeout(SETTLE)
+
+  // Back in the material panel, the base-colour slot now names the texture.
+  await page.getByRole('button', { name: '材质' }).click()
+  const slot = page.locator('.field', { hasText: '基础色' }).locator('button.slot')
+  await expect.poll(async () => (await slot.innerText()).trim(), { timeout: 20_000 }).not.toBe('（未设置）')
+})

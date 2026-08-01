@@ -462,12 +462,22 @@
   共享检测走「先问再做」：运行时的写时复制救不了这一条——**文档里只有一份记录**，而另外那些对象
   可能在镜头背后。分离后应用是**一条 commit**：用户要的不是"分离"，是"这个东西变成玻璃"。
 
-### [ ] T-155 · 资源库纹理 / 环境页签
-- **依赖** T-141, T-145, T-150, T-133 · **预估** 0.5d · **实际** ___
+### [x] T-155 · 资源库纹理 / 环境页签
+- **依赖** T-141, T-145, T-150, T-133 · **预估** 0.5d · **实际** 0.5h
 - **独占** `packages/editor/src/panels/LibraryPanel.tsx`（纹理 / 环境页签区）
+  （+ `packages/editor/src/lib/environment-edit.ts` 与 `test/environment-edit.test.ts`（增）：
+  「一条 commit」这条契约得在 JSX 之外才测得到；+ `e2e/tests/material.spec.ts` 第 ⑥⑦ 条）
 - **做** 纹理页签：starter 纹理陈列，点选 → 引入为资产，若当前选中节点有材质则提供"挂到 map 槽位"快捷流；环境页签：HDRI 陈列，点选 → 引入 + 设 `meta.environment.hdriAssetId` + `background.type = 'hdri'`，**一条 commit**。
 - **验收** 黄金路径 II 第 7 步可完成；撤销一步环境整体还原
-- **自测** `pnpm dev` 目视
+- **自测** `pnpm -F @w3/editor test environment-edit`（7）+ `playwright test material`（7）
+- **实际情况**：环境这件事有**三个字段一起动**（环境贴图、背景类型、以及经 D14 隐含的默认灯组是否
+  让位），中间没有任何一个有用的中间态。分成两条 commit 就会出现"撤销之后场景仍被一张自己不再
+  显示的天空照亮"。所以引入 + 设为环境是**同一条 commit**——`importThen` 让调用方把额外改动折进
+  同一次提交里。
+  「清除环境」不等于撤销：`background.type: 'hdri'` 配一个空的 hdriAssetId 是一个**没有背景**的场景，
+  所以清除必须把背景类型也放回 `color`。
+  纹理页签的「挂到基础色」在节点没有自己的材质时**明确说不**并提示怎么办——闷声引入一个用户看不见的
+  资产，面板写着「已引入」而物体一点没变，是这里最容易做出来的坏体验。
 
 ---
 

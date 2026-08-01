@@ -1,3 +1,4 @@
+import type { SceneDocument } from '@w3/schema'
 import { useEffect, useMemo, useState } from 'react'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
@@ -13,6 +14,7 @@ import {
 } from '../lib/library.js'
 import type { Library, LibraryCategory, LibraryItem, PrimitiveTemplate } from '../lib/library.js'
 import { LIBRARY_MIME, PRIMITIVE_MIME, beginDrag, endDrag } from '../viewport/drag.js'
+import { applyHdri, assignToBaseColour, clearHdri } from '../lib/environment-edit.js'
 import { boundsOfPrimitive, restOnPoint, viewCentre } from '../viewport/place.js'
 import { getActiveRuntime } from '../viewport/runtime-registry.js'
 
@@ -47,7 +49,12 @@ export function LibraryPanel() {
   const session = useProject()
   const store = useDocumentStore()
   const doc = useDocumentSelector((s) => s.doc)
+  const selection = useDocumentSelector((s) => s.selection)
   const { commit, select } = useDocumentActions()
+
+  /** True when the texture tab can offer its one-step 「挂到基础色」. */
+  const canAssign =
+    selection.length === 1 && doc.nodes.find((n) => n.id === selection[0])?.overrides.materialId !== undefined
 
   const [tab, setTab] = useState<LibraryCategory>('model')
   const [library, setLibrary] = useState<Library>(EMPTY_LIBRARY)
@@ -78,6 +85,52 @@ export function LibraryPanel() {
     })
     if (created) select([created])
   }
+
+  /**
+   * Imports a library item and lets the caller fold extra changes into the SAME commit.
+   *
+   * One entry, because 「引入 + 设为环境」 is one thing the user asked for. Two commits would
+   * mean an undo that leaves the scene lit by an HDRI it is no longer showing.
+   */
+  const importThen = async (item: LibraryItem, label: string, extra?: (draft: SceneDocument, assetId: string) => void) => {
+    if (busy) return
+    setBusy(item.id)
+    setNote(null)
+    try {
+      const result = await importLibraryItem({
+        item,
+        // The live document, not this render's: an import is async and the user can edit
+        // while it runs.
+        doc: store.getState().doc,
+        storage: session.storage,
+        loader: session.loader,
+        base,
+      })
+      commit(label, (draft) => {
+        applyImport(draft, result)
+        extra?.(draft, result.asset.id)
+      })
+      setNote(summarizeImport(result))
+    } catch (error) {
+      setNote(`引入失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** A texture: import it, and hang it on the selected object's base colour if it has one. */
+  const bringInTexture = (item: LibraryItem) =>
+    importThen(item, canAssign ? `引入 ${item.name} 并挂到基础色` : `引入 ${item.name}`, (draft, assetId) => {
+      const nodeId = selection[0]
+      if (nodeId === undefined) return
+      if (!assignToBaseColour(draft, nodeId, assetId)) {
+        setNote('已引入。选中对象还没有自己的材质，先在材质面板新建一个再挂上去。')
+      }
+    })
+
+  /** An HDRI: import it, set it as the environment AND as the backdrop, in one entry. */
+  const bringInHdri = (item: LibraryItem) =>
+    importThen(item, `设为环境 ${item.name}`, (draft, assetId) => applyHdri(draft, assetId))
 
   const bringInItem = async (item: LibraryItem) => {
     if (busy) return
@@ -180,11 +233,55 @@ export function LibraryPanel() {
         </>
       )}
 
-      {tab !== 'model' && (
-        <p className="panel__empty">
-          {tab === 'texture' ? '纹理' : '环境'}页签在 T-155 接通。内置库已包含
-          {itemsOf(library, tab).length} 项，届时在这里陈列。
-        </p>
+      {tab === 'texture' && (
+        <>
+          <p className="panel__note">
+            {canAssign
+              ? '点一下引入项目；引入后直接挂到选中对象的基础色槽位。'
+              : '点一下引入项目。选中一个带材质的对象，就能一步挂上去。'}
+          </p>
+          <ul className="library-grid">
+            {itemsOf(library, 'texture').map((item) => (
+              <li
+                key={item.id}
+                className="library-grid__item"
+                onClick={() => void bringInTexture(item)}
+                title={`${item.name}｜${item.license}`}
+              >
+                <img className="library-grid__preview" src={libraryUrl(item.preview, base)} alt="" />
+                <span className="library-grid__name">{busy === item.id ? '引入中…' : item.name}</span>
+              </li>
+            ))}
+          </ul>
+          {itemsOf(library, 'texture').length === 0 && <p className="panel__empty">内置纹理库为空。</p>}
+        </>
+      )}
+
+      {tab === 'hdri' && (
+        <>
+          <p className="panel__note">
+            点一下引入并设为场景环境。
+            {doc.meta.environment.hdriAssetId !== null && (
+              <button type="button" className="tbtn" onClick={() => commit('清除环境', clearHdri)}>
+                清除环境
+              </button>
+            )}
+          </p>
+          <ul className="library-grid">
+            {itemsOf(library, 'hdri').map((item) => (
+              <li
+                key={item.id}
+                className="library-grid__item"
+                onClick={() => void bringInHdri(item)}
+                title={`${item.name}｜${item.license}`}
+              >
+                <img className="library-grid__preview" src={libraryUrl(item.preview, base)} alt="" />
+                <span className="library-grid__name">{busy === item.id ? '引入中…' : item.name}</span>
+              </li>
+            ))}
+          </ul>
+          {itemsOf(library, 'hdri').length === 0 && <p className="panel__empty">内置环境库为空。</p>}
+        </>
       )}
     </div>
   )
