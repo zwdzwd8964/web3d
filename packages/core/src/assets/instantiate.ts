@@ -1,5 +1,5 @@
 import type { IdFactory, Node } from '@w3/schema'
-import { ORDER_STEP, defaultIdFactory } from '@w3/schema'
+import { ORDER_STEP, clampNodeName, defaultIdFactory } from '@w3/schema'
 import { Matrix4 } from 'three'
 import type { Object3D } from 'three'
 import { decompose } from './normalize.js'
@@ -97,7 +97,10 @@ export function instantiate(scene: Object3D, options: InstantiateOptions): Insta
     const id = mint()
     nodes.push({
       id,
-      name: object.name === '' ? object.type : object.name,
+      // Clamped against the schema's own cap. A GLB object name longer than 120 characters
+      // produced a node `NodeSchema` rejects, and nothing re-validates on the way in — so
+      // the project saved and then refused to open (T-176 审查所得).
+      name: clampNodeName(object.name === '' ? object.type : object.name),
       parent: parentId,
       order: nextOrder(parentId),
       assetRef: {

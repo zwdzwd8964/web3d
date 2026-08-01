@@ -701,6 +701,57 @@
 
 ---
 
+## E18 · v0.5 债务清偿（T-176 登记项）
+
+T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清掉，**不留"已知但没人负责"的条目**。
+每张卡的验收都包含：一条能复现原问题的测试 + 一次变异检验。
+
+### [x] T-180 · 「存得下、打不开」路径收口
+- **独占** `packages/core/src/assets/instantiate.ts`, 对应测试
+- **做** 导入的模型若有超过 120 字符的物体名 → 生成的节点违反 `NodeSchema` → **整份工程从此打不开**。
+  规范化节点名（截断 + 保留可读尾巴），并**系统性排查**其余由外部数据流进文档的字段（资产名、objectPath、动画名）。
+- **验收** 造一个超长名的 GLB，导入后 `validate` 通过；截断策略有测试
+- **实际情况**：全仓只有**两个**长度受限的字符串字段（`document.name` 与 `node.name`），
+  而只有后者由外部数据（GLB 的物体名）喂进来——排查结论比修复本身更有价值。
+  `clampNodeName` 放在**约束旁边**（`node.ts`）而不是导入管线里：上限和尊重上限的那段代码
+  分头演化，正是这个 bug 的成因。
+  **保留名字的尾巴而不是开头**：导出器给的名字长这样 `Assembly_Rev3_SubAssembly_…_Bolt_M6x20`，
+  能把两个零件区分开的信息全在末尾，从右边截等于把一层结构变成四十行一模一样的东西（变异 A2 抓这条）。
+
+### [ ] T-181 · 共享 Texture 的 colorSpace 与 UV 隔离
+- **独占** `packages/core/src/runtime/texture-cache.ts`, `material-registry.ts`, 对应测试
+- **做** 一资产一 Texture 让 `colorSpace` 与 uv 变换互相踩踏：同一张图同时挂「基础色」与「粗糙度」→ 最终线性 → 物体发白（已实测复现）；两个材质用同一张图不同平铺 → 后写的赢。
+  按**用途**（colorSpace）分变体，uv 按材质分变体；变体共享解码后的 image，不重复解码。
+- **验收** 上述两个场景各一条测试；变体数有上界且被断言
+
+### [ ] T-182 · 预览态摘掉编辑期物件（C3）
+- **独占** `packages/editor/src/preview/controller.ts`, `packages/core/src/runtime/light-helpers.ts`
+- **做** 预览里灯光 helper 与拾取代理球仍在：**预览里点得到灯、播放器里点不到**，且用户「发布前最后看一眼」看到的不是发布出去的画面。网格已经这么处理了，灯光 helper 没有一并适用。
+- **验收** 预览期间 helper 计数为 0、代理球不参与拾取；退出预览后回来
+
+### [ ] T-183 · HDRI 端到端验证
+- **独占** `packages/core/test/runtime/environment-wiring.test.ts`（增）, `e2e/tests/golden-path-2.spec.ts`
+- **做** 「HDRI 照亮场景」全仓零验证：`EnvironmentController` 只在隔离桩里测过，删掉 `await this.environment.apply(doc)` 全套测试照绿。补 `SceneRuntime` 接线断言 + E2E 断言**渲染器**（`scene.environment` 非空）。
+- **验收** 上述删除能让测试转红
+
+### [ ] T-184 · O(n²) 性能悬崖收口
+- **独占** `packages/schema/src/index-builder.ts`, `packages/editor/src/panels/tree-dnd.ts`, `packages/editor/src/App.tsx`, `packages/core/src/runtime/{apply-patch,scene-runtime,primitive-factory}.ts`
+- **做** 1000 节点实测：删除靠前节点 `applyPatch` 97 ms、`flattenTree` 8.9 ms/帧、`buildIndex` 8.5 ms/次、状态栏 `checkIntegrity` 4.7 ms/次、`syncShadows(force)` O(n²)、`primitiveBounds` 被接到每次指针移动。
+  一次建好父子索引，把每节点一次全表 filter 改成一次分组。
+- **验收** 1000 节点基准测试有数字且进 METRICS；**增量路径必须快于全量重建**
+
+### [ ] T-185 · 假绿收口
+- **独占** `packages/editor/test/{patch-forwarder,undo-runtime-parity}.test.ts`, `packages/core/test/eca/actions.test.ts`
+- **做** `createPatchForwarder` 零单测（改坏 `'assets'` 判断两套测试照绿）；`undo-runtime-parity` 的 snapshot 不含 v0.5 的灯光/原始体/贴图/阴影标志位；「六种字段」守卫写死了错误集合（混入不存在的 `vec3`、漏掉合法的 `valueExpr`），与 `FieldDescriptor` 无机械联系。
+- **验收** 三条各有一次变异检验
+
+### [ ] T-186 · minor 收口
+- **独占** 见各条
+- **做** D19「先到者为准」实际只等 `durationS`（`waitForEnd` 零生产调用者）；规则编辑器媒体下拉显示文件名而非 `media.name`；`resetScene` 的 `describe()` 未随 v0.5 更新；executor 的 B9 对 media 直接放行；清空贴图槽位不释放显存（M11 登记）。
+- **验收** 逐条测试
+
+---
+
 ## 收尾：v0.5 晋级门槛核对
 
 全部任务卡完成后，逐条核对 [NORTH_STAR.md](NORTH_STAR.md) §3 的 G0.5-1 ~ G0.5-8：

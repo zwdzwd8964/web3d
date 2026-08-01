@@ -82,3 +82,25 @@ export const NodeSchema = z
   })
   .strict()
 export type Node = z.infer<typeof NodeSchema>
+
+/** The cap `NodeSchema.name` enforces. Exported so producers clamp against the real number. */
+export const NODE_NAME_MAX = 120
+
+/**
+ * Fits an externally-supplied name inside `NODE_NAME_MAX`.
+ *
+ * Lives beside the constraint on purpose: the limit and the thing that respects it drifting
+ * apart is how the bug this fixes happened. A GLB whose object name ran past 120 characters
+ * produced a node the schema rejects — and because nothing re-validates on the way in, the
+ * project SAVED and then refused to open, sending the user back to the sample scene with
+ * their work apparently gone (T-176 审查所得).
+ *
+ * The tail is kept rather than the head: exporters generate names like
+ * `Assembly_Rev3_SubAssembly_…_Bolt_M6x20`, where everything that tells two of them apart
+ * is at the END. Truncating from the right would turn a hierarchy into forty identical rows.
+ */
+export function clampNodeName(raw: string): string {
+  const name = raw.trim() === '' ? '对象' : raw.trim()
+  if (name.length <= NODE_NAME_MAX) return name
+  return `…${name.slice(name.length - (NODE_NAME_MAX - 1))}`
+}
