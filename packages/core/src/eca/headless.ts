@@ -1,4 +1,4 @@
-import type { SceneDocument } from '@w3/schema'
+import type { Light, SceneDocument } from '@w3/schema'
 import { AbortError } from './types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from './types.js'
 
@@ -134,6 +134,8 @@ export class HeadlessRuntime implements RuntimeContext {
   private vars = new Map<string, VarValue>()
   private visibility = new Map<string, boolean>()
   private materials = new Map<string, string | null>()
+  /** v0.5 · light params changed by `setLight`; absent means "still the document's". */
+  private lights = new Map<string, LiveLight>()
   private highlights = new Map<string, string>()
   private panels = new Set<string>()
   private playing = new Map<string, { cancel: () => void; loop: boolean }>()
@@ -236,6 +238,39 @@ export class HeadlessRuntime implements RuntimeContext {
     this.materials.set(nodeId, materialId)
   }
 
+  /**
+   * v0.5 · light parameters, as bookkeeping.
+   *
+   * There is no three light here, so "applied" means "recorded against the node id" — and
+   * that is exactly what the parity trace compares. The type check is the part that has to
+   * agree with SceneRuntime bit for bit: a rule that points `setLight` at a mesh must be
+   * skipped identically on both sides, or the two views disagree about whether the step
+   * ran (C3).
+   */
+  setLight(nodeId: string, patch: { intensity?: number; color?: string }): void {
+    const node = this.doc.nodes.find((n) => n.id === nodeId)
+    if (!node) {
+      this.log('error', `setLight 引用了不存在的对象：${nodeId}`)
+      return
+    }
+    if (node.light === null) {
+      this.log('error', `setLight 的目标「${node.name}」不是灯光对象，已跳过`)
+      return
+    }
+    const current = this.lights.get(nodeId) ?? liveLightOf(node.light)
+    this.lights.set(nodeId, {
+      intensity: patch.intensity ?? current.intensity,
+      color: patch.color ?? current.color,
+    })
+  }
+
+  /** The live parameters of a light node — the document's own values until `setLight` moves them. */
+  lightOf(nodeId: string): LiveLight | null {
+    const node = this.doc.nodes.find((n) => n.id === nodeId)
+    if (!node || node.light === null) return null
+    return this.lights.get(nodeId) ?? liveLightOf(node.light)
+  }
+
   highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void {
     for (const id of this.subtree(nodeId, options?.includeDescendants)) {
       if (preset === null) this.highlights.delete(id)
@@ -272,6 +307,7 @@ export class HeadlessRuntime implements RuntimeContext {
     this.visibility.clear()
     for (const node of this.doc.nodes) this.visibility.set(node.id, node.visible)
     this.materials.clear()
+    this.lights.clear()
     this.highlights.clear()
     this.panels.clear()
     this.animationTime.clear()
@@ -428,5 +464,29 @@ export class HeadlessRuntime implements RuntimeContext {
 
   errors(): LogEntry[] {
     return this.logs.filter((l) => l.level === 'error')
+  }
+}
+
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two light parameters `setLight` can move (进化规划 §4.3).
+ *
+ * Shared with SceneRuntime so both runtimes read the document's starting values through
+ * one function: `hemisphere` calls its colour `skyColor`, and two independent readings of
+ * that would be a divergence the contract test could not see — both sides would be
+ * self-consistent and different from each other.
+ */
+export interface LiveLight {
+  readonly intensity: number
+  readonly color: string
+}
+
+/** A light carrier's starting parameters, before any `setLight` moved them. */
+export function liveLightOf(light: Light): LiveLight {
+  return {
+    intensity: light.intensity,
+    color: light.kind === 'hemisphere' ? light.skyColor : light.color,
   }
 }

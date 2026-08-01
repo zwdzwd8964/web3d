@@ -230,6 +230,114 @@ describe('state actions', () => {
   })
 })
 
+/**
+ * v0.5 · light actions (进化规划 §4.3).
+ *
+ * The document these run against gets a real light node, because every interesting case
+ * here is about the difference between a light and something that merely has an id.
+ */
+describe('light actions', () => {
+  const LIGHT_ID = 'nd_light001'
+
+  const litDoc = (): SceneDocument => {
+    const doc = testDoc()
+    return {
+      ...doc,
+      nodes: [
+        ...doc.nodes,
+        {
+          id: LIGHT_ID,
+          name: '聚光灯',
+          parent: null,
+          order: 9000,
+          assetRef: null,
+          primitive: null,
+          light: {
+            kind: 'spot',
+            color: '#ffd9a0',
+            intensity: 3,
+            range: 0,
+            decay: 2,
+            angleDeg: 30,
+            penumbra: 0.2,
+            shadow: { enabled: false, quality: 'medium', bias: -0.0005 },
+          },
+          transform: { p: [0, 2, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+          visible: true,
+          locked: false,
+          overrides: {},
+        },
+      ],
+    }
+  }
+
+  beforeEach(() => {
+    ctx = new HeadlessRuntime(litDoc())
+  })
+
+  it('setLight moves intensity and colour', async () => {
+    await run('setLight', { nodeId: LIGHT_ID, intensity: 6, color: '#ff0000' })
+    expect(ctx.lightOf(LIGHT_ID)).toEqual({ intensity: 6, color: '#ff0000' })
+  })
+
+  it('leaves the parameter it was not given alone', async () => {
+    // A rule that only turns the light up must not also reset the colour the author chose.
+    await run('setLight', { nodeId: LIGHT_ID, intensity: 6 })
+    expect(ctx.lightOf(LIGHT_ID)).toEqual({ intensity: 6, color: '#ffd9a0' })
+    await run('setLight', { nodeId: LIGHT_ID, color: '#00ff00' })
+    expect(ctx.lightOf(LIGHT_ID)).toEqual({ intensity: 6, color: '#00ff00' })
+  })
+
+  it('reads the document’s own values before anything has changed them', async () => {
+    expect(ctx.lightOf(LIGHT_ID)).toEqual({ intensity: 3, color: '#ffd9a0' })
+  })
+
+  it('skips a target that is not a light, logging an error rather than throwing (B9)', async () => {
+    await run('setLight', { nodeId: IDS.cover, intensity: 6 })
+    expect(ctx.lightOf(IDS.cover), '阀盖 不是灯，不该有灯光状态').toBeNull()
+    expect(ctx.logs.some((l) => l.level === 'error' && l.message.includes('不是灯光对象'))).toBe(true)
+  })
+
+  it('skips a target that does not exist at all', async () => {
+    await run('setLight', { nodeId: 'nd_00000000', intensity: 6 })
+    expect(ctx.logs.some((l) => l.level === 'error' && l.message.includes('不存在'))).toBe(true)
+  })
+
+  it('rejects a colour that is not #rrggbb before the handler ever runs', async () => {
+    const definition = registry.get('setLight')!
+    expect(definition.schema.safeParse({ nodeId: LIGHT_ID, color: 'red' }).success).toBe(false)
+    expect(definition.schema.safeParse({ nodeId: LIGHT_ID, intensity: 999 }).success).toBe(false)
+  })
+
+  it('resetScene puts the light back where the document had it (B13)', async () => {
+    // Golden path II step 11: leave preview and the spot returns to intensity 3. Without
+    // this the editor keeps whatever the last preview run happened to leave behind.
+    await run('setLight', { nodeId: LIGHT_ID, intensity: 6, color: '#ff0000' })
+    ctx.resetScene()
+    expect(ctx.lightOf(LIGHT_ID)).toEqual({ intensity: 3, color: '#ffd9a0' })
+  })
+
+  it('describes itself in Chinese, naming the light rather than its id (R14)', async () => {
+    const { definition, params } = await run('setLight', { nodeId: LIGHT_ID, intensity: 6 })
+    expect(definition.describe(params, litDoc())).toMatch(/灯光「聚光灯」/)
+    expect(definition.describe(params, litDoc())).toMatch(/强度 6/)
+  })
+
+  it('declares the node it points at, so refsTo and the publish gate can see it', async () => {
+    const { definition, params } = await run('setLight', { nodeId: LIGHT_ID, intensity: 6 })
+    expect(definition.refs(params)).toEqual([{ kind: 'node', id: LIGHT_ID }])
+  })
+
+  it('is renderable by the rule editor with no new field kinds', () => {
+    // v0.5's claim is that a new action needs zero rule-editor changes. That holds only
+    // while every field it declares is one of the six kinds ECA_SPEC §4.4 closes over.
+    const KNOWN = new Set(['ref', 'number', 'boolean', 'string', 'enum', 'valueExpr'])
+    for (const field of registry.get('setLight')!.ui.fields) {
+      expect(KNOWN, `字段 ${field.key} 用了规则编辑器不认识的类型 ${field.type}`).toContain(field.type)
+    }
+  })
+})
+
 describe('describe() produces the acceptance-case wording (R14)', () => {
   it('names entities by their display name, not by id', () => {
     const doc = testDoc()

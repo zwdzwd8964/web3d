@@ -68,7 +68,7 @@ describe('ActionRegistry', () => {
 })
 
 describe('registerBuiltinActions()', () => {
-  it('registers the whole v0 action set', () => {
+  it('registers the whole built-in action set', () => {
     const registry = registerBuiltinActions(new ActionRegistry())
     expect(registry.size).toBe(BUILTIN_ACTIONS.length)
     expect(registry.all().map((a) => a.type).sort()).toEqual(
@@ -81,6 +81,7 @@ describe('registerBuiltinActions()', () => {
         'playAnimation',
         'resetScene',
         'seekAnimation',
+        'setLight',
         'setMaterial',
         'setVariable',
         'setVisible',

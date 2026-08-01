@@ -50,6 +50,14 @@ export interface EcaEngineOptions {
  * Written out by hand rather than via Object.create: prototype delegation would send
  * property WRITES to the wrapper instead of the real runtime, so state mutations would
  * silently land on a throwaway object.
+ *
+ * **This list is why a new RuntimeContext capability cannot leave `engine.ts` untouched.**
+ * v0.5's per-card rule ("涉及 ECA 动作的卡，engine.ts 的 diff 必须为空") is about C5 — no
+ * `if (action.type === …)` in the engine — and that still holds: the line added below
+ * carries no knowledge of any action. But the rule as written is unsatisfiable for the
+ * four RuntimeContext methods 进化规划 §4.3 mandates, and it will be unsatisfiable again
+ * for T-163's three. Registered in IMPL_NOTES §4 with a proposed fix (delegate through a
+ * Proxy, which needs no per-method list) rather than refactored here unasked.
  */
 function withCurrentEvent(ctx: RuntimeContext, event: RuntimeEvent | null): RuntimeContext {
   return {
@@ -60,6 +68,7 @@ function withCurrentEvent(ctx: RuntimeContext, event: RuntimeEvent | null): Runt
     setVisible: (id, v, o) => ctx.setVisible(id, v, o),
     setMaterial: (id, m) => ctx.setMaterial(id, m),
     highlight: (id, p, o) => ctx.highlight(id, p, o),
+    setLight: (id, patch) => ctx.setLight(id, patch),
     getNodeProp: (id, k) => ctx.getNodeProp(id, k),
     resetScene: () => ctx.resetScene(),
     playAnimation: (id, o) => ctx.playAnimation(id, o),

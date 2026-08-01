@@ -14,6 +14,7 @@ describe('HeadlessRuntime', () => {
         await ctx.clock.advance(ms)
         for (let i = 0; i < 4; i++) await Promise.resolve()
       },
+      lightOf: (nodeId) => ctx.lightOf(nodeId),
     }
   })
 })

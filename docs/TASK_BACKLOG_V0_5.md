@@ -194,12 +194,22 @@
   晋级门槛该有的样子的反面。判据 `needsDefaultLightRig` 在 schema（T-122），编辑器与运行时
   不可能对"该不该挂默认灯"产生分歧。
 
-### [ ] T-135 · `setLight` 动作
-- **依赖** T-131, T-134 · **预估** 0.5d · **实际** ___
+### [x] T-135 · `setLight` 动作
+- **依赖** T-131, T-134 · **预估** 0.5d · **实际** 0.7h
 - **独占** `packages/core/src/eca/actions/light.ts`, `packages/core/src/eca/types.ts`, `packages/core/src/eca/headless.ts`, `packages/core/src/runtime/scene-runtime.ts`（ctx 实现段）, `packages/core/test/eca/actions.test.ts`, `packages/core/test/runtime-contract.ts`, `docs/ECA_SPEC.md`
 - **做** 进化规划 §4.3：`RuntimeContext.setLight` 双实现 + 契约测试条目；动作五项齐全（schema / handler / ui / refs / describe，describe 中文）；目标节点非灯时 skip + error 日志（B9 同款语义）。**回写 ECA_SPEC.md** 动作表与 RuntimeContext 章节。`executor.ts` / `engine.ts` / 规则编辑器 diff 为空。
 - **验收** 覆盖率门槛 14/14；规则编辑器零改动可编辑该动作（既有 rule-editor 测试自动把关）
 - **自测** `pnpm -F @w3/core test eca`
+- **实际情况**：`executor.ts` 与 `packages/editor` 的 diff **确为空**；**`engine.ts` 不为空**
+  ——它的 `withCurrentEvent` 是手写逐方法委托，每加一个 RuntimeContext 方法都得改它一行，
+  与动作类型无关（C5 的实质没破）。这条纪律对进化规划 §4.3 强制的四个新方法字面上不可满足，
+  T-163 还会再撞一次。已登记 IMPL_NOTES §4 并给出修法（Proxy 委托），**未擅自重构引擎**。
+  另两处：颜色字段用 `type: 'string'` 而不是新增 `'color'` 字段类型（§4.4 是封闭六种，
+  加一种等于同时改规范和改规则编辑器）；契约测试的灯光读取器由 harness 提供而不是往
+  `RuntimeContext` 上加 `getLight`——为测试方便加宽冻结清单，冻结就不再有意义。
+  三次变异检验，其中**第二次一开始没抓住**：只传 intensity 时，把「目标必须是灯」的守卫
+  整个删掉，测试照样全绿（往错的 Object3D 上写个数字在 JS 里是静默成功的）。断言改为同时
+  传颜色后才转红——已写进契约测试的注释。
 
 ### [ ] T-136 · 灯光 helper 与拾取（编辑态）
 - **依赖** T-131 · **预估** 0.5d · **实际** ___

@@ -171,6 +171,12 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 > 顺带记一条不修的观察（低）：编辑器在软件渲染下**不提示**，只有播放器提示。
 > 作者机器与客户机器的假设不同，可以辩护；登记在此，v1 若统一再说。
 
+### T-135 登记的一条（未修，等人工裁决）
+
+| 严重度 | 发现 | 位置 | 处置 |
+|---|---|---|---|
+| minor | **`engine.ts` 的 `withCurrentEvent` 是手写的逐方法委托**，所以每新增一个 `RuntimeContext` 方法都必须改 `engine.ts` 一行——哪怕新方法与任何动作类型都无关。v0.5 每卡纪律第 2 条要求「涉及 ECA 动作的卡，engine.ts 的 diff 必须为空」，而进化规划 §4.3 强制新增四个 RuntimeContext 方法：这两条**字面上互相矛盾**。T-163（media 三个方法）会再撞一次 | `packages/core/src/eca/engine.ts:54` | 本卡只加了 `setLight` 一行（无动作知识，C5 的实质未破），**没有擅自重构引擎**。建议改法：`withCurrentEvent` 改用 Proxy 委托——`get` 拦截 `currentEvent`，其余 `Reflect.get` 后 `bind(target)`，写入自然落到真实运行时上，从此不再需要逐方法列表。等人工确认后再动 |
+
 ### T-132 抓到的一条（已修）
 
 | 严重度 | 发现 | 位置 | 处置 |

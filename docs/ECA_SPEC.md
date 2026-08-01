@@ -186,7 +186,7 @@ export function allActions(): ActionDefinition[]
 
 漏掉任何一项，新增动作的边际成本就从"半天"变成"两天"。
 
-### 4.2 v0 动作清单
+### 4.2 动作清单
 
 | `action` | 参数 | 语义 | await 行为 |
 |---|---|---|---|
@@ -202,11 +202,20 @@ export function allActions(): ActionDefinition[]
 | `setVariable` | `{ variableId, value: ValueExpr, mode?: 'set'\|'add' }` | 赋值 | 立即，同步触发 `variableChange` |
 | `wait` | `{ ms }` | 等待 | 挂起 `ms` 毫秒（走 `ctx.wait`） |
 | `openLink` | `{ url, target: '_blank'\|'_self' }` | 打开链接 | 立即 |
-| `resetScene` | `{}` | 恢复到文档初始状态（transform / visible / material / 变量默认值） | 立即 |
+| `resetScene` | `{}` | 恢复到文档初始状态（transform / visible / material / 变量默认值 / **灯光参数**） | 立即 |
+| `setLight` **（v0.5）** | `{ nodeId, intensity?, color? }` | 改灯光参数（目标节点须为灯节点，否则 skip + error，同 B9） | 立即 |
 
 `moveCamera` **只能飞到已保存的视点**（技术方案 §1.3 原文限定）。允许填任意坐标等于让用户在规则编辑器里手搓相机，UI 复杂度暴涨且几乎无人用对。
 
 `wait` 是技术方案没列但必需的：没有它，"高亮 → 停 1 秒 → 弹面板"这类最常见的编排做不出来，用户会被迫用假的 loop 动画去凑。
+
+**`setLight`（v0.5，进化规划 §4.3）只有强度与颜色两个参数**，这是刻意的：它们是场景**响应
+事件**时会变的量（"报警 → 聚光灯变亮变红"）。锥角、衰减、阴影质量是创作期决定，属于文档，
+不属于规则。想加进来 = 改冻结清单 = 触发分诊 Q3。
+
+颜色字段用 `type: 'string'` 而不是取色器：`FieldDescriptor` 是 §4.4 的封闭六种，规则编辑器
+只渲染这六种。加一种 `'color'` 等于同时改规范和改规则编辑器——而 v0.5 的整个主张就是新增
+动作两样都不用改。格式由 zod 的 `#rrggbb` 校验在动作跑起来之前挡住。
 
 ### 4.3 一个完整的动作定义示例
 
@@ -331,6 +340,8 @@ export interface RuntimeContext {
   highlight(nodeId: string, preset: string | null, opts?: { includeDescendants?: boolean }): void
   getNodeProp(nodeId: string, key: string): VarValue
   resetScene(): void
+  /** v0.5 · 目标非灯节点时 skip + error（同 B9）；resetScene 会还原它改过的值（B13） */
+  setLight(nodeId: string, patch: { intensity?: number; color?: string }): void
 
   // ---- 动画 ----
   playAnimation(id: string, opts: { signal?: AbortSignal }): Promise<void>
@@ -362,6 +373,17 @@ export interface RuntimeContext {
 
 - `SceneRuntime implements RuntimeContext` —— 生产环境，操作真实 three 对象；
 - `HeadlessRuntime implements RuntimeContext` —— 纯 JS，用 Map 记录状态，假时钟，动画用"到时间就 resolve"模拟。
+
+**接口没有 `getLight` 之类的读取方法**，但契约测试仍然逐项比对两侧的灯光状态：读取器由
+**契约测试的 harness** 提供，两侧各自暴露自己的状态，跑同一批断言。理由是冻结清单
+（进化规划 §4.3）只有 `setLight` 与三个媒体方法；为了测试方便去加宽一份冻结清单，冻结
+就不再有意义。
+
+> **一处已知的维护陷阱**：`engine.ts` 的 `withCurrentEvent` 是手写的逐方法委托，所以
+> **每新增一个 RuntimeContext 方法都必须改 `engine.ts`**——哪怕新方法与任何动作类型都
+> 无关。C5 的实质（引擎里不出现 `if (action.type === …)`）没有被破坏，但 v0.5 每卡纪律
+> 里"engine.ts diff 必须为空"这条对本节强制的四个新方法字面上不可满足。已登记进
+> IMPL_NOTES §4，并给出修法（改为 Proxy 委托，不再需要逐方法列表）。
 
 两者**必须共用同一套接口一致性测试**：写一个 `describeRuntimeContract(makeCtx)` 测试套件，两个实现各跑一遍。否则 HeadlessRuntime 会慢慢和真实行为漂移，测试全绿但产品是坏的——这是这类架构最隐蔽的失效方式。
 
@@ -434,7 +456,7 @@ type TestCase = {
 | B10 | `variableChange` 事件中 `setVariable` 同一变量 | 有循环保护：同一 tick 内同一变量的连锁深度上限 16，超出则 abort + error |
 | B11 | `detach()` 时有规则在跑 | 全部 abort，无悬挂 Promise，无泄漏定时器 |
 | B12 | parallel + 首个失败 + `abort` | 其余动作收到 abort |
-| B13 | 退出预览模式 | 变量、可见性、transform、材质全部回到进入前的编辑态 |
+| B13 | 退出预览模式 | 变量、可见性、transform、材质、**灯光参数（v0.5）** 全部回到进入前的编辑态 |
 | B14 | `{ event: 'nodeId' }` 值表达式 | 在 `target: { any: true }` 的规则中拿到正确的节点 |
 
 **B10 值得单独说**：变量变化触发规则、规则又改变量，是最容易写出无限循环的地方，而且它在编辑器里表现为整个页面卡死。必须有硬性深度上限。

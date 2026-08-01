@@ -18,10 +18,56 @@ export interface ContractHarness {
   readonly ctx: RuntimeContext
   /** Moves whatever clock this runtime uses forward by `ms`, settling side effects. */
   advance(ms: number): Promise<void>
+  /**
+   * v0.5 · the light's live parameters, however this runtime stores them.
+   *
+   * Supplied by the harness rather than added to `RuntimeContext` on purpose. The frozen
+   * increment (进化规划 §4.3) is `setLight` and three media methods — no reader — and
+   * widening a frozen list for the convenience of a test is how frozen lists stop meaning
+   * anything. Each side exposes its own state, and the SAME assertions run against both,
+   * which is what the contract is for.
+   */
+  lightOf(nodeId: string): { intensity: number; color: string } | null
+}
+
+/** A spot light node, so the light half of the contract has something to point at. */
+const LIGHT_ID = 'nd_light001'
+
+function litDocument(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  return {
+    ...doc,
+    nodes: [
+      ...doc.nodes,
+      {
+        id: LIGHT_ID,
+        name: '聚光灯',
+        parent: null,
+        order: 9000,
+        assetRef: null,
+        primitive: null,
+        light: {
+          kind: 'spot',
+          color: '#ffd9a0',
+          intensity: 3,
+          range: 0,
+          decay: 2,
+          angleDeg: 30,
+          penumbra: 0.2,
+          shadow: { enabled: false, quality: 'medium', bias: -0.0005 },
+        },
+        transform: { p: [0, 2, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+        visible: true,
+        locked: false,
+        overrides: {},
+      },
+    ],
+  }
 }
 
 export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocument) => ContractHarness) {
   const setup = () => makeCtx(createGoldenPathDocument())
+  const setupLit = () => makeCtx(litDocument())
 
   it(`${label}: variables start at their document defaults`, () => {
     expect(setup().ctx.getVar('step')).toBe(1)
@@ -174,5 +220,44 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
   it(`${label}: reading an undeclared variable warns instead of throwing`, () => {
     const { ctx } = setup()
     expect(() => ctx.getVar('nope')).not.toThrow()
+  })
+
+  /* --- v0.5 · setLight (进化规划 §4.3) ------------------------------------ */
+
+  it(`${label}: a light starts at the parameters the document gave it`, () => {
+    expect(setupLit().lightOf(LIGHT_ID)).toEqual({ intensity: 3, color: '#ffd9a0' })
+  })
+
+  it(`${label}: setLight moves intensity and colour`, () => {
+    const h = setupLit()
+    h.ctx.setLight(LIGHT_ID, { intensity: 6, color: '#ff0000' })
+    expect(h.lightOf(LIGHT_ID)).toEqual({ intensity: 6, color: '#ff0000' })
+  })
+
+  it(`${label}: setLight leaves the parameter it was not given alone`, () => {
+    const h = setupLit()
+    h.ctx.setLight(LIGHT_ID, { intensity: 6 })
+    expect(h.lightOf(LIGHT_ID)).toEqual({ intensity: 6, color: '#ffd9a0' })
+  })
+
+  it(`${label}: setLight on a node that is not a light is skipped, not thrown (B9)`, () => {
+    // The divergence this catches is the expensive kind: one runtime throwing where the
+    // other skips means the editor's preview and the player disagree about whether the
+    // rest of the sequence ran at all.
+    //
+    // BOTH parameters are passed on purpose. With intensity alone this assertion does not
+    // discriminate: writing a number onto the wrong Object3D silently succeeds in
+    // JavaScript, so a runtime that had lost its "is this a light" guard entirely would
+    // still pass. Colour is the one that needs a real `Color` on the other end.
+    const h = setupLit()
+    expect(() => h.ctx.setLight(IDS.cover, { intensity: 6, color: '#ff0000' })).not.toThrow()
+    expect(h.lightOf(IDS.cover)).toBeNull()
+  })
+
+  it(`${label}: resetScene puts the light back (B13, extended to lights)`, () => {
+    const h = setupLit()
+    h.ctx.setLight(LIGHT_ID, { intensity: 6, color: '#ff0000' })
+    h.ctx.resetScene()
+    expect(h.lightOf(LIGHT_ID)).toEqual({ intensity: 3, color: '#ffd9a0' })
   })
 }

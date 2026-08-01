@@ -433,6 +433,7 @@ describe('the shared RuntimeContext contract', () => {
         await vi.advanceTimersByTimeAsync(ms)
         for (let i = 0; i < 6; i++) await Promise.resolve()
       },
+      lightOf: (nodeId: string) => runtime.lightOf(nodeId),
     }
   })
 })

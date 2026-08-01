@@ -56,6 +56,22 @@ export interface RuntimeContext {
   getNodeProp(nodeId: string, key: string): VarValue
   resetScene(): void
 
+  /**
+   * v0.5 · live light parameters (进化规划 §4.3).
+   *
+   * A node that is not a light is SKIPPED with an error log, never a throw — the B9
+   * semantics every other node action follows: a rule pointing at something that has been
+   * deleted or retyped must not take the scene down with it.
+   *
+   * Only intensity and colour, and deliberately so: they are what a scene animates in
+   * response to an event. Cone angle and shadow quality are authoring decisions and stay
+   * in the document.
+   *
+   * `resetScene` restores whatever this changed, which is what makes "exit preview and the
+   * light goes back to 3" true (B13, extended to lights in v0.5).
+   */
+  setLight(nodeId: string, patch: { intensity?: number; color?: string }): void
+
   // ---- animation ----
   /**
    * MVP_V0 D6 · resolves when playback finishes naturally. A looping animation resolves

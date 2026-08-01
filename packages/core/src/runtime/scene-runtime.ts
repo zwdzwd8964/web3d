@@ -17,6 +17,7 @@ import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
 import { SceneGraph } from './scene-graph.js'
+import type { LiveLight } from '../eca/headless.js'
 import type { EnvMapCompiler } from './environment.js'
 import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
@@ -44,6 +45,13 @@ export interface SceneRuntimeOptions {
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
+}
+
+/** The shape every three light class shares. Duck-typed so no `instanceof` chain is needed. */
+interface ThreeLightLike {
+  isLight?: boolean
+  intensity: number
+  color: { set(value: string): void; getHexString(): string }
 }
 
 interface PendingWait {
@@ -557,6 +565,48 @@ export class SceneRuntime implements RuntimeContext {
     this.materials.applyToNode(nodeId, materialId, defs, this.graph)
   }
 
+  /**
+   * v0.5 · writes live light parameters onto the three light (进化规划 §4.3).
+   *
+   * Runtime state, not document state: this is a rule reacting to an event, exactly like
+   * `setVisible`. `resetScene` rebuilds the graph from the document, which is what puts the
+   * light back where the author left it when preview ends (B13, extended to lights).
+   *
+   * Every light class three has exposes `color` and `intensity`, including
+   * `HemisphereLight` — whose `color` IS its sky colour, which is why `liveLightOf` maps
+   * the document's `skyColor` onto the same name. One reading of "the light's colour",
+   * shared by both runtimes.
+   */
+  setLight(nodeId: string, patch: { intensity?: number; color?: string }): void {
+    const node = this.document.nodes.find((n) => n.id === nodeId)
+    if (!node) {
+      this.log('error', `setLight 引用了不存在的对象：${nodeId}`)
+      return
+    }
+    if (node.light === null) {
+      // B9's semantics: skip and say so. A rule aimed at a node that has since been
+      // retyped must not take the scene down, and must not silently look like it worked.
+      this.log('error', `setLight 的目标「${node.name}」不是灯光对象，已跳过`)
+      return
+    }
+    const light = this.graph.objectFor(nodeId) as unknown as ThreeLightLike | undefined
+    if (light?.isLight !== true) {
+      this.log('error', `setLight 的目标「${node.name}」在场景里不是灯光对象，已跳过`)
+      return
+    }
+    if (patch.intensity !== undefined) light.intensity = patch.intensity
+    if (patch.color !== undefined) light.color.set(patch.color)
+  }
+
+  /** The light's live parameters, or null when the node is not a light. Read by the contract suite. */
+  lightOf(nodeId: string): LiveLight | null {
+    const node = this.document.nodes.find((n) => n.id === nodeId)
+    if (!node || node.light === null) return null
+    const light = this.graph.objectFor(nodeId) as unknown as ThreeLightLike | undefined
+    if (light?.isLight !== true) return null
+    return { intensity: light.intensity, color: `#${light.color.getHexString()}` }
+  }
+
   highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void {
     const applied = this.highlights.set(nodeId, preset, options ?? {})
     if (!applied && preset !== null) {
@@ -598,8 +648,14 @@ export class SceneRuntime implements RuntimeContext {
     this.clips.stopAll()
     this.highlights.clearAll()
     this.resetRuntimeState()
+    // Rebuilding from the document is what undoes `setLight`: the lights are constructed
+    // again from `node.light`, so whatever a rule moved goes back to what the author set
+    // (B13, extended to lights in v0.5).
     this.graph.build(this.document)
     this.materials.applyAll(this.document, this.graph)
+    // Every Object3D is new again, carrying three's defaults — the same reason `rebuild`
+    // forces this. Without it, exiting preview silently turns every shadow off.
+    this.syncShadows(this.document, true)
   }
 
   private resetRuntimeState(): void {
