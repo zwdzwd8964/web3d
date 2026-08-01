@@ -59,33 +59,35 @@ export interface EcaEngineOptions {
  * for T-163's three. Registered in IMPL_NOTES §4 with a proposed fix (delegate through a
  * Proxy, which needs no per-method list) rather than refactored here unasked.
  */
-function withCurrentEvent(ctx: RuntimeContext, event: RuntimeEvent | null): RuntimeContext {
-  return {
-    doc: ctx.doc,
-    getVar: (id) => ctx.getVar(id),
-    setVar: (id, v) => ctx.setVar(id, v),
-    isVisible: (id) => ctx.isVisible(id),
-    setVisible: (id, v, o) => ctx.setVisible(id, v, o),
-    setMaterial: (id, m) => ctx.setMaterial(id, m),
-    highlight: (id, p, o) => ctx.highlight(id, p, o),
-    setLight: (id, patch) => ctx.setLight(id, patch),
-    getNodeProp: (id, k) => ctx.getNodeProp(id, k),
-    resetScene: () => ctx.resetScene(),
-    playAnimation: (id, o) => ctx.playAnimation(id, o),
-    stopAnimation: (id, o) => ctx.stopAnimation(id, o),
-    seekAnimation: (id, t) => ctx.seekAnimation(id, t),
-    isAnimationPlaying: (id) => ctx.isAnimationPlaying(id),
-    moveCamera: (id, o) => ctx.moveCamera(id, o),
-    openPanel: (id) => ctx.openPanel(id),
-    closePanel: (id) => ctx.closePanel(id),
-    isPanelOpen: (id) => ctx.isPanelOpen(id),
-    openLink: (u, t) => ctx.openLink(u, t),
-    now: () => ctx.now(),
-    wait: (ms, s) => ctx.wait(ms, s),
-    emit: (e) => ctx.emit(e),
-    log: (l, m, d) => ctx.log(l, m, d),
-    currentEvent: () => event,
-  }
+/**
+ * The context an action sees while a rule is executing: the real runtime, plus the event
+ * that triggered it.
+ *
+ * A Proxy rather than a hand-written delegation, decided in T-163 after the hand-written
+ * one had cost twice. Every method added to `RuntimeContext` needed a line here, and
+ * forgetting one produced a failure that NO action test could see: the action tests pass a
+ * `HeadlessRuntime` straight in, so `ctx.playMedia` exists there and is `undefined` only
+ * once a real rule fires through the engine. A silent hole that opens at runtime, on the
+ * exact path least covered.
+ *
+ * It also restores C5's substance. 「加交互能力靠注册表，不改 engine.ts」 was literally
+ * impossible while every new `RuntimeContext` method demanded an engine edit — v0.5's own
+ * discipline (「涉及 ECA 动作的卡，engine.ts 的 diff 必须为空」) and 进化规划 §4.3 (which
+ * mandates four new context methods) contradicted each other outright. This is the one
+ * engine change that stops there being any more of them; it was registered in M9's review
+ * and approved by a human before being made.
+ *
+ * `bind(target)` matters: `SceneRuntime`'s methods use `this`, and handing back an unbound
+ * function would break every one of them the moment it was called through the proxy.
+ */
+export function withCurrentEvent(ctx: RuntimeContext, event: RuntimeEvent | null): RuntimeContext {
+  return new Proxy(ctx, {
+    get(target, property, receiver) {
+      if (property === 'currentEvent') return () => event
+      const value = Reflect.get(target, property, receiver) as unknown
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value
+    },
+  })
 }
 
 export class EcaEngine {

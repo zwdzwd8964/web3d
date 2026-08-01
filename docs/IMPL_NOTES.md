@@ -262,11 +262,11 @@ E2E 都看不见（模型确实出现了，只是没贴在表面上），是读 
 > "这个函数有人调吗"。写成可执行的检查：**凡是卡面出现"拖 / 双击 / 点击"这类手势的，验收里
 > 必须有一条走到 UI 事件入口的测试或 E2E 步骤**，否则手势层永远是测试盲区。
 
-### T-135 登记的一条（未修，等人工裁决）
+### T-135 登记的一条（**已裁决并修复**，见 [ADR-0018](adr/0018-withCurrentEvent-改用-Proxy-委托.md)）
 
 | 严重度 | 发现 | 位置 | 处置 |
 |---|---|---|---|
-| minor | **`engine.ts` 的 `withCurrentEvent` 是手写的逐方法委托**，所以每新增一个 `RuntimeContext` 方法都必须改 `engine.ts` 一行——哪怕新方法与任何动作类型都无关。v0.5 每卡纪律第 2 条要求「涉及 ECA 动作的卡，engine.ts 的 diff 必须为空」，而进化规划 §4.3 强制新增四个 RuntimeContext 方法：这两条**字面上互相矛盾**。T-163（media 三个方法）会再撞一次 | `packages/core/src/eca/engine.ts:54` | 本卡只加了 `setLight` 一行（无动作知识，C5 的实质未破），**没有擅自重构引擎**。建议改法：`withCurrentEvent` 改用 Proxy 委托——`get` 拦截 `currentEvent`，其余 `Reflect.get` 后 `bind(target)`，写入自然落到真实运行时上，从此不再需要逐方法列表。等人工确认后再动 |
+| minor | **`engine.ts` 的 `withCurrentEvent` 是手写的逐方法委托**，所以每新增一个 `RuntimeContext` 方法都必须改 `engine.ts` 一行——哪怕新方法与任何动作类型都无关。v0.5 每卡纪律第 2 条要求「涉及 ECA 动作的卡，engine.ts 的 diff 必须为空」，而进化规划 §4.3 强制新增四个 RuntimeContext 方法：这两条**字面上互相矛盾**。T-163（media 三个方法）会再撞一次 | `packages/core/src/eca/engine.ts:54` | ✅ **T-163 前已裁决并执行**：人工确认后改用 Proxy 委托，`engine.ts` 改这一次、以后不再改。补了 `scoped-context.test.ts`——**枚举运行时自身的方法表**逐个断言透传，而不是再维护一份名单，所以明天加的方法自动被覆盖。`bind(target)` 也钉了一条测试（一个带 `#private` 字段的类）：两个运行时今天都没有私有字段，不钉的话这个 bind 就是没人能证伪的防御代码 |
 
 ### T-132 抓到的一条（已修）
 
