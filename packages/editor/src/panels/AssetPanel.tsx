@@ -1,7 +1,7 @@
 import type { AuditFinding } from '@w3/schema'
 import { formatBytes } from '@w3/core'
 import { useRef, useState } from 'react'
-import { applyImport, importModel, placeInstance, summarizeImport } from '../lib/import-flow.js'
+import { IMPORT_ACCEPT, applyImport, importAsset, placeInstance, summarizeImport } from '../lib/import-flow.js'
 import type { ImportProgress, ImportResult } from '../lib/import-flow.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
@@ -35,7 +35,7 @@ export function AssetPanel() {
     setError(null)
     setPending(null)
     try {
-      const result = await importModel({
+      const result = await importAsset({
         file: { name: file.name, bytes: await file.arrayBuffer() },
         doc,
         storage,
@@ -79,12 +79,12 @@ export function AssetPanel() {
       <div className="panel__head">
         资产<span className="num">{doc.assets.length}</span>
         <button type="button" className="tbtn" onClick={() => fileInput.current?.click()}>
-          导入 GLB
+          导入资产
         </button>
         <input
           ref={fileInput}
           type="file"
-          accept=".glb,.gltf,model/gltf-binary"
+          accept={IMPORT_ACCEPT}
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0]
@@ -107,7 +107,7 @@ export function AssetPanel() {
         {error && <p className="panel__note panel__note--warn">导入失败：{error}</p>}
 
         {doc.assets.length === 0 && !progress && !pending && (
-          <p className="panel__empty">把 GLB 文件拖到这里，或点「导入 GLB」</p>
+          <p className="panel__empty">把模型（.glb）、纹理（.png/.jpg/.webp/.ktx2）或环境贴图（.hdr）拖到这里</p>
         )}
 
         <ul className="asset-list">

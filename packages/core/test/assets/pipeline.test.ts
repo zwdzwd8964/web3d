@@ -198,7 +198,9 @@ describe('T-050 · audit', () => {
   })
 
   it('describePolicy renders the numbers Appendix A is written from', () => {
-    const text = describePolicy()
+    // Scoped now (v0.5): the metric table also carries image and hdri limits, and an
+    // unscoped render is every threshold in the product rather than the model's seven.
+    const text = describePolicy(undefined, 'model')
     expect(text).toContain('三角面数 ≤ 300,000')
     expect(text.split('\n')).toHaveLength(7)
     expect(formatBytes(8_412_300)).toBe('8.0 MB')

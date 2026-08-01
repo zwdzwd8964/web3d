@@ -2,7 +2,7 @@ import type { Asset, AssetAudit, AssetStats, IdFactory, Node, SceneDocument } fr
 import { collectAllIds, defaultIdFactory, remapAssetRefs } from '@w3/schema'
 import type { MigrationReport } from '@w3/schema'
 import type { AuditResult } from '@w3/core'
-import { AssetLoader, auditGlb, computeNormalization, instantiate, renderThumbnail } from '@w3/core'
+import { AssetLoader, auditGlb, auditImage, computeNormalization, instantiate, renderThumbnail } from '@w3/core'
 import type { LoadedAsset } from '@w3/core'
 import type { BlobHash, StorageProvider } from '@w3/storage'
 import { extensionOf, hashBytes, hashToPath } from '@w3/storage'
@@ -76,6 +76,124 @@ export interface ImportResult {
   readonly deduplicated: boolean
   readonly hash: BlobHash
 }
+
+/* -------------------------------------------------------------------------- */
+/* v0.5 · what kind of file is this? (T-150)                                   */
+/* -------------------------------------------------------------------------- */
+
+/** The asset kinds the importer can produce. `media` arrives in T-160. */
+export type ImportKind = 'model' | 'texture' | 'hdri'
+
+/** Extension → kind. The extension is the user's declaration; the header check confirms it. */
+const KIND_BY_EXTENSION: Record<string, ImportKind> = {
+  '.glb': 'model',
+  '.gltf': 'model',
+  '.png': 'texture',
+  '.jpg': 'texture',
+  '.jpeg': 'texture',
+  '.webp': 'texture',
+  '.ktx2': 'texture',
+  '.hdr': 'hdri',
+}
+
+/** What a file picker should accept today. Kept next to the table it is derived from. */
+export const IMPORT_ACCEPT = Object.keys(KIND_BY_EXTENSION).join(',')
+
+/**
+ * Classifies a file by extension.
+ *
+ * Extension rather than content sniffing, deliberately: the user renaming `photo.png` to
+ * `model.glb` should get "这不是一个有效的模型文件" from the parser, not a texture import
+ * they did not ask for. The extension states intent; the format check in the audit is what
+ * catches a mismatch.
+ */
+export function classifyImport(fileName: string): ImportKind | null {
+  return KIND_BY_EXTENSION[extensionOf(fileName).toLowerCase()] ?? null
+}
+
+/**
+ * Imports any supported file.
+ *
+ * The one entry point a caller should use. It answers "what is this" and hands off; the
+ * model path is unchanged from v0, and the image path shares hashing, dedup, storage and
+ * the asset record with it — the parts that must not diverge, because a second upload of
+ * the same bytes has to produce the same url whatever the file is.
+ */
+export async function importAsset(options: ImportOptions): Promise<ImportResult> {
+  const kind = classifyImport(options.file.name)
+  if (kind === null) {
+    throw new Error(`不支持的文件类型：${options.file.name}。当前支持 ${IMPORT_ACCEPT}`)
+  }
+  return kind === 'model' ? importModel(options) : importImage(options, kind === 'hdri' ? 'hdri' : 'texture')
+}
+
+/**
+ * Imports a texture or an environment map.
+ *
+ * Deliberately NOT a branch inside `importModel`. The two flows share their first half and
+ * diverge completely in the second: an image has no geometry to parse, no normalisation to
+ * apply, no nodes to instantiate and no remap ladder — and every one of those steps in the
+ * model path would need an `if` that means "skip this". Four skipped steps in a row is a
+ * different function.
+ *
+ * **The image is its own thumbnail.** A separate downscaled blob would need a canvas (so:
+ * browser-only, untestable in Node) and would double the stored bytes for a picture the
+ * asset panel already displays at 64 px through CSS. The one case this is wrong for — a
+ * 4 MB texture used as a 64 px thumbnail — is exactly the case the size audit is telling
+ * the user to fix.
+ */
+export async function importImage(options: ImportOptions, kind: 'texture' | 'hdri'): Promise<ImportResult> {
+  const { file, doc, storage } = options
+  const newId = options.newId ?? defaultIdFactory
+  const now = options.now ?? (() => new Date().toISOString())
+  const report = (stage: ImportStage, message: string) => options.onProgress?.({ stage, message })
+
+  report('hashing', '正在计算内容哈希…')
+  const hash = await hashBytes(new Uint8Array(file.bytes))
+
+  report('deduplicating', '正在查重…')
+  const deduplicated = await storage.hasBlob(hash)
+  const existing = doc.assets.find((a) => a.hash === hash)
+
+  report('auditing', '正在体检…')
+  const audit = auditImage(file.bytes, { now, scope: kind === 'hdri' ? 'hdri' : 'image' })
+
+  if (existing) {
+    // Same bytes, already recorded. Unlike a model, a second import produces no nodes —
+    // an image is not placed in the scene, it is pointed at by a material or by
+    // `meta.environment`. Returning the existing record is the whole result.
+    report('done', '导入完成')
+    return { asset: existing, audit, nodes: [], deduplicated: true, hash }
+  }
+
+  report('storing', '正在写入存储…')
+  if (!deduplicated) await storage.putBlob(new Uint8Array(file.bytes))
+
+  const assetId = newId('asset', collectAllIds(doc))
+  const url = hashToPath(hash, extensionOf(file.name) || (kind === 'hdri' ? '.hdr' : '.png'))
+  const asset: Asset = {
+    id: assetId,
+    type: kind,
+    name: file.name,
+    hash,
+    url,
+    version: 1,
+    lineageId: assetId,
+    stats: audit.stats satisfies AssetStats,
+    audit: audit.audit satisfies AssetAudit,
+    // An `<img>` can show a png/jpg/webp directly, so the asset IS its own preview. An
+    // `.hdr` cannot be shown by any browser without tone-mapping it first, so it gets no
+    // thumbnail and the panel falls back to its type icon — an honest blank rather than a
+    // broken image.
+    ...(kind === 'texture' && isBrowserDisplayable(file.name) ? { thumbnailUrl: url } : {}),
+  }
+
+  report('done', '导入完成')
+  return { asset, audit, nodes: [], deduplicated, hash }
+}
+
+/** True for formats an `<img>` element can render. KTX2 is GPU-only, so: not that one. */
+const isBrowserDisplayable = (fileName: string) => ['.png', '.jpg', '.jpeg', '.webp'].includes(extensionOf(fileName).toLowerCase())
 
 export async function importModel(options: ImportOptions): Promise<ImportResult> {
   const { file, doc, storage, loader } = options
@@ -226,6 +344,12 @@ export function summarizeImport(result: ImportResult): string {
   if (result.remap) {
     const migrated = result.remap.exact.length + result.remap.byName.length + result.remap.byPathScore.length
     return `已迁移 ${migrated} 项 / 需确认 ${result.remap.ambiguous.length} 项 / 失效 ${result.remap.orphaned.length} 项`
+  }
+  if (result.asset.type !== 'model') {
+    // An image produces no nodes on purpose — it is pointed AT, not placed. Reporting
+    // 「新增 0 个对象」 for a texture reads as a failed import.
+    const what = result.asset.type === 'hdri' ? '环境贴图' : '纹理'
+    return result.deduplicated ? `该${what}已在库中，复用已有资产未重复占用存储` : `已导入${what}「${result.asset.name}」`
   }
   if (result.deduplicated) {
     return `该文件已在库中，复用已有资产未重复占用存储；新增 ${result.nodes.length} 个对象`

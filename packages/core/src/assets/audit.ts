@@ -1,7 +1,7 @@
 import type { AssetAudit, AssetStats, AuditFinding, AuditLevel } from '@w3/schema'
 import { Document, WebIO } from '@gltf-transform/core'
-import type { AssetPolicy } from './policy.js'
-import { DEFAULT_POLICY, METRICS, WARN_RATIO, formatMetric } from './policy.js'
+import type { AssetPolicy, PolicyScope } from './policy.js'
+import { DEFAULT_POLICY, METRICS, WARN_RATIO, formatMetric, metricsFor } from './policy.js'
 
 /**
  * T-050 · the import health check (R01).
@@ -34,6 +34,11 @@ export interface AuditOptions {
   readonly policy?: AssetPolicy
   /** Injected so the record is reproducible; production passes the real clock. */
   readonly now?: () => string
+  /**
+   * v0.5 · which metric set applies. Defaults to `'model'`, so every pre-v0.5 caller keeps
+   * grading exactly the seven metrics it always did.
+   */
+  readonly scope?: PolicyScope
 }
 
 /** Decoded VRAM for one mip chain: w*h*4 bytes, plus ~1/3 again for the mipmaps. */
@@ -97,10 +102,16 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
   const policy = options.policy ?? DEFAULT_POLICY
   const now = options.now ?? (() => new Date().toISOString())
 
-  const findings: AuditFinding[] = METRICS.map((spec) => {
+  const findings: AuditFinding[] = metricsFor(options.scope ?? 'model').map((spec) => {
     const value = (measurements as unknown as Record<string, number>)[spec.metric] ?? 0
     const limit = spec.limit(policy)
-    const level: AuditLevel = value > limit ? 'fail' : value > limit * WARN_RATIO ? 'warn' : 'pass'
+    const level: AuditLevel = spec.level
+      ? spec.level(value, limit)
+      : value > limit
+        ? 'fail'
+        : value > limit * WARN_RATIO
+          ? 'warn'
+          : 'pass'
     return {
       metric: spec.metric,
       value,
@@ -144,3 +155,146 @@ export async function auditGlb(bytes: ArrayBuffer, options: AuditOptions = {}): 
 
 const labelOf = (finding: AuditFinding) => METRICS.find((m) => m.metric === finding.metric)?.label ?? finding.metric
 const unitOf = (finding: AuditFinding) => METRICS.find((m) => m.metric === finding.metric)?.unit ?? 'count'
+
+/* ========================================================================== */
+/* v0.5 · standalone images and environment maps (T-150)                      */
+/* ========================================================================== */
+
+export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'ktx2' | 'hdr'
+
+export interface ImageInfo {
+  readonly format: ImageFormat
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * Reads an image's dimensions out of its header.
+ *
+ * Header parsing rather than decoding, for three reasons that all matter here:
+ *
+ *  - **It runs in Node.** The audit is unit-tested without a DOM (C8); `createImageBitmap`
+ *    and `<img>` are browser-only, and a check that can only run in a browser is a check
+ *    that runs on nobody's machine before CI.
+ *  - **It runs before the decode.** R01's premise is reporting on an asset that is too big
+ *    BEFORE spending memory on it. Decoding an 8192×8192 PNG to discover that it is
+ *    8192×8192 is the thing being warned about.
+ *  - **`.hdr` and `.ktx2` cannot be decoded by the browser at all.** No `<img>` will ever
+ *    say how big an environment map is.
+ *
+ * Returns null for bytes that are not a recognised image, which is how the importer tells
+ * "unsupported file type" apart from "corrupt file".
+ */
+export function readImageInfo(bytes: ArrayBuffer): ImageInfo | null {
+  const view = new DataView(bytes)
+  const u8 = new Uint8Array(bytes)
+  // Enough for a signature only. Each branch checks the length IT needs — a single
+  // generous guard up front silently rejects short-but-valid files, and the reader would
+  // report "unsupported format" for something perfectly ordinary.
+  if (u8.length < 16) return null
+
+  // PNG — fixed layout, IHDR is always the first chunk.
+  if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) {
+    return u8.length < 24 ? null : { format: 'png', width: view.getUint32(16), height: view.getUint32(20) }
+  }
+
+  // KTX2 — «AB KTX 20 BB», then a fixed header.
+  if (u8[0] === 0xab && u8[1] === 0x4b && u8[2] === 0x54 && u8[3] === 0x58) {
+    return u8.length < 28 ? null : { format: 'ktx2', width: view.getUint32(20, true), height: view.getUint32(24, true) }
+  }
+
+  // JPEG — walk the marker chain to the frame header. The dimensions are not at a fixed
+  // offset: EXIF blocks, ICC profiles and embedded thumbnails all sit in front of it.
+  if (u8[0] === 0xff && u8[1] === 0xd8) {
+    let at = 2
+    while (at + 9 < u8.length) {
+      if (u8[at] !== 0xff) {
+        at++
+        continue
+      }
+      const marker = u8[at + 1]!
+      // SOF0…SOF15, excluding DHT (C4), JPG (C8) and DAC (CC), which are not frame headers.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { format: 'jpeg', width: view.getUint16(at + 7), height: view.getUint16(at + 5) }
+      }
+      if (marker >= 0xd0 && marker <= 0xd9) {
+        at += 2
+        continue
+      }
+      at += 2 + view.getUint16(at + 2)
+    }
+    return null
+  }
+
+  // WebP — one RIFF container, three codecs, three different ways to store the size.
+  if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46 && u8[8] === 0x57) {
+    if (u8.length < 30) return null
+    const chunk = String.fromCharCode(u8[12]!, u8[13]!, u8[14]!, u8[15]!)
+    if (chunk === 'VP8X') {
+      return {
+        format: 'webp',
+        width: (u8[24]! | (u8[25]! << 8) | (u8[26]! << 16)) + 1,
+        height: (u8[27]! | (u8[28]! << 8) | (u8[29]! << 16)) + 1,
+      }
+    }
+    if (chunk === 'VP8L') {
+      const bits = u8[21]! | (u8[22]! << 8) | (u8[23]! << 16) | (u8[24]! << 24)
+      return { format: 'webp', width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
+    }
+    if (chunk === 'VP8 ') {
+      return { format: 'webp', width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
+    }
+    return null
+  }
+
+  // Radiance — an ASCII header ending in a resolution line like `-Y 512 +X 1024`.
+  if (u8[0] === 0x23 && u8[1] === 0x3f) {
+    const head = new TextDecoder('latin1').decode(u8.subarray(0, Math.min(512, u8.length)))
+    const match = /-Y\s+(\d+)\s+\+X\s+(\d+)/.exec(head)
+    return match ? { format: 'hdr', width: Number(match[2]), height: Number(match[1]) } : null
+  }
+
+  return null
+}
+
+const isPowerOfTwo = (n: number) => n > 0 && (n & (n - 1)) === 0
+
+/** Extra measurements for a standalone image, on top of what AssetStats carries. */
+export interface ImageMeasurements extends AuditMeasurements {
+  readonly imageBytes: number
+  readonly hdriBytes: number
+  readonly imageSize: number
+  readonly nonPowerOfTwo: number
+}
+
+/**
+ * Measures a standalone image or environment map.
+ *
+ * `textures: 1` with a real `textureBytes` estimate, because that is what this asset costs
+ * once it is on a material — the same budget the model path reports into, not a separate
+ * scale. `tris` / `materials` / `nodes` are zero and are NOT graded for this scope (see
+ * `metricsFor`), so they never show up in the report as pointless green rows.
+ */
+export function measureImage(info: ImageInfo, byteLength: number): ImageMeasurements {
+  return {
+    tris: 0,
+    materials: 0,
+    textures: 1,
+    bytes: byteLength,
+    textureBytes: estimateTextureBytes(info.width, info.height),
+    nodes: 0,
+    animations: [],
+    maxTextureSize: Math.max(info.width, info.height),
+    imageBytes: byteLength,
+    hdriBytes: byteLength,
+    imageSize: Math.max(info.width, info.height),
+    nonPowerOfTwo: isPowerOfTwo(info.width) && isPowerOfTwo(info.height) ? 0 : 1,
+  }
+}
+
+/** Reads, measures and grades a standalone image. Throws on bytes it cannot recognise. */
+export function auditImage(bytes: ArrayBuffer, options: AuditOptions & { scope: 'image' | 'hdri' }): AuditResult {
+  const info = readImageInfo(bytes)
+  if (!info) throw new Error('无法识别的图片格式，支持 png / jpg / webp / ktx2 / hdr')
+  return grade(measureImage(info, bytes.byteLength), options)
+}

@@ -299,12 +299,25 @@
 
 ## E15 · 材质与纹理
 
-### [ ] T-150 · 纹理与 HDRI 导入管线
-- **依赖** T-120 · **预估** 0.8d · **实际** ___
+### [x] T-150 · 纹理与 HDRI 导入管线
+- **依赖** T-120 · **预估** 0.8d · **实际** 0.9h
 - **独占** `packages/editor/src/lib/import-flow.ts`（图像段）, `packages/core/src/assets/audit.ts`（图像增量）, `packages/core/src/assets/policy.ts`（增量）, 对应测试
 - **做** 图片导入（png / jpg / webp → `type: 'texture'`；ktx2 透传）；`.hdr` 导入（→ `type: 'hdri'`）；体检增量：分辨率上限、非 2 幂 warn、bytes 阈值（阈值进 `policy.ts`，数值将回填附件A）；缩略图 = 缩放原图。
 - **验收** 超标项 advice 具体（"4096 降 2048"而非"请优化"）；同图二次导入命中 hash 不重复存储
 - **自测** `pnpm -F @w3/core test audit && pnpm -F @w3/editor test import-flow`
+- **实际情况**：尺寸从**文件头**读，不解码。三个理由都成立：纯 Node 可测（C8）、发生在解码
+  **之前**（R01 的前提就是"报告一个大到不该加载的资产"，解码它来得知它太大等于自相矛盾）、
+  以及 `.hdr` / `.ktx2` 浏览器根本解不了。顺带写了 png/jpeg/webp(三种编码)/ktx2/hdr 五种头。
+  METRICS 加了 `scopes`：一张 PNG 拿 `maxTriangles` 评级会报「三角面数 0 / 300,000 通过」，
+  不算错，但正是教人不再读体检报告的那种噪声。NPOT 检查不是阈值判定，所以 MetricSpec 加了
+  可选的 `level` —— 硬塞进比较会让存下来的 `limit` 变成一句假话。
+  图片**自己就是自己的缩略图**（`<img>` 直接能显示），`.hdr` 没有缩略图（任何浏览器都显示
+  不了未色调映射的 HDR，给个坏图不如给个类型图标）。
+  **本卡新建了测试文件 `core/test/assets/audit-image.test.ts`**——卡片的自测命令
+  `test audit` 原来一条测试都匹配不到（审计测试住在 pipeline.test.ts 里）。
+  另动了两个 独占 外的文件：`pipeline.test.ts` 的 describePolicy 断言（7 行 → 按 scope 取），
+  和 `AssetPanel.tsx` 的 accept / 分派（不改它的话新路径无法从 UI 到达，等于交付了一段
+  死代码）。三次变异检验：JPEG 帧头假设固定偏移、NPOT 变成 fail、grade 忽略 scope。
 
 ### [ ] T-151 · 贴图槽位应用与纹理缓存（core）
 - **依赖** T-130, T-150 · **预估** 0.8d · **实际** ___
