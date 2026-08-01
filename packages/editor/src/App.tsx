@@ -9,6 +9,7 @@ import { PublishDialog } from './dialogs/PublishDialog.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
 import { HotspotPanel } from './panels/HotspotPanel.js'
 import { IssuePanel } from './panels/IssuePanel.js'
+import { LibraryPanel } from './panels/LibraryPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
 import { RuleLogPanel } from './panels/RuleLogPanel.js'
@@ -30,6 +31,7 @@ import { fullRebuildCount } from './viewport/runtime-registry.js'
  */
 
 type BottomTab =
+  | 'library'
   | 'assets'
   | 'material'
   | 'animation'
@@ -189,7 +191,7 @@ function ModeSwitch() {
 }
 
 function BottomDock() {
-  const [tab, setTab] = useState<BottomTab>('assets')
+  const [tab, setTab] = useState<BottomTab>('library')
   const rules = useDocumentSelector((s) => s.doc.rules)
   const previewActive = usePreview((s) => s.active)
 
@@ -199,6 +201,7 @@ function BottomDock() {
         <div className="seg">
           {(
             [
+              ['library', '资源库'],
               ['assets', '资产'],
               ['material', '材质'],
               ['animation', '动画'],
@@ -222,6 +225,7 @@ function BottomDock() {
         </span>
       </div>
       <div className="panel__body">
+        {tab === 'library' && <LibraryPanel />}
         {tab === 'assets' && <AssetPanel />}
         {tab === 'material' && <MaterialPanel />}
         {tab === 'animation' && <AnimationPanel />}

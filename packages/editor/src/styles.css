@@ -989,3 +989,64 @@ code {
   flex: 1;
   resize: vertical;
 }
+
+/* T-141 · resource library grid. */
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  margin: 0;
+  list-style: none;
+  overflow: auto;
+}
+.library-grid__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border: 1px solid #242b31;
+  border-radius: 4px;
+  background: #1a1f24;
+  cursor: grab;
+  user-select: none;
+}
+.library-grid__item:hover {
+  border-color: #3a444d;
+}
+.library-grid__preview,
+.library-grid__shape {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #12161a;
+}
+/* Primitives have no file to preview, so the icon is drawn from their own shape. */
+.library-grid__shape {
+  border: 1px solid #3a444d;
+}
+.library-grid__shape[data-kind='sphere'],
+.library-grid__shape[data-kind='torus'] {
+  border-radius: 50%;
+}
+.library-grid__shape[data-kind='capsule'] {
+  border-radius: 28px / 18px;
+}
+.library-grid__shape[data-kind='cylinder'] {
+  border-radius: 24px / 8px;
+}
+.library-grid__shape[data-kind='plane'] {
+  height: 18px;
+  margin: 19px 0;
+}
+.library-grid__name {
+  font-size: 11px;
+  color: #9aa4ad;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
