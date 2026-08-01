@@ -79,7 +79,7 @@ export function AssetPanel() {
       <div className="panel__head">
         资产<span className="num">{doc.assets.length}</span>
         <button type="button" className="tbtn" onClick={() => fileInput.current?.click()}>
-          导入资产
+          导入文件
         </button>
         <input
           ref={fileInput}
