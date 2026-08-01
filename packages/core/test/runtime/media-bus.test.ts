@@ -261,3 +261,36 @@ describe('waitForEnd', () => {
     await expect(bus.waitForEnd(MEDIA_ID)).resolves.toBeUndefined()
   })
 })
+
+describe('a media record deleted while it plays (M12 审查所得)', () => {
+  it('stops and releases it', async () => {
+    // Left running, the clip sounds for ever with nothing left to stop it: the media
+    // panel's row is gone, so there is no 停止 button, and the document no longer mentions
+    // it. The user's only remaining option is reloading the page.
+    const revoked: string[] = []
+    vi.stubGlobal('URL', {
+      createObjectURL: () => 'blob:stub/1',
+      revokeObjectURL: (url: string) => void revoked.push(url),
+    })
+    vi.stubGlobal('Blob', class {})
+
+    const { bus } = makeBus()
+    await bus.play(MEDIA_ID)
+    expect(bus.isPlaying(MEDIA_ID)).toBe(true)
+
+    // The record is deleted; the runtime hands the new document over on the next patch.
+    bus.setDocument({ ...docWithMedia(), media: [] } as SceneDocument)
+
+    expect(bus.isPlaying(MEDIA_ID), '记录没了，声音也得停').toBe(false)
+    expect(bus.playingIds).toEqual([])
+    expect(revoked, '连同它占着的 object URL 一起还回去').toEqual(['blob:stub/1'])
+    vi.unstubAllGlobals()
+  })
+
+  it('leaves alone the clips the new document still has', async () => {
+    const { bus } = makeBus()
+    await bus.play(MEDIA_ID)
+    bus.setDocument(docWithMedia())
+    expect(bus.isPlaying(MEDIA_ID)).toBe(true)
+  })
+})

@@ -172,3 +172,50 @@ describe('the ordinary path still works', () => {
     runtime.dispose()
   })
 })
+
+describe('leaving a session silences the scene (M12 · T-163 验收)', () => {
+  /** The golden path plus one audio record, and an element stand-in that always plays. */
+  const mediaDoc = () => {
+    const doc = createGoldenPathDocument()
+    return {
+      ...doc,
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio', name: '讲解.mp3' }],
+      media: [{ id: 'med_00000001', type: 'audio', assetId: 'ast_med00001', name: '讲解', durationS: 2 }],
+    } as ReturnType<typeof createGoldenPathDocument>
+  }
+
+  const fakeMediaElement = () => ({
+    src: '',
+    volume: 1,
+    loop: false,
+    currentTime: 0,
+    play: () => Promise.resolve(),
+    pause: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })
+
+  it('stopping the session stops the audio', async () => {
+    // The card's acceptance is 「退出预览音频停止」, and the chain that delivers it is four
+    // hops long: exit → session.dispose → stop → runtime.resetScene → MediaBus.stop('all').
+    // Every hop worked on its own and nothing asserted the chain — the exact shape of gap
+    // M10 and M11 each found once. A narration that keeps playing after the user has left
+    // the scene it belongs to is the most jarring thing this feature can do.
+    const doc = mediaDoc()
+    const runtime = new SceneRuntime(doc, {
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      mode: 'play',
+      createMediaElement: () => fakeMediaElement(),
+      now: () => 0,
+    })
+    const session = createPlaybackSession({ runtime, document: doc })
+    await session.start()
+
+    await runtime.playMedia('med_00000001', {})
+    expect(runtime.isMediaPlaying('med_00000001'), '前提：声音确实在播').toBe(true)
+
+    session.dispose()
+
+    expect(runtime.isMediaPlaying('med_00000001'), '退出预览必须静音').toBe(false)
+  })
+})

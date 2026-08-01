@@ -59,9 +59,27 @@ export class MediaBus {
 
   constructor(private readonly options: MediaBusOptions) {}
 
-  /** The document media ids are resolved against. Re-set on every load and patch batch. */
+  /**
+   * The document media ids are resolved against. Re-set on every load and patch batch.
+   *
+   * Anything the new document no longer contains is STOPPED and released (M12 审查所得).
+   * Deleting a clip while it plays otherwise leaves it sounding for ever with nothing left
+   * to stop it: the media panel's row is gone, so there is no 停止 button, and the document
+   * no longer mentions it — the user's only remaining option is reloading the page.
+   */
   setDocument(doc: SceneDocument): void {
     this.document = doc
+    const live = new Set(doc.media.map((m) => m.id))
+    for (const id of [...this.entries.keys()]) {
+      if (live.has(id)) continue
+      this.stop(id)
+      this.entries.delete(id)
+      const url = this.objectUrls.get(id)
+      if (url !== undefined) {
+        URL.revokeObjectURL(url)
+        this.objectUrls.delete(id)
+      }
+    }
   }
 
   /** Media ids currently playing. The set `stopMedia('all')` acts on. */
