@@ -1,0 +1,33 @@
+# Binary assets must never be line-ending converted.
+#
+# Git decides "text or binary" by looking for a NUL byte in the first 8000 bytes. A
+# Radiance `.hdr` starts with an ASCII header followed by RGBE pixel data, and a gradient
+# sky happens to contain no NUL early on — so git classified the starter HDRIs as TEXT and,
+# with `core.autocrlf=true` (the Windows default), a fresh checkout inserted a 0x0D before
+# every 0x0A in the pixel data. Measured, not theorised: 131121 bytes committed, 131125
+# bytes checked out.
+#
+# The failure mode is the worst kind. It cannot happen on the machine that generated the
+# file, and it cannot happen in CI (Linux runners default to `autocrlf=false`), so both
+# "works on my machine" and "CI is green" hold while every Windows clone gets a corrupt
+# environment map. Declaring the types is the only thing that makes it impossible.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.hdr   binary
+*.exr   binary
+*.glb   binary
+*.ktx2  binary
+*.bin   binary
+*.wasm  binary
+*.w3p   binary
+*.wav   binary
+*.mp3   binary
+*.ogg   binary
+*.mp4   binary
+*.webm  binary
+*.woff  binary
+*.woff2 binary
+*.ico   binary
