@@ -280,12 +280,20 @@
 - **验收** 粘贴后 `checkIntegrity` 零 error；undo 一步整树消失；输入框聚焦时快捷键不误触发（沿 T-071 语义）
 - **自测** `pnpm -F @w3/editor test clipboard`
 
-### [ ] T-145 · 内置库 manifest 机制与 starter 内容
-- **依赖** T-120 · **预估** 0.8d · **实际** ___
+### [x] T-145 · 内置库 manifest 机制与 starter 内容
+- **依赖** T-120 · **预估** 0.8d · **实际** 0.7h
 - **独占** `packages/editor/public/library/**`, `scripts/gen-library-starter.mjs`, `scripts/check-library-manifest.mjs`, `docs/LICENSES_LIBRARY.md`
 - **做** manifest schema（id / 名称 / 类别 model|texture|hdri / 文件相对路径 / 预览图 / **license 必填**）+ 加载校验；`check-library-manifest.mjs`：零外链 + license 必填，静态扫描；starter 内容**程序化生成**（D17）：纹理若干（棋盘 / 噪声 / 拉丝金属色+法线，canvas 生成）、HDRI 2 张（渐变天空，RGBE 编码写出）、组合模型 2 个（gltf-transform 由原始体拼装）；真实美术内容包为人工供给（H2），本卡只交付机制与 starter。
 - **验收** `node scripts/check-library-manifest.mjs` 绿；starter 总量 ≤ 40MB；断网可用；许可登记逐项可查（自产标 CC0）
 - **自测** `node scripts/gen-library-starter.mjs && node scripts/check-library-manifest.mjs`
+- **实际情况**：根目录脚本**取不到** workspace 的 `@gltf-transform/core`（它属于两个包，不属于
+  根），所以 PNG / Radiance `.hdr` / glTF 二进制三个编码器全部手写（PNG 走 `node:zlib`，
+  另两个直接写字节）。为一个 4 KB 的立方体给根加一个依赖是错的取舍。噪声用整数哈希不用
+  `Math.random`——生成物必须逐字节可复现，否则每次跑脚本都是一次无意义的 diff。
+  生成物经**真实解析器**验证：两张 `.hdr` 过 `HDRLoader`，两个 `.glb` 过 `GLTFLoader` 并解出
+  带中文名的层级。starter 共 8 项 / 1.1 MB（预算 40 MB）。校验脚本做了六次变异检验：外链、
+  缺 license、文件不存在、绝对路径、id 重复、类别越界，六种坏 manifest 全部被拦。
+  纳入 `pnpm check:constitution` 是 T-173 的事，本卡不动 check-constitution.mjs。
 
 ---
 

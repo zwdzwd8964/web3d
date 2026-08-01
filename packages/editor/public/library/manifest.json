@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "generatedBy": "scripts/gen-library-starter.mjs",
+  "items": [
+    {
+      "id": "hdri-daylight",
+      "name": "正午天光",
+      "category": "hdri",
+      "file": "hdri/gradient-daylight.hdr",
+      "preview": "previews/hdri-daylight.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "程序化渐变天空，用于检验 IBL 接线；不是实拍全景"
+    },
+    {
+      "id": "hdri-dusk",
+      "name": "黄昏",
+      "category": "hdri",
+      "file": "hdri/gradient-dusk.hdr",
+      "preview": "previews/hdri-dusk.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "程序化渐变天空，暖色低照度；不是实拍全景"
+    },
+    {
+      "id": "model-display-stand",
+      "name": "展示台",
+      "category": "model",
+      "file": "models/display-stand.glb",
+      "preview": "previews/model-display-stand.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "底座 + 立柱 + 台面，三个部件，可分别选中"
+    },
+    {
+      "id": "model-signpost",
+      "name": "指示牌",
+      "category": "model",
+      "file": "models/signpost.glb",
+      "preview": "previews/model-signpost.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "立杆 + 牌面，牌面适合挂材质与热点"
+    },
+    {
+      "id": "tex-brushed-metal",
+      "name": "拉丝金属",
+      "category": "texture",
+      "file": "textures/brushed-metal.png",
+      "preview": "previews/tex-brushed-metal.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "与「拉丝金属法线」配套使用"
+    },
+    {
+      "id": "tex-brushed-metal-normal",
+      "name": "拉丝金属 法线",
+      "category": "texture",
+      "file": "textures/brushed-metal-normal.png",
+      "preview": "previews/tex-brushed-metal-normal.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "切线空间法线贴图，配「拉丝金属」"
+    },
+    {
+      "id": "tex-checker",
+      "name": "棋盘格",
+      "category": "texture",
+      "file": "textures/checker.png",
+      "preview": "previews/tex-checker.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "校验 UV 缩放与贴图朝向用"
+    },
+    {
+      "id": "tex-noise",
+      "name": "噪声",
+      "category": "texture",
+      "file": "textures/noise.png",
+      "preview": "previews/tex-noise.png",
+      "license": "CC0-1.0",
+      "author": "本仓库程序化生成",
+      "note": "可用作粗糙度或遮罩"
+    }
+  ]
+}
