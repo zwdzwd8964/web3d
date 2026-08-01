@@ -557,6 +557,24 @@ export class SceneRuntime implements RuntimeContext {
   }
 
   /**
+   * Turns the renderer's shadow map on or off directly.
+   *
+   * The DOCUMENT is the normal driver — `syncShadows` derives this from whether any light
+   * asks for shadows, and that is the path the editor and player both take. This exists for
+   * the BENCHMARK (T-174), which measures the same scene at shadows off / medium / high
+   * without touching the document: those lights are measuring weights, not scene content
+   * (C1), so they must not be committed anywhere.
+   *
+   * Calling it does not disturb the document's own state: the next `applyPatch` or `load`
+   * re-derives the flag from the scene.
+   */
+  setShadowsEnabled(enabled: boolean): void {
+    if (!this.renderer) return
+    this.renderer.shadowMap.enabled = enabled
+    this.renderer.shadowMap.type = PCFSoftShadowMap
+  }
+
+  /**
    * The world-space bounding box of one or more subtrees, or null when they enclose nothing.
    *
    * T-146 · what a dropped library model needs and could not have: a primitive's size is

@@ -1,17 +1,20 @@
-import { detectCapability, renderCapabilityNotice } from '@w3/core'
+import { detectCapability, lightFactory, renderCapabilityNotice } from '@w3/core'
 import { unpackScene } from '@w3/storage'
 import { createPlayerSession } from '../session.js'
 import {
   BENCH_LIMITS,
+  LIGHT_COUNTS,
+  SHADOW_MODES,
   STRESS_COPIES,
   estimateTextureMemory,
   gradeFrames,
   gradeScene,
+  gradeLighting,
   gradeStress,
   summariseFrames,
   toMarkdown,
 } from './metrics.js'
-import type { BenchRow, StressLevel } from './metrics.js'
+import type { BenchRow, LightLevel, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -74,6 +77,9 @@ async function run(bytes: Uint8Array, sourceName: string) {
     show('<p class="bench__note">正在做逐级加载压力测试…（最多约 5 秒）</p>')
     const stress = await stressRamp(runtime, session)
 
+    show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
+    const lighting = await lightingRamp(runtime, session)
+
     const rows: BenchRow[] = [
       ...gradeFrames(summariseFrames(frameTimes)),
       ...gradeScene({
@@ -85,6 +91,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
         textureMemoryBytes: estimateTextureMemory(textures),
       }),
       ...gradeStress(stress),
+      ...gradeLighting(lighting),
     ]
 
     renderReport(rows, sourceName)
@@ -151,6 +158,74 @@ function measure(
  *
  * Nothing here touches the document. These are measuring weights, not scene content (C1).
  */
+/**
+ * T-174 · the lighting ladder.
+ *
+ * 0 / 1 / 4 / 8 dynamic lights × shadows off / medium / high. Two costs are being separated,
+ * and conflating them is how people conclude "lights are slow" and stop using them: more
+ * lights costs per-pixel shading and grows smoothly, while shadows cost an extra depth pass
+ * per casting light and grow in steps.
+ *
+ * The lights are real `SpotLight`s added straight to the scene, NOT document nodes: these
+ * are measuring weights, not scene content (C1). Nothing here is committed, and the finally
+ * block removes every one of them.
+ *
+ * Rungs are skipped once a configuration drops below the fail line — past it there is
+ * nothing left to learn from a bigger one, and the page would hold the machine at
+ * single-digit frame rates to prove it.
+ */
+async function lightingRamp(
+  runtime: ReturnType<typeof createPlayerSession>['runtime'],
+  session: ReturnType<typeof createPlayerSession>['session'],
+): Promise<LightLevel[]> {
+  const spread = Math.max(1, boundingSpan(runtime.graph.root))
+  const added: { removeFromParent: () => void; dispose?: () => void }[] = []
+  const levels: LightLevel[] = []
+
+  try {
+    for (const shadows of SHADOW_MODES) {
+      // Shadow maps are a renderer-wide switch; the per-light flag decides who casts.
+      runtime.setShadowsEnabled(shadows !== 'off')
+
+      for (const count of LIGHT_COUNTS) {
+        while (added.length < count) {
+          // Built through core's own `lightFactory`, not by importing three: @w3/player
+          // must never reach for three directly (C2), and going through the factory also
+          // means the benchmark measures the SAME objects the product builds.
+          const light = lightFactory.create({
+            kind: 'spot',
+            color: '#ffffff',
+            intensity: 2,
+            range: 0,
+            decay: 2,
+            angleDeg: 30,
+            penumbra: 0.2,
+            shadow: { enabled: shadows !== 'off', quality: shadows === 'high' ? 'high' : 'medium', bias: -0.0005 },
+          }) as unknown as { position: { set(x: number, y: number, z: number): void }; removeFromParent(): void }
+          // Ringed around the scene so each one lights a different side: stacking them in
+          // one place measures overdraw on one face rather than N lights on a model.
+          const angle = (added.length / Math.max(1, count)) * Math.PI * 2
+          light.position.set(Math.cos(angle) * spread, spread * 1.5, Math.sin(angle) * spread)
+          runtime.scene.add(light as unknown as Parameters<typeof runtime.scene.add>[0])
+          added.push(light)
+        }
+        while (added.length > count) added.pop()?.removeFromParent()
+
+        const stats = summariseFrames(await measure(runtime, session, 900, 4))
+        levels.push({ lights: count, shadows, fps: stats.fps, drawCalls: runtime.info?.calls ?? 0 })
+
+        if (stats.fps < BENCH_LIMITS.fpsFail) break
+      }
+
+      while (added.length > 0) added.pop()?.removeFromParent()
+    }
+  } finally {
+    for (const light of added) light.removeFromParent()
+    runtime.setShadowsEnabled(false)
+  }
+  return levels
+}
+
 async function stressRamp(
   runtime: ReturnType<typeof createPlayerSession>['runtime'],
   session: ReturnType<typeof createPlayerSession>['session'],

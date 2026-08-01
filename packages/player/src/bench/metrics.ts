@@ -287,3 +287,77 @@ export function toMarkdown(options: {
   }
   return lines.join('\n')
 }
+
+/* -------------------------------------------------------------------------- */
+/* v0.5 · T-174 · the lighting ladder                                          */
+/* -------------------------------------------------------------------------- */
+
+/** One measured rung of the lighting ladder. */
+export interface LightLevel {
+  /** Dynamic lights added on top of the scene's own. */
+  readonly lights: number
+  readonly shadows: 'off' | 'medium' | 'high'
+  readonly fps: number
+  readonly drawCalls: number
+}
+
+/** Light counts the page climbs. 0 is the baseline: the scene as published. */
+export const LIGHT_COUNTS: readonly number[] = [0, 1, 4, 8]
+
+/** Shadow settings each light count is measured at. */
+export const SHADOW_MODES: readonly LightLevel['shadows'][] = ['off', 'medium', 'high']
+
+/**
+ * The lighting ladder, graded.
+ *
+ * Two different costs are being separated here, and conflating them is how people conclude
+ * "lights are slow" and stop using them:
+ *
+ * - **more lights** costs shading work per pixel, and grows smoothly;
+ * - **shadows** costs an extra depth pass PER shadow-casting light, and grows in steps.
+ *
+ * So the headline is the pair — how many lights are affordable WITH shadows, and how many
+ * without. A single number would hide the fact that the answer differs by roughly the
+ * factor people most need to know.
+ */
+export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
+  if (levels.length === 0) return []
+
+  const ceilingFor = (shadows: LightLevel['shadows']): LightLevel | null =>
+    levels
+      .filter((l) => l.shadows === shadows && l.fps >= BENCH_LIMITS.fpsWarn)
+      .reduce<LightLevel | null>((best, l) => (best && best.lights >= l.lights ? best : l), null)
+
+  const noShadow = ceilingFor('off')
+  const withShadow = ceilingFor('medium')
+
+  const rows: BenchRow[] = [
+    {
+      metric: '动态灯上限（无阴影）',
+      value: noShadow ? `${noShadow.lights} 盏 · ${noShadow.fps.toFixed(1)} fps` : '不足 1 盏',
+      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+      verdict: noShadow ? 'pass' : 'fail',
+      note: '灯数只增加逐像素的着色量，代价是平滑上升的。',
+    },
+    {
+      metric: '动态灯上限（medium 阴影）',
+      value: withShadow ? `${withShadow.lights} 盏 · ${withShadow.fps.toFixed(1)} fps` : '不足 1 盏',
+      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+      verdict: withShadow ? 'pass' : 'fail',
+      note:
+        '每一盏投影灯多一遍深度 pass，代价是**阶梯式**上升的。' +
+        '这一行与上一行分开报，是因为把两者混成一个数字会让人得出「灯很慢」然后干脆不用灯。',
+    },
+  ]
+
+  for (const level of levels) {
+    rows.push({
+      metric: `灯 ×${level.lights} · 阴影 ${level.shadows}`,
+      value: `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall`,
+      limit: '—',
+      verdict: level.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : level.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
+      note: '',
+    })
+  }
+  return rows
+}

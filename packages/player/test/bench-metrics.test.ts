@@ -2,14 +2,18 @@ import { DEFAULT_POLICY } from '@w3/core'
 import { describe, expect, it } from 'vitest'
 import {
   BENCH_LIMITS,
+  LIGHT_COUNTS,
+  SHADOW_MODES,
   STRESS_COPIES,
   estimateTextureMemory,
   gradeFrames,
   gradeScene,
+  gradeLighting,
   gradeStress,
   summariseFrames,
   toMarkdown,
 } from '../src/bench/metrics.js'
+import type { LightLevel } from '../src/bench/metrics.js'
 import type { StressLevel } from '../src/bench/metrics.js'
 import type { CapabilityReport } from '@w3/core'
 
@@ -246,5 +250,61 @@ describe('toMarkdown', () => {
     })
     expect(md).toContain('| 指标 | 实测 | 上限 | 结论 | 说明 |')
     for (const row of rows) expect(md).toContain(row.metric)
+  })
+})
+
+describe('the lighting ladder (T-174)', () => {
+  const level = (lights: number, shadows: 'off' | 'medium' | 'high', fps: number): LightLevel => ({
+    lights,
+    shadows,
+    fps,
+    drawCalls: 10 + lights,
+  })
+
+  it('reports the two ceilings SEPARATELY', () => {
+    // Conflating them is how people conclude 「灯很慢」 and stop using lights. More lights
+    // costs per-pixel shading and grows smoothly; shadows cost a depth pass per casting
+    // light and grow in steps — and the two numbers differ by roughly the factor that
+    // actually matters when planning a scene.
+    const rows = gradeLighting([
+      level(0, 'off', 60),
+      level(1, 'off', 60),
+      level(4, 'off', 58),
+      level(8, 'off', 55),
+      level(0, 'medium', 60),
+      level(1, 'medium', 52),
+      level(4, 'medium', 28),
+      level(8, 'medium', 12),
+    ])
+
+    const noShadow = rows.find((r) => r.metric === '动态灯上限（无阴影）')!
+    const withShadow = rows.find((r) => r.metric === '动态灯上限（medium 阴影）')!
+    expect(noShadow.value).toContain('8 盏')
+    expect(withShadow.value, '开了阴影之后上限应当明显更低').toContain('1 盏')
+    expect(noShadow.verdict).toBe('pass')
+  })
+
+  it('says "不足 1 盏" rather than picking the least-bad rung', () => {
+    // Reporting the last rung measured would read as a capacity finding while actually
+    // reporting where the ramp gave up — same trap `gradeStress` documents.
+    const rows = gradeLighting([level(0, 'off', 20), level(1, 'off', 14)])
+    const ceiling = rows.find((r) => r.metric === '动态灯上限（无阴影）')!
+    expect(ceiling.value).toBe('不足 1 盏')
+    expect(ceiling.verdict).toBe('fail')
+  })
+
+  it('grades each rung against the same frame-rate limits as everything else', () => {
+    const rows = gradeLighting([level(4, 'high', BENCH_LIMITS.fpsFail - 1)])
+    const rung = rows.find((r) => r.metric === '灯 ×4 · 阴影 high')!
+    expect(rung.verdict).toBe('fail')
+  })
+
+  it('returns nothing at all when the ramp never ran', () => {
+    expect(gradeLighting([])).toEqual([])
+  })
+
+  it('climbs the counts and modes the page actually uses', () => {
+    expect(LIGHT_COUNTS).toEqual([0, 1, 4, 8])
+    expect(SHADOW_MODES).toEqual(['off', 'medium', 'high'])
   })
 })
