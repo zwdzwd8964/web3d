@@ -430,12 +430,22 @@
   J6「去掉『只替换自己拥有的克隆』守卫」也全绿，因为那个分支在 `materialFor` 的契约下**根本不可达**，
   于是把它从运行时 `if` 改成参数类型（`rebaseIfNeeded` 收 `OwnedClone`），不可达的防御代码也是一种谎。
 
-### [ ] T-152 · 材质面板 v2（贴图 / UV / physical）
-- **依赖** T-151, T-153 · **预估** 0.8d · **实际** ___
+### [x] T-152 · 材质面板 v2（贴图 / UV / physical）
+- **依赖** T-151, T-153 · **预估** 0.8d · **实际** 1.0h
 - **独占** `packages/editor/src/panels/MaterialPanel.tsx`, `packages/editor/src/widgets/TexturePicker.tsx`
+  （+ `packages/editor/src/lib/material-edit.ts`（增）与 `packages/editor/test/material-edit.test.ts`（增）：
+  面板的判断逻辑抽出去才测得到，理由同 M10；+ `e2e/tests/material.spec.ts`（增）：手势级断言；+ styles.css）
 - **做** 六槽位 UI + `TexturePicker`（项目资产页 + 内置纹理库页，选库图即触发引入流程）+ 清除槽位；uv 三控件（走 preview / previewCommit 支持拖拽调节）；`base === 'physical'` 时展开 physical 参数区。改动一律走 commit。
 - **验收** 黄金路径 II 第 5 步可完成；共享材质陷阱目视复验
-- **自测** `pnpm dev` 目视 + `pnpm -F @w3/editor test`
+- **自测** `pnpm -F @w3/editor test material-edit`（13）+ `pnpm -F @w3/e2e exec playwright test material`（4）
+- **实际情况**：清空槽位是 `delete` 而不是写 `undefined`——`maps` 是 strict object，显式 undefined
+  过一遍 JSON 会变成"有键没值"，重新打开时校验不过：**存得好好的，就是打不开**，是这里最糟的一种坏法。
+  `uv` 是 optional，所以写它必须从单位值把整块**物化**出来；直接 `params.uv.repeat = …` 会在用户
+  第一次碰平铺控件时抛异常。
+  离开 physical 时**丢弃** physical 参数：留着的话文档会一直挂着 I15 警告，描述一个用户在面板上
+  看不见（字段已隐藏）、也没要求过的状态。要拿回来靠撤销。
+  「这份材质被 N 个对象共用」的提示是补给铁律 9 的**另一半**：运行时的写时复制让"改一个螺栓整台泵
+  都变了"不会发生，但只有这行字能让用户在拖滑块**之前**知道自己在哪种情形里。
 
 ### [ ] T-154 · 材质预设库
 - **依赖** T-152 · **预估** 0.8d · **实际** ___

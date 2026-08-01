@@ -449,6 +449,7 @@ textarea {
 /* --- bottom dock ---------------------------------------------------------- */
 
 .subpanel {
+  position: relative; /* T-152 · the texture picker anchors to the panel that opened it. */
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1049,4 +1050,100 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+/* T-152 · the material panel's texture slots, uv block and physical section. */
+.fieldset {
+  margin: 8px 6px;
+  padding: 6px 8px 8px;
+  border: 1px solid #242b31;
+  border-radius: 4px;
+}
+.fieldset > legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: #8d99a5;
+  font-size: 11px;
+}
+/* A slot reads as a value, not as a button: it shows what is in it. */
+.slot {
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The texture picker sits over the panel rather than in a portal: it belongs to the slot
+   that opened it, and the panel is where the user's attention already is. */
+.picker {
+  position: absolute;
+  inset: auto 8px 8px 8px;
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #3a444d;
+  border-radius: 4px;
+  background: #12161a;
+  box-shadow: 0 8px 24px #0008;
+  z-index: 5;
+}
+.picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #242b31;
+}
+.picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  margin: 0;
+  list-style: none;
+  overflow: auto;
+}
+.picker__item,
+.picker__clear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 1px solid #242b31;
+  border-radius: 4px;
+  background: #1a1f24;
+  color: inherit;
+  cursor: pointer;
+}
+.picker__item:hover,
+.picker__clear:hover:not(:disabled) {
+  border-color: #3a444d;
+}
+.picker__item[aria-pressed='true'] {
+  border-color: #4f8cc9;
+}
+.picker__item img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #12161a;
+}
+.picker__name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.picker__clear {
+  justify-content: center;
+  min-height: 76px;
+  color: #8d99a5;
 }
