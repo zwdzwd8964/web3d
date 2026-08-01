@@ -68,13 +68,23 @@ if (import.meta.env.DEV) {
         roughness?: unknown
         metalness?: unknown
         opacity?: unknown
+        transmission?: unknown
         color?: { getHexString?: () => string }
+        map?: { name?: unknown } | null
+        type?: unknown
       }
       found.push({
         roughness: typeof read.roughness === 'number' ? read.roughness : null,
         metalness: typeof read.metalness === 'number' ? read.metalness : null,
         opacity: typeof read.opacity === 'number' ? read.opacity : null,
+        transmission: typeof read.transmission === 'number' ? read.transmission : null,
         color: typeof read.color?.getHexString === 'function' ? `#${read.color.getHexString()}` : null,
+        // M11 · 「文档里写着一张贴图」 and 「渲染器手上有一张贴图」 are two different claims,
+        // and the second is the one the user sees. Nothing checked it until this review:
+        // the panel and the E2E both read the document back. The texture's NAME rather than
+        // a boolean, so a test can tell WHICH texture arrived.
+        map: read.map != null && typeof read.map.name === 'string' ? read.map.name : null,
+        base: typeof read.type === 'string' ? read.type : null,
       })
     })
     return found[0] ?? null
@@ -86,5 +96,10 @@ interface MaterialProbe {
   readonly roughness: number | null
   readonly metalness: number | null
   readonly opacity: number | null
+  readonly transmission: number | null
   readonly color: string | null
+  /** The Texture's name — the asset's file name — or null when the slot is empty. */
+  readonly map: string | null
+  /** three's class name, so a base change can be observed rather than inferred. */
+  readonly base: string | null
 }

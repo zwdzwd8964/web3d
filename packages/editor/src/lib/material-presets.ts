@@ -186,7 +186,9 @@ export function separateMaterial(
   const factory = options.ctx ?? defaultFactoryContext
 
   const copy = createMaterial({
-    name: `${source.name} 副本`,
+    // Numbered, because the material dropdown is the ONLY way to pick one and three records
+    // all called 「拉丝不锈钢 副本」 are indistinguishable in it (M11 审查所得).
+    name: uniqueName(draft, `${source.name} 副本`),
     base: source.base,
     preset: source.preset,
     // Deep enough: `maps` and `uv` are the only nested objects, and sharing either would
@@ -201,4 +203,14 @@ export function separateMaterial(
   draft.materials.push(copy)
   node.overrides.materialId = copy.id
   return copy.id
+}
+
+/** `X 副本`, `X 副本 2`, `X 副本 3`… — the first name that is not already taken. */
+function uniqueName(draft: SceneDocument, wanted: string): string {
+  const taken = new Set(draft.materials.map((m) => m.name))
+  if (!taken.has(wanted)) return wanted
+  for (let n = 2; ; n++) {
+    const candidate = `${wanted} ${n}`
+    if (!taken.has(candidate)) return candidate
+  }
 }

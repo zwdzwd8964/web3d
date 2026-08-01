@@ -128,8 +128,11 @@ export class TextureCache implements TextureSource {
   /**
    * Drops textures no material references any more.
    *
-   * Called from `ensure`, so a document edit that unsets the last reference to a 4 MB map
-   * gives the memory back without anyone having to remember to.
+   * Called from `ensure`, and therefore only when the host has a reason to await something:
+   * an asset arriving, or a material starting to reference a texture. CLEARING a slot does
+   * neither, so the bytes stay resident until the next import or the next `load` (M11 —
+   * registered rather than fixed, because freeing them eagerly would mean making the
+   * synchronous patch path await, which is what D1 exists to avoid).
    */
   private retainOnly(wanted: ReadonlySet<string>, doc: SceneDocument): void {
     const counts = new Map<string, number>()

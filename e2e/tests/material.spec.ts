@@ -184,3 +184,47 @@ test('⑦ 纹理页签点一张：引入并挂到选中对象的基础色', asyn
   const slot = page.locator('.field', { hasText: '基础色' }).locator('button.slot')
   await expect.poll(async () => (await slot.innerText()).trim(), { timeout: 20_000 }).not.toBe('（未设置）')
 })
+
+/** What the RENDERER is holding for a node — not what the document says (M11). */
+async function renderedMaterial(page: Page, nodeName: string) {
+  return page.evaluate((name: string) => {
+    const row = [...document.querySelectorAll('.tree-row')].find((r) => r.textContent?.includes(name))
+    const nodeId = row?.getAttribute('data-node-id')
+    if (!nodeId) return null
+    const probe = (globalThis as Record<string, unknown>)['__w3DevMaterialOf'] as
+      | ((id: string) => { map: string | null; base: string | null; transmission: number | null } | null)
+      | undefined
+    return probe?.(nodeId) ?? null
+  }, nodeName)
+}
+
+test('⑧ 贴图真的到了渲染器手上，不只是文档里写着（M11 审查所得）', async ({ page }) => {
+  // The gap this closes: every assertion about textures so far read the DOCUMENT back — the
+  // slot label, the material record. 「文档里写着一张贴图」 and 「渲染器手上有一张贴图」 are
+  // two different claims, and only the second is what the user sees. This is the same shape
+  // as the roughness assertion T-115 had to fix in the v0 golden path.
+  await selectCover(page)
+  expect((await renderedMaterial(page, '阀盖'))?.map, '前提：一开始没有贴图').toBeNull()
+
+  await page.locator('.field', { hasText: '基础色' }).locator('button.slot').click()
+  await page.locator('.picker').getByRole('button', { name: '内置纹理' }).click()
+  await page.locator('.picker__item').first().click()
+
+  await expect
+    .poll(async () => (await renderedMaterial(page, '阀盖'))?.map, { timeout: 20_000 })
+    .not.toBeNull()
+})
+
+test('⑨ 换成玻璃之后，渲染器手上真的是 MeshPhysicalMaterial', async ({ page }) => {
+  // Same lens on T-153: the panel showing a 透射 slider proves the document changed, not
+  // that the renderer built a class that can read it.
+  await selectCover(page)
+  expect((await renderedMaterial(page, '阀盖'))?.base).toBe('MeshStandardMaterial')
+
+  await page.getByRole('button', { name: '玻璃', exact: true }).click()
+  await page.waitForTimeout(SETTLE)
+
+  const rendered = await renderedMaterial(page, '阀盖')
+  expect(rendered?.base, '预设说这是玻璃，渲染器就得拿到玻璃').toBe('MeshPhysicalMaterial')
+  expect(rendered?.transmission).toBe(1)
+})

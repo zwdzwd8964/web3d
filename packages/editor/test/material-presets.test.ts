@@ -203,3 +203,21 @@ describe('separating a shared material', () => {
     expect(after.materials).toHaveLength(doc.materials.length)
   })
 })
+
+describe('naming (M11 审查所得)', () => {
+  it('numbers the copies, because the dropdown is the only way to pick one', () => {
+    // Separating all three nodes used to leave three records all called
+    // 「拉丝不锈钢 副本」. The material selector shows names, so the user could see three
+    // identical entries and had no way to tell which belonged to what.
+    const shared = produce(createGoldenPathDocument(), (draft) => {
+      for (const node of draft.nodes) node.overrides.materialId = MATERIAL
+    })
+    const after = edit((draft) => {
+      for (const node of draft.nodes) separateMaterial(draft, node.id, { ctx: ctx() })
+    }, shared)
+
+    const names = after.materials.map((m) => m.name)
+    expect(new Set(names).size, '每个名字都得能区分开').toBe(names.length)
+    expect(names).toEqual(['拉丝不锈钢', '拉丝不锈钢 副本', '拉丝不锈钢 副本 2', '拉丝不锈钢 副本 3'])
+  })
+})

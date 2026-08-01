@@ -105,7 +105,19 @@ export function createPatchForwarder(getRuntime: () => SceneRuntime | null) {
     const runtime = getRuntime()
     if (!runtime) return
 
-    const touchesAssets = patches.some((patch) => patch.path[0] === 'assets')
+    // Two kinds of patch need bytes in hand before they can be applied: an asset arriving,
+    // and a material starting to reference a texture. The second is not obvious and cost
+    // M11 a real bug — the cache loads what materials REFERENCE, but the reference is
+    // usually set in a later commit than the import, so a picked texture was never loaded
+    // and the slot rendered empty while the document said otherwise.
+    //
+    // Narrow on purpose: `/materials/3/params/maps/map`, not `/materials/**`. Dragging a
+    // roughness slider emits sixty material patches a second and must stay on the
+    // synchronous fast path.
+    const touchesAssets = patches.some(
+      (patch) =>
+        patch.path[0] === 'assets' || (patch.path[0] === 'materials' && patch.path.includes('maps')),
+    )
     if (!touchesAssets && queued === 0) {
       runtime.applyPatch(patches, next, prev)
       return
