@@ -47,6 +47,15 @@ const proxyGeometry = new SphereGeometry(PROXY_RADIUS, 12, 8)
 interface HelperEntry {
   readonly nodeId: string
   readonly kind: LightKind
+  /**
+   * The three light this entry was built against.
+   *
+   * Kept because three's helpers hold a REFERENCE to their light and read its matrix on
+   * every update. A graph rebuild replaces that object, and a helper pointing at the
+   * discarded one silently freezes: it keeps drawing where the light used to be. Comparing
+   * identity here is what turns that into a rebuild instead of a ghost.
+   */
+  readonly light: Object3D
   /** three's own helper, or null for `ambient` — which has no position or direction to draw. */
   readonly helper: (Object3D & { update?: () => void }) | null
   readonly proxy: Mesh
@@ -111,7 +120,9 @@ export class LightHelperLayer {
 
     for (const [nodeId, entry] of [...this.entries]) {
       const spec = lights.get(nodeId)
-      if (!spec || spec.kind !== entry.kind) this.remove(nodeId)
+      // Gone, retyped, or rebuilt into a different Object3D — all three mean this entry is
+      // pointing at something that no longer exists.
+      if (!spec || spec.kind !== entry.kind || this.graph.objectFor(nodeId) !== entry.light) this.remove(nodeId)
     }
 
     for (const [nodeId, spec] of lights) {
@@ -131,7 +142,7 @@ export class LightHelperLayer {
 
       this.root.add(proxy)
       if (helper) this.root.add(helper)
-      this.entries.set(nodeId, { nodeId, kind: spec.kind, helper, proxy })
+      this.entries.set(nodeId, { nodeId, kind: spec.kind, light, helper, proxy })
     }
 
     this.update()

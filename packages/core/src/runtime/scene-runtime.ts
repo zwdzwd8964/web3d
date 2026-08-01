@@ -673,6 +673,8 @@ export class SceneRuntime implements RuntimeContext {
     // Every Object3D is new again, carrying three's defaults — the same reason `rebuild`
     // forces this. Without it, exiting preview silently turns every shadow off.
     this.syncShadows(this.document, true)
+    // …and every light helper is holding a reference to a light that no longer exists.
+    this.lightHelpers?.sync(this.document)
   }
 
   private resetRuntimeState(): void {

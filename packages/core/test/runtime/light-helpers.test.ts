@@ -224,3 +224,37 @@ describe('light helpers in play mode', () => {
     runtime.dispose()
   })
 })
+
+describe('helpers after a graph rebuild', () => {
+  it('re-points at the new light instead of freezing on the old one', () => {
+    // Found by M9's closing review. three's helpers hold a reference to their light and
+    // read its matrix on every update, and `resetScene` — which is what exiting preview
+    // does — rebuilds the whole graph. Every helper was left pointing at a discarded
+    // object: it kept drawing where the light used to be, and no test could see it because
+    // the proxy (which is repositioned from the graph each frame) still worked.
+    const doc = docWithLight(spot, [3, 0, 0])
+    const runtime = makeRuntime(doc)
+    const lightBefore = runtime.graph.objectFor(LIGHT_ID)
+    const helperBefore = runtime.lightHelpers!.objects.find((o) => o.name.startsWith('w3:light-helper'))
+
+    runtime.resetScene()
+
+    const lightAfter = runtime.graph.objectFor(LIGHT_ID)
+    expect(lightAfter, 'resetScene 应当重建场景图（前提）').not.toBe(lightBefore)
+    const helperAfter = runtime.lightHelpers!.objects.find((o) => o.name.startsWith('w3:light-helper')) as unknown as {
+      light: object
+    }
+    expect(helperAfter).not.toBe(helperBefore)
+    expect(helperAfter.light, 'helper 必须指着活着的那盏灯').toBe(lightAfter)
+    runtime.dispose()
+  })
+
+  it('still selects the light after a rebuild', () => {
+    const doc = docWithLight(spot)
+    const runtime = makeRuntime(doc)
+    runtime.resetScene()
+    runtime.tick()
+    expect(runtime.picker.pick(400, 300, 800, 600, cameraAtZ5(), doc)?.nodeId).toBe(LIGHT_ID)
+    runtime.dispose()
+  })
+})
