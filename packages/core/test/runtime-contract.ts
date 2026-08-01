@@ -33,6 +33,22 @@ export interface ContractHarness {
 /** A spot light node, so the light half of the contract has something to point at. */
 const LIGHT_ID = 'nd_light001'
 
+/** A media record, so the media half has something to point at. */
+const MEDIA_ID = 'med_00000001'
+
+/** The golden path plus one audio asset and its media record. */
+function mediaDocument(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  return {
+    ...doc,
+    assets: [
+      ...doc.assets,
+      { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio', name: '讲解.mp3' },
+    ],
+    media: [{ id: MEDIA_ID, type: 'audio', assetId: 'ast_med00001', name: '讲解', durationS: 2 }],
+  } as SceneDocument
+}
+
 function litDocument(): SceneDocument {
   const doc = createGoldenPathDocument()
   return {
@@ -68,6 +84,7 @@ function litDocument(): SceneDocument {
 export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocument) => ContractHarness) {
   const setup = () => makeCtx(createGoldenPathDocument())
   const setupLit = () => makeCtx(litDocument())
+  const setupWithMedia = () => makeCtx(mediaDocument())
 
   it(`${label}: variables start at their document defaults`, () => {
     expect(setup().ctx.getVar('step')).toBe(1)
@@ -259,5 +276,58 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
     h.ctx.setLight(LIGHT_ID, { intensity: 6, color: '#ff0000' })
     h.ctx.resetScene()
     expect(h.lightOf(LIGHT_ID)).toEqual({ intensity: 3, color: '#ffd9a0' })
+  })
+
+  /* --- v0.5 · media (进化规划 §4.3 · T-163) -------------------------------- */
+
+  it(`${label}: nothing is playing to begin with`, async () => {
+    const h = setupWithMedia()
+    expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
+    await Promise.resolve()
+  })
+
+  it(`${label}: playMedia starts it and isMediaPlaying says so`, async () => {
+    const h = setupWithMedia()
+    await h.ctx.playMedia(MEDIA_ID, {})
+    expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(true)
+  })
+
+  it(`${label}: stopMedia stops it`, async () => {
+    const h = setupWithMedia()
+    await h.ctx.playMedia(MEDIA_ID, {})
+    h.ctx.stopMedia(MEDIA_ID)
+    expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
+  })
+
+  it(`${label}: stopMedia('all') stops everything`, async () => {
+    const h = setupWithMedia()
+    await h.ctx.playMedia(MEDIA_ID, {})
+    h.ctx.stopMedia('all')
+    expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
+  })
+
+  it(`${label}: stopping what is not playing is fine, not an error`, async () => {
+    const h = setupWithMedia()
+    expect(() => h.ctx.stopMedia(MEDIA_ID)).not.toThrow()
+    expect(() => h.ctx.stopMedia('all')).not.toThrow()
+    await Promise.resolve()
+  })
+
+  it(`${label}: playMedia on a media id that does not exist is skipped, not thrown`, async () => {
+    // Same divergence risk as setLight on a non-light (B9): one runtime throwing where the
+    // other skips means the editor's preview and the player disagree about whether the rest
+    // of the sequence ran.
+    const h = setupWithMedia()
+    await expect(h.ctx.playMedia('med_00000000', {})).resolves.toBeUndefined()
+    expect(h.ctx.isMediaPlaying('med_00000000')).toBe(false)
+  })
+
+  it(`${label}: resetScene silences the scene (B13 extended to media)`, async () => {
+    // Leaving preview mode with a narration still playing is the single most jarring thing
+    // this feature can do.
+    const h = setupWithMedia()
+    await h.ctx.playMedia(MEDIA_ID, {})
+    h.ctx.resetScene()
+    expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
   })
 }

@@ -79,6 +79,7 @@ describe('registerBuiltinActions()', () => {
         'openLink',
         'openPanel',
         'playAnimation',
+        'playMedia',
         'resetScene',
         'seekAnimation',
         'setLight',
@@ -86,6 +87,7 @@ describe('registerBuiltinActions()', () => {
         'setVariable',
         'setVisible',
         'stopAnimation',
+        'stopMedia',
         'wait',
       ].sort(),
     )

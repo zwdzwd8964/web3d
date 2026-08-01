@@ -3,6 +3,7 @@ import { defaultRegistry } from './registry.js'
 import { ANIMATION_ACTIONS } from './animation.js'
 import { CAMERA_ACTIONS } from './camera.js'
 import { LIGHT_ACTIONS } from './light.js'
+import { MEDIA_ACTIONS } from './media.js'
 import { SCENE_ACTIONS } from './scene.js'
 import { STATE_ACTIONS } from './state.js'
 import { UI_ACTIONS } from './ui.js'
@@ -11,6 +12,7 @@ export * from './animation.js'
 export * from './camera.js'
 export * from './define.js'
 export * from './light.js'
+export * from './media.js'
 export * from './registry.js'
 export * from './scene.js'
 export * from './state.js'
@@ -21,6 +23,7 @@ export const BUILTIN_ACTIONS = [
   ...ANIMATION_ACTIONS,
   ...SCENE_ACTIONS,
   ...LIGHT_ACTIONS,
+  ...MEDIA_ACTIONS,
   ...CAMERA_ACTIONS,
   ...UI_ACTIONS,
   ...STATE_ACTIONS,

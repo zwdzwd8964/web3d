@@ -535,12 +535,21 @@
   `resolveMedia` 是注入的：这个类是编辑器预览和播放器**共用**的那一个（C3），谁也不许伸手进
   对方的存储。播放器那边顺手把 resolver 提到 `createPlayerSession` 外面，两边读的是同一个。
 
-### [ ] T-163 · `playMedia` / `stopMedia` 动作与 MediaBus
-- **依赖** T-135, T-160 · **预估** 1d · **实际** ___
+### [x] T-163 · `playMedia` / `stopMedia` 动作与 MediaBus
+- **依赖** T-135, T-160 · **预估** 1d · **实际** 1.3h
 - **独占** `packages/core/src/runtime/media-bus.ts`, `packages/core/src/eca/actions/media.ts`, `packages/core/src/eca/types.ts`（增）, `packages/core/src/eca/headless.ts`（增）, `packages/core/src/runtime/scene-runtime.ts`（ctx 实现段）, `packages/core/test/eca/actions.test.ts`（增）, `packages/core/test/runtime-contract.ts`（增）, `docs/ECA_SPEC.md`（回写）
 - **做** `MediaBus`（`<audio>` 元素池、volume / loop、`AbortSignal` 停播、**自动播放解锁**：首次用户手势前的播放请求 resolve + warn 不 reject 不卡 sequence——风险 V3 的防线）；`RuntimeContext` 四方法双实现 + 契约条目；两个动作五项齐全；await 语义按 D19（headless 用假时钟 + `durationS`；`loop` 立即 resolve **必测**；`durationS` 缺失立即 resolve + warn）；`stopMedia('all')` 供 `resetScene` / 退出预览调用（预览退出必须音停）。
 - **验收** 覆盖率门槛 16/16 全绿；纯 Node 环境全部通过；退出预览音频停止（B13 语义扩展）
-- **自测** `pnpm -F @w3/core test eca`
+- **自测** `pnpm -F @w3/core test eca`（193）+ `pnpm -F @w3/core test media-bus`（18）
+- **前置**：`engine.ts` 的矛盾先解决了才动这张卡，见 [ADR-0018](adr/0018-withCurrentEvent-改用-Proxy-委托.md)（人工裁决）。
+- **实际情况**：**契约测试当场抓到一条分叉**——`SceneRuntime.resetScene` 静音了，
+  `HeadlessRuntime.resetScene` 没有。这正是它存在的理由：两个实现各自都"对"，而 C3 要的是
+  两边一致。
+  自动播放这条（V3）是整个 MediaBus 存在的原因：浏览器在用户交互前拒绝播放，拒绝以 rejected
+  promise 的形式到达。放它过去会中断整条规则链——用户看到的不是少了一个声音，而是**什么都
+  没发生**。所以播放失败 resolve + warn。
+  一个测试踩到了 JS 的默认参数陷阱：`mediaDoc(undefined)` 会触发 `= 2` 默认值，于是"没有时长"
+  的用例其实有时长，测试挂在没人推进的时钟上超时 5 秒。改用 `null` 当哨兵。
 
 ---
 

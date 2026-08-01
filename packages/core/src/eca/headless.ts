@@ -136,6 +136,8 @@ export class HeadlessRuntime implements RuntimeContext {
   private materials = new Map<string, string | null>()
   /** v0.5 · light params changed by `setLight`; absent means "still the document's". */
   private lights = new Map<string, LiveLight>()
+  /** v0.5 · which clips are playing, and with what. No decoder, and none needed (D19). */
+  private playingMedia = new Map<string, { loop: boolean; volume: number }>()
   private highlights = new Map<string, string>()
   private panels = new Set<string>()
   private playing = new Map<string, { cancel: () => void; loop: boolean }>()
@@ -264,6 +266,44 @@ export class HeadlessRuntime implements RuntimeContext {
     })
   }
 
+  /* ---- media (v0.5 · T-163) ---------------------------------------------- */
+
+  /**
+   * Starts a clip, in the only sense a headless runtime can: it records that it is playing.
+   *
+   * There is no decoder here and there does not need to be. What the parity trace compares
+   * is WHICH clip started, with what volume and loop flag, in what order relative to the
+   * other steps — and every one of those is a decision the document made, not the audio
+   * hardware. The waiting half lives in the action (D19), on `ctx.wait`, so a fake clock
+   * drives it.
+   */
+  playMedia(id: string, opts: { loop?: boolean; volume?: number; signal?: AbortSignal } = {}): Promise<void> {
+    const media = this.doc.media.find((m) => m.id === id)
+    if (!media) {
+      this.log('error', `playMedia 引用了不存在的媒体：${id}`)
+      return Promise.resolve()
+    }
+    this.playingMedia.set(id, { loop: opts.loop ?? false, volume: opts.volume ?? 1 })
+    return Promise.resolve()
+  }
+
+  stopMedia(id: string | 'all'): void {
+    if (id === 'all') {
+      this.playingMedia.clear()
+      return
+    }
+    this.playingMedia.delete(id)
+  }
+
+  isMediaPlaying(id: string): boolean {
+    return this.playingMedia.has(id)
+  }
+
+  /** What each playing clip was started with. Read by the parity trace and the tests. */
+  mediaState(id: string): { loop: boolean; volume: number } | null {
+    return this.playingMedia.get(id) ?? null
+  }
+
   /** The live parameters of a light node — the document's own values until `setLight` moves them. */
   lightOf(nodeId: string): LiveLight | null {
     const node = this.doc.nodes.find((n) => n.id === nodeId)
@@ -308,6 +348,9 @@ export class HeadlessRuntime implements RuntimeContext {
     for (const node of this.doc.nodes) this.visibility.set(node.id, node.visible)
     this.materials.clear()
     this.lights.clear()
+    // B13 extended (T-163): leaving preview silences the scene. SceneRuntime does the same
+    // through MediaBus, and the contract test is what caught them disagreeing.
+    this.playingMedia.clear()
     this.highlights.clear()
     this.panels.clear()
     this.animationTime.clear()

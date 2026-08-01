@@ -32,6 +32,25 @@ import { buildPumpGlb } from '../assets/glb.js'
  * production — an untestable branch guarding against the test harness. It is also what
  * makes T-132's acceptance ("无 GL 断言 shadowMap 开关联动") assertable at all.
  */
+/** A stand-in for HTMLMediaElement. Records nothing; plays instantly and successfully. */
+function fakeMediaElement() {
+  const listeners = new Set<() => void>()
+  return {
+    src: '',
+    volume: 1,
+    loop: false,
+    currentTime: 0,
+    play: () => Promise.resolve(),
+    pause: () => {},
+    addEventListener: (_type: 'ended', listener: () => void) => void listeners.add(listener),
+    removeEventListener: (_type: 'ended', listener: () => void) => void listeners.delete(listener),
+    /** Test seam: fires `ended`, which is how a clip finishes without real playback. */
+    finish: () => {
+      for (const listener of [...listeners]) listener()
+    },
+  }
+}
+
 function fakeRenderer() {
   const calls = { render: 0, setSize: 0, dispose: 0 }
   const shadowMap = { enabled: false, type: -1 }
@@ -417,10 +436,18 @@ describe('the shared RuntimeContext contract', () => {
     clock = 0
     const runtime = new SceneRuntime(doc, {
       canvas: canvas(),
-      resolver: createMemoryResolver(new Map()),
+      // Resolves ANY url to empty bytes. The contract is about media semantics — started,
+      // stopped, silenced on reset — not about storage, and a resolver that refuses every
+      // url would make the media half fail for a reason about the harness.
+      resolver: { resolve: async () => new ArrayBuffer(8) },
       mode: 'play',
       createRenderer: () => fakeRenderer().renderer,
       hotspotRenderer: new NullHotspotRenderer(),
+      // A stand-in for <audio>, for the same reason as `createRenderer`: the bus's logic —
+      // pooling, volume, loop, stop, the autoplay fallback — is what the contract compares,
+      // and none of it needs a decoder. Without this the contract's media assertions would
+      // pass on the headless side and fail here for a reason that is about the harness.
+      createMediaElement: () => fakeMediaElement(),
       now: () => clock,
     })
     runtime.graph.build(doc)

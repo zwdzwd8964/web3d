@@ -204,6 +204,8 @@ export function allActions(): ActionDefinition[]
 | `openLink` | `{ url, target: '_blank'\|'_self' }` | 打开链接 | 立即 |
 | `resetScene` | `{}` | 恢复到文档初始状态（transform / visible / material / 变量默认值 / **灯光参数**） | 立即 |
 | `setLight` **（v0.5）** | `{ nodeId, intensity?, color? }` | 改灯光参数（目标节点须为灯节点，否则 skip + error，同 B9） | 立即 |
+| `playMedia` **（v0.5）** | `{ mediaId, await?: false, loop?: false, volume?: 1 }` | 播放媒体 | `await: true` 时按 media 记录的 `durationS` 挂起（走 `ctx.wait`）；**`loop: true` 立即 resolve**（同 D6 边界）；`durationS` 缺失立即 resolve + warn |
+| `stopMedia` **（v0.5）** | `{ mediaId \| 'all' }` | 停止播放 | 立即 |
 
 `moveCamera` **只能飞到已保存的视点**（技术方案 §1.3 原文限定）。允许填任意坐标等于让用户在规则编辑器里手搓相机，UI 复杂度暴涨且几乎无人用对。
 
@@ -216,6 +218,24 @@ export function allActions(): ActionDefinition[]
 颜色字段用 `type: 'string'` 而不是取色器：`FieldDescriptor` 是 §4.4 的封闭六种，规则编辑器
 只渲染这六种。加一种 `'color'` 等于同时改规范和改规则编辑器——而 v0.5 的整个主张就是新增
 动作两样都不用改。格式由 zod 的 `#rrggbb` 校验在动作跑起来之前挡住。
+
+**`playMedia` 的三条边界都立即 resolve**，各有各的理由，都有测试：
+
+- **`loop: true`** —— 循环的音频没有"播完"，await 它等于把 sequence 永远挂住。与
+  `playAnimation` 是同一条边界（D6），任务卡把它标成"必测"。
+- **`durationS` 缺失** —— 导入时浏览器没肯报时长（T-160）。不知道要等多久，而编一个数字
+  等于把 sequence 挂在没人量过的值上。resolve + warn。
+- **浏览器拒绝自动播放** —— 在 `ctx.playMedia` 内部处理，resolve 而不是 reject（风险 V3）。
+  reject 会中断整条链：「响完铃再弹面板」变成「铃没响，面板也没弹」，用户看到的不是少了
+  一个声音，而是**什么都没发生**。
+
+**`stopMedia` 的 `mediaId` 用 `type: 'string'` 而不是 `ref`**：`'all'` 是合法值而媒体选择器
+提供不了它。与 `setLight` 的颜色同一笔交易——`FieldDescriptor` 是 §4.4 的封闭六种，新增动作
+不许加宽它。另外 `'all'` **不贡献引用**，否则每个用了它的场景都会被完整性检查报成"引用了
+不存在的媒体 all"。
+
+`playMedia` 的 `refKind: 'media'` 从 v0 起就在 `FieldDescriptor` 里——规则编辑器**零改动**
+长出这个表单，这是 C5 的验收证据之一。
 
 ### 4.3 一个完整的动作定义示例
 
@@ -342,6 +362,13 @@ export interface RuntimeContext {
   resetScene(): void
   /** v0.5 · 目标非灯节点时 skip + error（同 B9）；resetScene 会还原它改过的值（B13） */
   setLight(nodeId: string, patch: { intensity?: number; color?: string }): void
+
+  // ---- 媒体（v0.5） ----
+  /** 开始播放后即 resolve；等到播完是**动作**的事（D19）。浏览器拒绝自动播放时也 resolve（V3） */
+  playMedia(id: string, opts: { loop?: boolean; volume?: number; signal?: AbortSignal }): Promise<void>
+  /** `'all'` 是退出预览时调的那个（B13 扩展：离开预览必须静音） */
+  stopMedia(id: string | 'all'): void
+  isMediaPlaying(id: string): boolean
 
   // ---- 动画 ----
   playAnimation(id: string, opts: { signal?: AbortSignal }): Promise<void>

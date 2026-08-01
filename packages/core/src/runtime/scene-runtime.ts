@@ -19,11 +19,13 @@ import type { Bounds } from './primitive-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { TextureCache, browserTextureDecoder } from './texture-cache.js'
+import { MediaBus, browserMediaElements } from './media-bus.js'
 import { Picker } from './picker.js'
 import { SceneGraph } from './scene-graph.js'
 import type { LiveLight } from '../eca/headless.js'
 import type { EnvMapCompiler } from './environment.js'
 import type { TextureDecoder } from './texture-cache.js'
+import type { MediaBusOptions } from './media-bus.js'
 import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
 /**
@@ -49,6 +51,8 @@ export interface SceneRuntimeOptions {
   readonly compileEnvMap?: EnvMapCompiler
   /** T-151 · injected in tests; production uses `createImageBitmap`, which needs a browser. */
   readonly decodeTexture?: TextureDecoder
+  /** T-163 · injected in tests; production creates real `<audio>` / `<video>` elements. */
+  readonly createMediaElement?: MediaBusOptions['createElement']
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
@@ -84,6 +88,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly environment: EnvironmentController
   /** T-136 · edit mode only; null in play, where there is nothing to author. */
   readonly lightHelpers: LightHelperLayer | null
+  /** T-163 · the scene's audio: what rules started and what leaving preview silences. */
+  readonly media: MediaBus
 
   private renderer: WebGLRenderer | null = null
   private hotspotRenderer: HotspotRenderer
@@ -124,6 +130,15 @@ export class SceneRuntime implements RuntimeContext {
       log: (level, message, data) => this.log(level, message, data),
     })
     this.materials.setTextureSource(this.textures)
+    // Injected like every other browser-only capability, so the bus's own logic — pooling,
+    // volume, loop, abort, the autoplay fallback — runs in plain Node (C8).
+    const createElement = options.createMediaElement ?? browserMediaElements()
+    this.media = new MediaBus({
+      resolve: (url) => options.resolver.resolve(url),
+      ...(createElement ? { createElement } : {}),
+      log: (level, message, data) => this.log(level, message, data),
+    })
+    this.media.setDocument(document)
     this.highlights = new HighlightLayer(this.graph, this.materials)
     this.camera = new CameraController(this.graph)
     this.picker = new Picker(this.graph)
@@ -337,6 +352,7 @@ export class SceneRuntime implements RuntimeContext {
   /** Builds the scene graph and loads every model asset the document references. */
   async load(doc: SceneDocument): Promise<void> {
     this.document = doc
+    this.media.setDocument(doc)
     await this.ensureAssets(doc)
     this.graph.setAssetSource(this.loader)
     this.rebuild(doc)
@@ -381,6 +397,7 @@ export class SceneRuntime implements RuntimeContext {
 
   private rebuild(doc: SceneDocument): void {
     this.document = doc
+    this.media.setDocument(doc)
     this.graph.build(doc)
     this.materials.applyAll(doc, this.graph)
     this.applyBackground(doc)
@@ -395,6 +412,9 @@ export class SceneRuntime implements RuntimeContext {
   /** Applies editor patches incrementally (D1). */
   applyPatch(patches: readonly DocumentPatch[], next: SceneDocument, prev: SceneDocument): void {
     this.document = next
+    // The bus resolves media ids against the document; a stale one means a clip added a
+    // moment ago cannot be found by the rule that plays it.
+    this.media.setDocument(next)
     this.patches.apply(patches, next, prev)
     // Both are a scan over nodes per batch, which is cheap, and both have to happen here
     // rather than in a patch consumer: adding the first light changes a scene-level fact
@@ -454,6 +474,7 @@ export class SceneRuntime implements RuntimeContext {
     this.disposed = true
     this.stop()
     this.textures.dispose()
+    this.media.disposeAll()
     for (const wait of this.waits) {
       clearTimeout(wait.timer)
       wait.reject(new AbortError())
@@ -669,6 +690,30 @@ export class SceneRuntime implements RuntimeContext {
   }
 
   /** The light's live parameters, or null when the node is not a light. Read by the contract suite. */
+  /**
+   * T-163 · starts a clip. Resolves once it has STARTED — awaiting the end is the action's
+   * job (D19), and `MediaBus.waitForEnd` is what it awaits on.
+   */
+  async playMedia(id: string, opts: { loop?: boolean; volume?: number; signal?: AbortSignal } = {}): Promise<void> {
+    const media = this.document.media.find((m) => m.id === id)
+    if (!media) {
+      this.log('error', `playMedia 引用了不存在的媒体：${id}`)
+      return
+    }
+    await this.media.play(id, {
+      ...(opts.loop === undefined ? {} : { loop: opts.loop }),
+      ...(opts.volume === undefined ? {} : { volume: opts.volume }),
+    })
+  }
+
+  stopMedia(id: string | 'all'): void {
+    this.media.stop(id)
+  }
+
+  isMediaPlaying(id: string): boolean {
+    return this.media.isPlaying(id)
+  }
+
   lightOf(nodeId: string): LiveLight | null {
     const node = this.document.nodes.find((n) => n.id === nodeId)
     if (!node || node.light === null) return null
@@ -714,6 +759,10 @@ export class SceneRuntime implements RuntimeContext {
   }
 
   resetScene(): void {
+    // B13 extended (T-163): leaving preview stops the audio too. A narration that keeps
+    // playing after the user has left the scene it belongs to is the single most jarring
+    // thing this feature can do.
+    this.media.stop('all')
     this.tweens.stopAll()
     this.clips.stopAll()
     this.highlights.clearAll()

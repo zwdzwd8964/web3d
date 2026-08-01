@@ -72,6 +72,20 @@ export interface RuntimeContext {
    */
   setLight(nodeId: string, patch: { intensity?: number; color?: string }): void
 
+  // ---- media (v0.5 · T-163) ----
+  /**
+   * Starts a clip and resolves once it has STARTED.
+   *
+   * Not when it ends: awaiting the end is the ACTION's decision (D19), because only the rule
+   * knows whether it asked to wait. A browser that refuses to autoplay resolves too, with a
+   * warning — rejecting would abort the whole rule chain, turning 「响完铃再弹面板」 into
+   * 「铃没响，面板也没弹」 (risk V3).
+   */
+  playMedia(id: string, opts: { loop?: boolean; volume?: number; signal?: AbortSignal }): Promise<void>
+  /** Stops one clip, or every clip. `'all'` is what leaving preview mode calls (B13). */
+  stopMedia(id: string | 'all'): void
+  isMediaPlaying(id: string): boolean
+
   // ---- animation ----
   /**
    * MVP_V0 D6 · resolves when playback finishes naturally. A looping animation resolves

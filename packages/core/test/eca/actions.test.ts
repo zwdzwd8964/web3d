@@ -361,6 +361,140 @@ describe('describe() produces the acceptance-case wording (R14)', () => {
   })
 })
 
+describe('media actions (v0.5 · T-163)', () => {
+  const MEDIA_ID = 'med_00000001'
+
+  /**
+   * The golden path plus one audio record, 2 s long by default.
+   *
+   * `null` rather than `undefined` for 「时长未知」: a default parameter fires for an
+   * explicit `undefined` too, so `mediaDoc(undefined)` silently produced a 2-second clip
+   * and the test hung waiting for a clock nobody advanced.
+   */
+  const mediaDoc = (durationS: number | null = 2): SceneDocument => {
+    const doc = createGoldenPathDocument()
+    return {
+      ...doc,
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio', name: '讲解.mp3' }],
+      media: [
+        {
+          id: MEDIA_ID,
+          type: 'audio',
+          assetId: 'ast_med00001',
+          name: '讲解',
+          ...(durationS === null ? {} : { durationS }),
+        },
+      ],
+    } as SceneDocument
+  }
+
+  beforeEach(() => {
+    ctx = new HeadlessRuntime(mediaDoc())
+  })
+
+  it('playMedia starts the clip', async () => {
+    await run('playMedia', { mediaId: MEDIA_ID })
+    expect(ctx.isMediaPlaying(MEDIA_ID)).toBe(true)
+    expect(ctx.mediaState(MEDIA_ID)).toEqual({ loop: false, volume: 1 })
+  })
+
+  it('carries loop and volume through to the runtime', async () => {
+    await run('playMedia', { mediaId: MEDIA_ID, loop: true, volume: 0.25 })
+    expect(ctx.mediaState(MEDIA_ID)).toEqual({ loop: true, volume: 0.25 })
+  })
+
+  it('does NOT wait by default', async () => {
+    // Same default as `playAnimation`: a rule that plays a sound and opens a panel should
+    // do both at once unless it said otherwise.
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID })
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+  })
+
+  it('await: true suspends for durationS and then continues', async () => {
+    // D19 · through `ctx.wait`, so a fake clock drives it and no audio hardware is needed.
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => void (settled = true))
+
+    await ctx.clock.advance(1999)
+    expect(settled, '还没到 2 秒，不该结束').toBe(false)
+    await ctx.clock.advance(1)
+    await Promise.resolve()
+    expect(settled, '2 秒到了就该继续').toBe(true)
+  })
+
+  it('a LOOPING clip resolves immediately even with await: true (D6 边界，必测)', async () => {
+    // A looping clip has no end. Awaiting one would hang the sequence for ever — the same
+    // boundary `playAnimation` draws, and the reason this test is called out on the card.
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true, loop: true })
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+    expect(ctx.isMediaPlaying(MEDIA_ID), '立即 resolve 不等于没在播').toBe(true)
+  })
+
+  it('resolves immediately and WARNS when durationS is missing', async () => {
+    // The browser would not report a length at import (T-160). Inventing one would hang a
+    // sequence on a number nobody measured.
+    ctx = new HeadlessRuntime(mediaDoc(null))
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+    expect(ctx.logs.some((l) => l.level === 'warn' && l.message.includes('没有时长记录'))).toBe(true)
+  })
+
+  it('skips a media id that does not exist, logging rather than throwing', async () => {
+    await run('playMedia', { mediaId: 'med_00000000' })
+    expect(ctx.logs.some((l) => l.level === 'error' && l.message.includes('不存在'))).toBe(true)
+  })
+
+  it('stopMedia stops one clip', async () => {
+    await run('playMedia', { mediaId: MEDIA_ID })
+    await run('stopMedia', { mediaId: MEDIA_ID })
+    expect(ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
+  })
+
+  it("stopMedia 'all' stops everything", async () => {
+    await run('playMedia', { mediaId: MEDIA_ID })
+    await run('stopMedia', { mediaId: 'all' })
+    expect(ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
+  })
+
+  it("'all' contributes no reference, or every scene using it reports a dangling id", async () => {
+    const stop = registry.get('stopMedia')!
+    expect(stop.refs?.({ mediaId: 'all' })).toEqual([])
+    expect(stop.refs?.({ mediaId: MEDIA_ID })).toEqual([{ kind: 'media', id: MEDIA_ID }])
+  })
+
+  it('rejects parameters the schema does not allow, before the handler runs', async () => {
+    const play = registry.get('playMedia')!
+    expect(play.schema.safeParse({ mediaId: MEDIA_ID, volume: 2 }).success, '音量上限 1').toBe(false)
+    expect(play.schema.safeParse({ mediaId: 'not-an-id' }).success).toBe(false)
+    // …and `'all'` is only legal for stopMedia.
+    expect(play.schema.safeParse({ mediaId: 'all' }).success).toBe(false)
+    expect(registry.get('stopMedia')!.schema.safeParse({ mediaId: 'all' }).success).toBe(true)
+  })
+
+  it('describes itself in Chinese, with the media NAME rather than its id', async () => {
+    const play = registry.get('playMedia')!
+    expect(play.describe?.({ mediaId: MEDIA_ID, await: false, loop: false, volume: 1 }, ctx.doc)).toBe(
+      '播放媒体「讲解」',
+    )
+    expect(play.describe?.({ mediaId: MEDIA_ID, await: true, loop: true, volume: 0.5 }, ctx.doc)).toContain('循环')
+    expect(registry.get('stopMedia')!.describe?.({ mediaId: 'all' }, ctx.doc)).toBe('停止全部媒体')
+  })
+
+  it('the rule editor needs no change: every field is one of the six kinds', async () => {
+    // C5's acceptance evidence. `refKind: 'media'` has been in `FieldDescriptor` since v0,
+    // so the form grows on its own — which is the whole claim v0.5 makes about actions.
+    const kinds = new Set(['string', 'number', 'boolean', 'enum', 'ref', 'vec3'])
+    for (const type of ['playMedia', 'stopMedia']) {
+      for (const field of registry.get(type)!.ui.fields) {
+        expect(kinds.has(field.type), `${type}.${field.key} 用了第七种字段类型`).toBe(true)
+      }
+    }
+  })
+})
+
+
 describe('G0-5 · every registered action has a test', () => {
   it('the tested set covers the registry exactly', () => {
     const registered = BUILTIN_ACTIONS.map((a) => a.type).sort()
