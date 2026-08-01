@@ -11,6 +11,7 @@ import { HotspotPanel } from './panels/HotspotPanel.js'
 import { IssuePanel } from './panels/IssuePanel.js'
 import { LibraryPanel } from './panels/LibraryPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
+import { MediaPanel } from './panels/MediaPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
 import { RuleLogPanel } from './panels/RuleLogPanel.js'
 import { SnapshotPanel } from './panels/SnapshotPanel.js'
@@ -35,6 +36,7 @@ type BottomTab =
   | 'library'
   | 'assets'
   | 'material'
+  | 'media'
   | 'animation'
   | 'viewpoint'
   | 'hotspots'
@@ -177,6 +179,7 @@ function BottomDock() {
               ['library', '资源库'],
               ['assets', '资产'],
               ['material', '材质'],
+              ['media', '媒体'],
               ['animation', '动画'],
               ['viewpoint', '视点'],
               ['hotspots', '热点'],
@@ -201,6 +204,7 @@ function BottomDock() {
         {tab === 'library' && <LibraryPanel />}
         {tab === 'assets' && <AssetPanel />}
         {tab === 'material' && <MaterialPanel />}
+        {tab === 'media' && <MediaPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}
         {tab === 'hotspots' && <HotspotPanel />}

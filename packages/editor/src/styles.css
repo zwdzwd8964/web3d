@@ -1155,3 +1155,37 @@ code {
   gap: 4px;
   padding: 4px 0;
 }
+
+/* T-161 · the media library rows. */
+.media-list {
+  margin: 0;
+  padding: 4px 6px;
+  list-style: none;
+  overflow: auto;
+}
+.media-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid #1c2226;
+}
+.media-list__icon {
+  width: 18px;
+  text-align: center;
+  color: #8d99a5;
+}
+.media-list__meta {
+  flex: 1;
+  color: #8d99a5;
+  font-size: 11px;
+}
+.media-list__player {
+  flex-basis: 100%;
+  padding: 4px 0;
+}
+.media-list__player audio,
+.media-list__player video {
+  max-width: 100%;
+}
