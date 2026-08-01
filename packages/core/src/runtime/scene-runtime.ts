@@ -88,6 +88,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly environment: EnvironmentController
   /** T-136 · edit mode only; null in play, where there is nothing to author. */
   readonly lightHelpers: LightHelperLayer | null
+  /** The edit-mode ground grid, kept so preview can take it away again. */
+  private grid: GridHelper | null = null
   /** T-163 · the scene's audio: what rules started and what leaving preview silences. */
   readonly media: MediaBus
 
@@ -200,8 +202,34 @@ export class SceneRuntime implements RuntimeContext {
     if (this.options.mode === 'edit') {
       const grid = new GridHelper(24, 48, 0x242b31, 0x1c2226)
       grid.name = 'w3:grid'
+      this.grid = grid
       this.scene.add(grid)
     }
+  }
+
+  /**
+   * Shows or hides everything that exists only because someone is EDITING: the ground grid
+   * and the light helpers.
+   *
+   * Preview is not a separate runtime — the editor keeps its `mode: 'edit'` one and turns
+   * the ECA engine on. So the objects `mode === 'edit'` created stayed in the scene, and
+   * 「预览」 rendered a grid and a set of light wireframes that the player will never draw.
+   * Worse, the helpers stayed in the picker's aux root, so clicking one in preview hit a
+   * helper instead of the object behind it and the rule under the viewer's cursor did not
+   * fire. That is C3 divergence — the two views disagreeing about what the scene contains —
+   * and it is the one thing preview exists to rule out (T-176 审查所得).
+   *
+   * Hiding rather than destroying: preview is toggled constantly, and rebuilding the helper
+   * layer each time would drop the wireframes' warm state for no benefit.
+   */
+  setEditorChromeVisible(visible: boolean): void {
+    if (this.options.mode !== 'edit') return
+    if (this.grid) this.grid.visible = visible
+    // One flag, two jobs: the renderer skips an invisible subtree, and so does this
+    // project's picker — `isPickable` walks every ancestor's `visible` precisely because
+    // three's raycaster does NOT. Taking the aux root off the picker as well would be a
+    // second mechanism for the same guarantee, and the one that later drifts.
+    if (this.lightHelpers) this.lightHelpers.root.visible = visible
   }
 
   /* --- the default light rig (T-134 · D14) --------------------------------- */

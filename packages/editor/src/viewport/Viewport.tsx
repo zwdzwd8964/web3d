@@ -183,6 +183,15 @@ export function Viewport() {
   }, [selection, ready, previewActive])
 
   useEffect(() => {
+    // …and so do the grid and the light helpers. Preview keeps the edit-mode runtime, so
+    // everything `mode: 'edit'` built is still in the scene unless it is taken away here.
+    // Left in, 「预览」 shows a grid and light wireframes the player never draws, and a
+    // click that lands on a helper does not reach the object the viewer aimed at (C3).
+    if (!ready) return
+    runtimeRef.current?.setEditorChromeVisible(!previewActive)
+  }, [previewActive, ready])
+
+  useEffect(() => {
     const controller = controllerRef.current
     if (!controller || !ready) return
     if (previewActive) void controller.enter(store.getState().doc)

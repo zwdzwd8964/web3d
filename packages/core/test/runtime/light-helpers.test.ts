@@ -258,3 +258,65 @@ describe('helpers after a graph rebuild', () => {
     runtime.dispose()
   })
 })
+
+/**
+ * T-182 · what preview must NOT contain.
+ *
+ * Preview is not a second runtime — the editor keeps its `mode: 'edit'` one and switches the
+ * ECA engine on. Everything `mode === 'edit'` built therefore stays in the scene, so 「预览」
+ * was drawing a ground grid and a set of light wireframes that the player never draws, and
+ * the picker was still offering the helpers to a click.
+ *
+ * That is C3 divergence — the two views disagreeing about what the scene contains — in the
+ * one feature whose entire job is to rule it out (T-176 审查所得).
+ */
+describe('preview drops the editing chrome (T-182)', () => {
+  it('hides the grid, and brings it back on the way out', () => {
+    const runtime = makeRuntime(docWithLight(spot))
+    const grid = runtime.scene.children.find((o) => o.name === 'w3:grid')
+    expect(grid, '前提：编辑态确实有网格').toBeDefined()
+
+    runtime.setEditorChromeVisible(false)
+    expect(grid!.visible, '预览里不该有网格——播放器不画它').toBe(false)
+
+    runtime.setEditorChromeVisible(true)
+    expect(grid!.visible, '退出预览要还回来').toBe(true)
+    runtime.dispose()
+  })
+
+  it('hides the light helpers', () => {
+    const runtime = makeRuntime(docWithLight(spot))
+    expect(runtime.lightHelpers!.root.visible).toBe(true)
+
+    runtime.setEditorChromeVisible(false)
+    expect(runtime.lightHelpers!.root.visible, '灯的线框是编辑期物件').toBe(false)
+    runtime.dispose()
+  })
+
+  it('stops the helpers eating a click that was aimed past them', () => {
+    // The load-bearing one. `visible = false` is honoured by the renderer but NOT by
+    // `Raycaster`, which walks the graph regardless — so hiding alone would leave an
+    // INVISIBLE proxy swallowing clicks, which is worse than the visible version: the
+    // viewer clicks the object, nothing happens, and there is nothing on screen to blame.
+    const doc = docWithLight(spot)
+    const runtime = makeRuntime(doc)
+    expect(runtime.picker.pick(400, 300, 800, 600, cameraAtZ5(), doc)?.nodeId, '前提：编辑态点得到灯').toBe(LIGHT_ID)
+
+    runtime.setEditorChromeVisible(false)
+    const hit = runtime.picker.pick(400, 300, 800, 600, cameraAtZ5(), doc)
+    expect(hit?.nodeId, '预览里点下去不该打中灯的代理').not.toBe(LIGHT_ID)
+
+    runtime.setEditorChromeVisible(true)
+    expect(runtime.picker.pick(400, 300, 800, 600, cameraAtZ5(), doc)?.nodeId, '回到编辑态要能再点中').toBe(LIGHT_ID)
+    runtime.dispose()
+  })
+
+  it('is a no-op in play mode, where none of this was ever built', () => {
+    // The player calls nothing here, but a runtime that threw on it would turn a harmless
+    // call into a blank canvas.
+    const runtime = makeRuntime(docWithLight(spot), 'play')
+    expect(() => runtime.setEditorChromeVisible(false)).not.toThrow()
+    expect(runtime.lightHelpers, 'play 模式本来就没有线框').toBeNull()
+    runtime.dispose()
+  })
+})
