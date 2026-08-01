@@ -118,6 +118,14 @@ export function pasteNodes(draft: SceneDocument, payload: ClipboardPayload, opti
     idMap.set(node.id, id)
   }
 
+  // A clipboard is a SNAPSHOT. Between Ctrl+C and Ctrl+V the material or asset it points at
+  // can stop existing, and pasting the reference anyway produces a document `checkIntegrity`
+  // rejects (I3) for something the user cannot see or repair. Neither record can be deleted
+  // from the v0.5 UI yet, so this is a guard rather than a fix — but 「粘贴后零 error」 is
+  // unconditional, and T-154's material presets are what will make it reachable.
+  const materials = new Set(draft.materials.map((m) => m.id))
+  const assets = new Set(draft.assets.map((a) => a.id))
+
   const created: Node[] = []
   for (const node of payload.nodes) {
     const isRoot = roots.has(node.id)
@@ -144,8 +152,8 @@ export function pasteNodes(draft: SceneDocument, payload: ClipboardPayload, opti
         s: [...node.transform.s],
       },
       // Shared, not cloned: a duplicate should be made of the same material.
-      overrides: { ...node.overrides },
-      ...(node.assetRef ? { assetRef: { ...node.assetRef } } : {}),
+      overrides: dropMissingMaterial(node.overrides, materials),
+      ...(node.assetRef ? { assetRef: assets.has(node.assetRef.assetId) ? { ...node.assetRef } : null } : {}),
       ...(node.primitive ? { primitive: { ...node.primitive } } : {}),
       ...(node.light ? { light: { ...node.light } } : {}),
     }
@@ -153,6 +161,20 @@ export function pasteNodes(draft: SceneDocument, payload: ClipboardPayload, opti
     created.push(copy)
   }
   return created
+}
+
+/**
+ * Strips a material override the target document can no longer resolve.
+ *
+ * The node then renders with its asset's own material, which is what it would have done had
+ * the override never been set — the one outcome that is not a lie.
+ */
+function dropMissingMaterial(overrides: Node['overrides'], materials: ReadonlySet<string>): Node['overrides'] {
+  const copy = { ...overrides }
+  if (copy.materialId !== undefined && copy.materialId !== null && !materials.has(copy.materialId)) {
+    delete copy.materialId
+  }
+  return copy
 }
 
 /** Copy + paste in one step, for Ctrl+D. Returns the new nodes, or an empty array. */

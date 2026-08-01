@@ -202,6 +202,32 @@ describe('pasteNodes', () => {
     expect(new Set(ids).size, '三个新节点必须拿到三个不同的 id').toBe(ids.length)
   })
 
+  it('drops a reference the document can no longer resolve (M10 审查所得)', () => {
+    // A clipboard is a snapshot. Between Ctrl+C and Ctrl+V the material or the asset it
+    // points at can stop existing; pasting the reference anyway lands an I3 error in the
+    // user's 体检 panel for something they cannot see, cannot select and cannot repair.
+    const before = createGoldenPathDocument()
+    const payload = copyNodes(before, [IDS.body, IDS.cover])!
+
+    const after = produce(before, (draft) => {
+      draft.materials = draft.materials.filter((m) => m.id !== IDS.material)
+      draft.assets = []
+      for (const node of draft.nodes) {
+        if (node.overrides.materialId === IDS.material) delete node.overrides.materialId
+        node.assetRef = null
+      }
+      pasteNodes(draft, payload, { ctx: ctx() })
+    })
+
+    expect(errorsOf(checkIntegrity(after)), '粘贴不得引入文档解析不了的引用').toEqual([])
+    const copies = after.nodes.slice(-2)
+    expect(copies.map((n) => n.overrides.materialId)).toEqual([undefined, undefined])
+    expect(copies.map((n) => n.assetRef)).toEqual([null, null])
+    // …and the nodes themselves still arrive: dropping them would make Ctrl+V do nothing at
+    // all, which is worse than an empty placeholder the user can see and delete.
+    expect(copies.map((n) => n.name)).toEqual(['泵体', '阀盖'])
+  })
+
   it('pastes twice without colliding with itself', () => {
     const before = createGoldenPathDocument()
     const payload = copyNodes(before, [IDS.pump])!

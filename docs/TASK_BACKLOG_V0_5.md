@@ -312,6 +312,28 @@
 - **验收** 粘贴后 `checkIntegrity` 零 error；undo 一步整树消失；输入框聚焦时快捷键不误触发（沿 T-071 语义）
 - **自测** `pnpm -F @w3/editor test clipboard`
 
+### [ ] T-146 · 库模型拖放、幽灵预览与双击落点（M10 审查补票）
+- **依赖** T-141, T-142, T-143 · **预估** 0.8d · **实际** ___
+- **独占** `packages/core/src/runtime/scene-runtime.ts`（新增 `boundsOf`）, `packages/editor/src/viewport/drag.ts`（增）, `packages/editor/src/viewport/Viewport.tsx`, `packages/editor/src/panels/LibraryPanel.tsx`, `packages/editor/test/drag.test.ts`（增）
+- **为什么存在** M10 收尾审查抓到三条「卡面写了、代码没接」：库模型的拖放 MIME 全仓无人接收；
+  T-142 明写的幽灵预览一个字都没有（`resolveDropPoint` 的 `exclude` 与 `offsetToRestOn` 都是
+  为它写的，双双零调用者）；双击落点是世界原点而非视口中心地面。三条同源，合成一张卡修。
+- **做**
+  1. `SceneRuntime.boundsOf(nodeIds)` → 子树的世界包围盒（`Bounds | null`）。库模型的落点必须
+     等资产建出来才量得到，`offsetToRestOn` 缺的就是这个输入。
+  2. 编辑器侧拖拽会话 `drag.ts`（模块级，同 `snap.ts` 的理由）：`dragover` 期间浏览器**不给**
+     `dataTransfer.getData`，只给 `types`，所以"正在拖的是什么"必须由 `dragstart` 存下来。
+  3. 视口接受 `application/x-w3-library`：落点先解析（指针坐标只在此刻有效）→ 导入 → 用
+     `boundsOf` 量出包围盒 → `offsetToRestOn` 定位 → **一条 commit**。
+  4. 原始体的幽灵预览：`dragover` 首帧 `previewStart` + `preview` 建幽灵节点，其后每帧只改
+     transform（落点解析带 `exclude: {幽灵}`，否则它每帧撞到自己往上爬一个包围盒），
+     `dragleave` → `previewAbort`，`drop` → `previewCommit`。库模型不做幽灵（导入前量不出
+     包围盒），这条**明确登记为差异**，不假装做了。
+  5. 双击落点：视口中心射线打地平面，无交点回落原点。
+- **验收** 拖库模型进视口真的多出对象且落在光标下；幽灵预览期间撤销栈深度不变、松手后恰好 +1；
+  拖出视口再放手不留残留节点；双击在转过视角后仍落在画面内
+- **自测** `pnpm -F @w3/editor test drag && pnpm -F @w3/core test bounds`
+
 ### [x] T-145 · 内置库 manifest 机制与 starter 内容
 - **依赖** T-120 · **预估** 0.8d · **实际** 0.7h
 - **独占** `packages/editor/public/library/**`, `scripts/gen-library-starter.mjs`, `scripts/check-library-manifest.mjs`, `docs/LICENSES_LIBRARY.md`
