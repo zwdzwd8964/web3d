@@ -25,7 +25,14 @@ export default defineConfig({
       // SHELL crashes it on launch (exit 0xC000027B), and the shell is what Playwright
       // picks by default — hence `channel: 'chromium'` below, which runs the full
       // browser in new-headless mode and does support WebGL.
-      args: ['--enable-unsafe-swiftshader'],
+      //
+      // `--autoplay-policy=no-user-gesture-required` is about the HARNESS, not the product.
+      // Chromium blocks audio until it decides the user has interacted, and a synthetic
+      // Playwright click does not always count — so without this the runtime's playing
+      // state is false for a reason that has nothing to do with the code under test.
+      // The product's own answer to a blocked play is covered where it belongs, in
+      // `media-bus.test.ts` (risk V3): it resolves and warns so the rule chain survives.
+      args: ['--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
     },
   },
 

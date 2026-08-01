@@ -584,18 +584,29 @@
 
 ## E17 · 质量收口
 
-### [ ] T-170 · 黄金路径 II E2E　**← 阻塞中，缺 T-137**
-- **依赖** 全部功能卡（**含新开的 T-137**） · **预估** 1d · **实际** 进行中 1.0h
-- **当前状态**：`e2e/tests/golden-path-2.spec.ts` 已建，**12 步里 4 步可跑**（①②③④），标了
-  `test.fixme` 以免把 `pnpm test:e2e` 变成一个大家学会忽略的东西。
-  第 ⑤ 步差 T-154 的「分离后应用 / 应用到全部」二选一没答；第 ⑥⑨⑩⑪ 步**做不出来**——
-  编辑器里没有创建灯光的入口（见 T-137）。
-  已完成且可复用的部分：`e2e/fixtures/gen-media-fixtures.mjs`（程序化生成 warning.png 与
-  1.5s 精确时长的 alarm.wav）、`__w3DevMediaPlaying` 与 `__w3DevDoc` 两个 DEV 只读钩子。
-- **独占** `e2e/tests/golden-path-2.spec.ts`, `e2e/fixtures/gen-media-fixtures.mjs`（生成 warning.png / alarm.wav）
+### [x] T-170 · 黄金路径 II E2E
+- **依赖** 全部功能卡（含 T-137） · **预估** 1d · **实际** 2.2h
+- **独占** `e2e/tests/golden-path-2.spec.ts`, `e2e/fixtures/gen-media-fixtures.mjs`
+  （+ `e2e/playwright.config.ts`：给测试台加 `--autoplay-screening` 例外，理由见下；
+  + `packages/core/src/assets/audit.ts`：修本卡抓到的 blocker；
+  + `packages/editor/src/viewport/runtime-registry.ts`：`__w3DevMediaPlaying` / `__w3DevDoc` 两个只读钩子）
 - **做** 进化规划 §2 的 12 步逐步覆盖；音频断言用运行时状态（`isMediaPlaying`）不断言声卡；断言 `fullRebuildCount === 0`；**黄金路径 I 的 spec 文件不改且保持全绿**；每步断言附变异检验（V6，防止重蹈 T-115 修的覆辙）。
 - **验收** 连跑 5 次零 flaky；两条黄金路径同时全绿
 - **自测** `pnpm test:e2e`
+- **实际情况**：**第 ⑫ 步抓到一个 blocker**——`asset.stats` 是 `.strict()`，而 `grade()` 用的是
+  「排掉一个已知键、其余全留」的黑名单写法，于是 T-150 / T-160 新增的六个测量键
+  （`imageBytes` / `hdriBytes` / `imageSize` / `nonPowerOfTwo` / `audioBytes` / `videoBytes`）
+  全部漏进了文档。后果：**凡是导入过图片、HDRI 或音频的项目都发布不出去**。
+  而在此之前没有一条测试是红的——面板用 `checkIntegrity`（它不重跑 schema 校验），
+  导入测试也全都只断言 `checkIntegrity`。这是仓库里**第一次真的把一份含 v0.5 资产的文档发布出去**。
+  已改成显式白名单投影（黑名单只会再漏一次），并在 `import-flow.test.ts` 补了三条
+  **`validate` 级别**的回归（图片 / 音频 / 模型各一），变异 U1 把黑名单换回来 → 两条转红。
+  第 ⑫ 步的「断网」用**掐断所有外部源**而不是 `context.setOffline(true)`：后者连本地开发服务器
+  一起掐，重载失败的原因就变成"页面自己取不到"，与产品依不依赖外网无关——那测的是测试台。
+  现在断言的是「发布出去的包一个外部地址都不请求」，这才是 C6 的原话。
+  `--autoplay-policy=no-user-gesture-required` 加在 playwright 配置里，同样是测试台的事：
+  Chromium 在它认定用户交互过之前不放音频，而合成点击不一定算数。**产品自己对"被拒绝播放"
+  的处理在 `media-bus.test.ts` 里测**（风险 V3：resolve + warn，让规则链活下去）。
 
 ### [ ] T-171 · parity 扩展（灯光 / 媒体轨迹）
 - **依赖** T-135, T-163, T-170 · **预估** 0.5d · **实际** ___

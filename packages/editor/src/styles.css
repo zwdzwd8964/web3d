@@ -1222,3 +1222,13 @@ code {
 .library-grid__shape--light[data-light='spot']::after {
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
+
+/* T-137 · carrier icon in the hierarchy tree. A light and a primitive have no thumbnail
+   and no children, so without a glyph they are indistinguishable from an empty group. */
+.tree-row__icon {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: #8d99a5;
+  font-size: 11px;
+}

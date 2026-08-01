@@ -134,8 +134,26 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
             .map((f) => `${labelOf(f)} ${formatMetric(f.value, unitOf(f))}（限 ${formatMetric(f.limit, unitOf(f))}）`)
             .join('；')}。`
 
-  const { maxTextureSize: _dropped, ...stats } = measurements
-  void _dropped
+  // A WHITELIST, not a blacklist. This used to be `const { maxTextureSize: _dropped, ...rest }`
+  // — drop the one key that is not part of `AssetStats` and keep everything else — and every
+  // measurement added afterwards leaked straight into the document. `AssetStatsSchema` is
+  // `.strict()`, so the leak turned every imported image, HDRI and audio file into a
+  // document that **could not be published**: the panels use `checkIntegrity`, which does
+  // not re-validate the schema, so the editor showed a healthy project right up until the
+  // publish gate refused it.
+  //
+  // Found by golden path II step ⑫ (T-170), which is the first thing in the repo that ever
+  // published a document containing a v0.5 asset. The import tests all asserted
+  // `checkIntegrity` and none of them asserted `validate`.
+  const stats: AssetStats = {
+    tris: measurements.tris,
+    materials: measurements.materials,
+    textures: measurements.textures,
+    bytes: measurements.bytes,
+    textureBytes: measurements.textureBytes,
+    nodes: measurements.nodes,
+    animations: [...measurements.animations],
+  }
 
   return {
     stats,

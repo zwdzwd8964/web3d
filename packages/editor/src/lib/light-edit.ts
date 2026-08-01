@@ -181,12 +181,12 @@ export function setLightShadow(
 }
 
 /**
- * True when the document has no light of its own.
+ * True when the document has no light of its own — re-exported, NOT re-implemented.
  *
- * D14 · core attaches the built-in three-light rig only while this holds, and takes it away
- * the moment the user adds their first light. The panel says so, because otherwise the first
- * light a user creates appears to make the scene DARKER — the rig left, and one weak lamp
- * replaced it. Explaining that once is cheaper than the bug report.
+ * `needsDefaultLightRig` is the schema's own predicate and the one `SceneRuntime` uses to
+ * decide whether the built-in rig stands down (D14). A second copy here would be a second
+ * definition of the same truth, and the day they disagreed the panel would say the rig is
+ * gone while the renderer still had it — the exact class of divergence the contract test
+ * exists to catch elsewhere. Caught by review before it could drift.
  */
-export const usingDefaultRig = (doc: SceneDocument): boolean =>
-  doc.nodes.every((n) => n.light === null) && doc.meta.environment.hdriAssetId === null
+export { needsDefaultLightRig as usingDefaultRig } from '@w3/schema'

@@ -1,4 +1,4 @@
-import { checkIntegrity, createGoldenPathDocument, errorsOf } from '@w3/schema'
+import { checkIntegrity, createGoldenPathDocument, errorsOf, validate } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { buildSamplePumpGlb } from '@w3/core'
 import { Document, NodeIO } from '@gltf-transform/core'
@@ -9,6 +9,7 @@ import {
   applyImport,
   classifyImport,
   importAsset,
+  importImage,
   importMedia,
   importModel,
   placeInstance,
@@ -544,5 +545,58 @@ describe('media import (T-160)', () => {
     const video = await importOne(createGoldenPathDocument(), '演示.mp4', 'video', 30, 11 * 1024 * 1024)
     expect(video.audit.failing.map((f) => f.metric)).not.toContain('audioBytes')
     expect(video.audit.verdict).not.toBe('block')
+  })
+})
+
+describe('every import produces a PUBLISHABLE document (T-170 抓到的 blocker)', () => {
+  // `checkIntegrity` and `validate` are two different questions, and every import test in
+  // this file had only ever asked the first. `AssetStatsSchema` is `.strict()`, and the
+  // v0.5 measurements (imageBytes / hdriBytes / imageSize / nonPowerOfTwo / audioBytes /
+  // videoBytes) were leaking into `asset.stats` — so an imported image or audio file made a
+  // document the panels called healthy and the publish gate refused. Nothing was red.
+  const pngBytes = () => {
+    // A 1×1 PNG, enough for `readImageInfo` to recognise it.
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    const ihdr = [0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]
+    return new Uint8Array([...header, ...ihdr, ...new Array(16).fill(0)]).buffer
+  }
+
+  it('an imported IMAGE leaves a document that validates', async () => {
+    const before = createGoldenPathDocument()
+    const result = await importImage(
+      { file: { name: '砖墙.png', bytes: pngBytes() }, doc: before, storage, loader: session.loader },
+      'texture',
+    )
+    const after = produce(before, (draft) => applyImport(draft, result))
+
+    expect(validate(after).ok, `发布闸门会拦住它：${JSON.stringify(errorsOf(checkIntegrity(after)))} / schema 校验未通过`).toBe(true)
+    expect(Object.keys(result.asset.stats).sort()).toEqual(
+      ['animations', 'bytes', 'materials', 'nodes', 'textureBytes', 'textures', 'tris'].sort(),
+    )
+  })
+
+  it('an imported AUDIO file leaves a document that validates', async () => {
+    const before = createGoldenPathDocument()
+    const result = await importMedia(
+      {
+        file: { name: '讲解.mp3', bytes: new ArrayBuffer(1024) },
+        doc: before,
+        storage,
+        loader: session.loader,
+        readDuration: async () => 2,
+      },
+      'audio',
+    )
+    const after = produce(before, (draft) => applyImport(draft, result))
+
+    expect(validate(after).ok, `发布闸门会拦住它：${JSON.stringify(errorsOf(checkIntegrity(after)))} / schema 校验未通过`).toBe(true)
+    expect('audioBytes' in result.asset.stats, '评级用的测量值不该进文档').toBe(false)
+  })
+
+  it('a MODEL import still validates too, so the fix did not narrow it', async () => {
+    const before = createGoldenPathDocument()
+    const result = await runImport(before, 'pump-b.glb')
+    const after = produce(before, (draft) => applyImport(draft, result))
+    expect(validate(after).ok).toBe(true)
   })
 })

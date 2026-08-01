@@ -181,6 +181,20 @@ export function HierarchyTree() {
                       ⚠
                     </span>
                   )}
+
+                  {/* T-137 · a light has no mesh, so without a glyph it looks exactly like
+                      an empty group in the tree. A light IS a node (D12), which is what
+                      makes it free — and also what makes it invisible without this. */}
+                  {row.node.light !== null && (
+                    <span className="tree-row__icon" aria-label="灯光" title="灯光">
+                      ☀
+                    </span>
+                  )}
+                  {row.node.primitive !== null && (
+                    <span className="tree-row__icon" aria-label="原始体" title="原始体">
+                      ◇
+                    </span>
+                  )}
                   {/* T-063 asks for INLINE rename. A native prompt() blocks the main
                       thread, cannot be styled, and drops a Windows dialog into the middle
                       of a dark self-drawn UI. */}

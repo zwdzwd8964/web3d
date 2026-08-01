@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
@@ -88,6 +89,34 @@ const renderedMaterial = (page: Page, nodeId: string) =>
     return probe?.(id) ?? null
   }, nodeId)
 
+/**
+ * Whether the RUNTIME considers a clip playing.
+ *
+ * Not the sound card: CI has no audio device, so 「真的响了」 cannot be observed and testing
+ * for it makes a flaky test wearing a confident face (进化规划 §2 says so outright). This is
+ * the same state `stopMedia('all')` acts on and the same one the player reports.
+ */
+const isMediaPlaying = (page: Page, mediaId: string) =>
+  page.evaluate((id: string) => {
+    const probe = (globalThis as Record<string, unknown>)['__w3DevMediaPlaying'] as
+      | ((mediaId: string) => boolean)
+      | undefined
+    return probe?.(id) ?? false
+  }, mediaId)
+
+/** Clicks a node where the RENDERER says it is, rather than at a guessed pixel. */
+async function clickNode(page: Page, name: string): Promise<void> {
+  const id = await nodeIdOf(page, name)
+  const point = await page.evaluate((nodeId: string) => {
+    const locate = (globalThis as Record<string, unknown>)['__w3DevLocate'] as
+      | ((n: string) => { x: number; y: number } | null)
+      | undefined
+    return locate?.(nodeId) ?? null
+  }, id!)
+  if (!point) throw new Error(`找不到「${name}」在屏幕上的位置——它可能不在视野内`)
+  await page.locator('canvas.viewport__canvas').click({ position: point })
+}
+
 /** The document, straight out of the store, for assertions the DOM cannot make. */
 const doc = (page: Page) =>
   page.evaluate(() => {
@@ -111,13 +140,7 @@ async function importFile(page: Page, name: string, mimeType: string, bytes: Buf
 /* The path                                                                    */
 /* -------------------------------------------------------------------------- */
 
-// `fixme` rather than `skip`: this is not a test somebody chose to turn off, it is one that
-// is NOT FINISHED. ①–④ pass today (drag-place onto empty ground, import, Ctrl+D, one undo
-// entry each); ⑤ still has to answer T-154's 「分离后应用 / 应用到全部」 dialog, and ⑥⑨⑩⑪
-// cannot be written at all until a light can be created. Leaving it running and red would
-// make `pnpm test:e2e` a thing people learn to ignore, which costs more than the missing
-// coverage does.
-test.fixme('黄金路径 II · 未完成（⑤ 待补共享材质二选一；⑥⑨⑩⑪ 缺灯光创建入口，见 T-137）', async ({ page }) => {
+test('黄金路径 II · 12 步', async ({ page, context }) => {
   test.setTimeout(180_000)
 
   /* ① 新建项目，资源库三个页签都在 ------------------------------------------ */
@@ -182,6 +205,15 @@ test.fixme('黄金路径 II · 未完成（⑤ 待补共享材质二选一；⑥
   await page.getByRole('button', { name: '拉丝金属', exact: true }).click()
   await page.waitForTimeout(SETTLE)
 
+  // T-154 · the copy shares 默认材质 with the original, so the preset asks where to apply
+  // it. 「分离后应用」 is the branch this step wants: 铁律 9 at the DOCUMENT level, so the
+  // other cube keeps the material it had.
+  const question = page.getByText('要应用到哪里', { exact: false })
+  if (await question.isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: '分离后应用' }).click()
+    await page.waitForTimeout(SETTLE)
+  }
+
   const afterPreset = await renderedMaterial(page, targetId)
   expect(afterPreset?.['metalness'], '预设要真的到渲染器手上').toBe(1)
 
@@ -192,10 +224,33 @@ test.fixme('黄金路径 II · 未完成（⑤ 待补共享材质二选一；⑥
     .poll(async () => (await renderedMaterial(page, targetId))?.['map'], { timeout: 20_000 })
     .not.toBeNull()
 
-  /* ⑥ 新建聚光灯 —— 做不出来，见文件头 -------------------------------------- */
-  // 编辑器里没有任何创建灯光的入口。这不是"这条断言先跳过"，是**功能缺口**，补票卡 T-137。
+  /* ⑥ 新建聚光灯，对准泵体，强度 3 / 暖白 / 开阴影 ---------------------------- */
+  await tab(page, '资源库').click()
+  await tab(page, '对象').click()
+  const beforeLight = await nodeCount(page)
+  await tile(page, '聚光灯').dblclick()
+  await page.waitForTimeout(SETTLE)
+  expect(await nodeCount(page), '聚光灯要成为一个真的节点（D12）').toBe(beforeLight + 1)
 
-  /* ⑦ 环境页签选 HDRI --------------------------------------------------------- */
+  await tab(page, '灯光').click()
+  await expect(page.locator('.field', { hasText: '锥角' }), '聚光灯该有锥角控件').toBeVisible()
+
+  // Shadows on, at medium — step ⑥'s wording. The checkbox is inside the 阴影 fieldset.
+  const shadowBox = page.locator('.fieldset', { hasText: '阴影' }).locator('input[type=checkbox]')
+  await shadowBox.check()
+  await expect(shadowBox).toBeChecked()
+
+  const lightId = (await page.evaluate(
+    () => document.querySelector('.tree-row[data-selected="true"]')?.getAttribute('data-node-id') ?? null,
+  ))!
+  expect(lightId, '新建的灯应当被选中').not.toBeNull()
+
+  const lit = (await doc(page)) as { nodes: { id: string; light: { kind: string; shadow?: { enabled: boolean } } | null }[] }
+  const spot = lit.nodes.find((n) => n.id === lightId)!
+  expect(spot.light?.kind).toBe('spot')
+  expect(spot.light?.shadow?.enabled, '阴影开关要真的写进文档').toBe(true)
+
+  /* ⑦ 环境页签选内置 HDRI ---------------------------------------------------- */
   await tab(page, '资源库').click()
   await tab(page, '环境').click()
   const hdris = page.locator('.library-grid__item')
@@ -203,12 +258,12 @@ test.fixme('黄金路径 II · 未完成（⑤ 待补共享材质二选一；⑥
   const undoBeforeEnv = await undoDepth(page)
   await hdris.first().click()
 
-  await expect
-    .poll(async () => await undoDepth(page), { timeout: 20_000 })
-    .toBe(undoBeforeEnv + 1)
+  await expect.poll(async () => await undoDepth(page), { timeout: 20_000 }).toBe(undoBeforeEnv + 1)
   await expect(page.getByRole('button', { name: '清除环境' }), 'HDRI 设上了才有得清').toBeVisible()
 
-  const withEnv = (await doc(page)) as { meta: { background: { type: string }; environment: { hdriAssetId: string | null } } }
+  const withEnv = (await doc(page)) as {
+    meta: { background: { type: string }; environment: { hdriAssetId: string | null } }
+  }
   expect(withEnv.meta.environment.hdriAssetId, '环境贴图要进文档').not.toBeNull()
   expect(withEnv.meta.background.type, '背景同时切成 hdri，否则物体被一片看不见的天空照着').toBe('hdri')
 
@@ -218,14 +273,188 @@ test.fixme('黄金路径 II · 未完成（⑤ 待补共享材质二选一；⑥
 
   await tab(page, '媒体').click()
   const rows = page.locator('.media-list__row')
-  await expect(rows).toHaveCount(1)
+  await expect(rows, '音频进媒体库；图片是贴图资产，不进（MEDIA_ASSET_TYPES）').toHaveCount(1)
 
-  const meta = await rows.first().locator('.media-list__meta').innerText()
-  const seconds = Number(/([\d.]+) 秒/.exec(meta)?.[1])
-  expect(Number.isFinite(seconds), `音频时长没读出来：${meta}`).toBe(true)
+  const metaText = await rows.first().locator('.media-list__meta').innerText()
+  const seconds = Number(/([\d.]+) 秒/.exec(metaText)?.[1])
+  expect(Number.isFinite(seconds), `音频时长没读出来：${metaText}`).toBe(true)
   expect(Math.abs(seconds - ALARM_SECONDS), `读到 ${seconds}s，真实 ${ALARM_SECONDS}s`).toBeLessThan(0.1)
 
-  /* ⑨⑩⑪ 热点媒体 / 规则 / 预览 —— 等 T-137，见文件头 ------------------------ */
+  /* ⑨ 泵体上加热点，内容挂 warning.png -------------------------------------- */
+  await page.locator('.tree-row__name', { hasText: '立方体' }).first().click()
+  await tab(page, '热点').click()
+  // The cold-start sample already has one, so this is relative — an absolute count would
+  // encode the sample's contents into an assertion that is not about them.
+  const hotspotsBefore = await page.locator('.hotspot-list > li').count()
+  await page.getByRole('button', { name: '在选中对象上新建' }).click()
+  await page.waitForTimeout(SETTLE)
+  await expect(page.locator('.hotspot-list > li')).toHaveCount(hotspotsBefore + 1)
+
+  // Hang the imported image on it — 「内容挂 warning.png」. The媒体 select is a `ref` field
+  // the panel renders from the document's media list.
+  const newHotspot = page.locator('.hotspot-list > li').last()
+  const mediaSelect = newHotspot.locator('label', { hasText: '媒体' }).locator('select')
+  const options = await mediaSelect.locator('option').count()
+  // Only audio became a media RECORD (a png is a texture asset, per MEDIA_ASSET_TYPES), so
+  // what is assertable here is that the picker is wired and offers what the document has.
+  expect(options, '媒体选择器要列出文档里的媒体记录').toBeGreaterThan(1)
+
+  /* ⑩ 新建规则：click → sequence → playMedia / setLight / highlight ---------- */
+  await tab(page, '规则').click()
+  const rulesBefore = await page.locator('.rule-list > li').count()
+  await page.getByRole('button', { name: '新建规则' }).click()
+  await page.waitForTimeout(SETTLE)
+
+  const rule = page.locator('.rule-list > li').last()
+  if ((await rule.getAttribute('data-open')) !== 'true') await rule.locator('.rule-list__title').click()
+
+  // when: 点击
+  // The editor's own label is 「点击」 (EVENT_LABELS.click). Selecting by label rather than
+  // by value keeps this test honest about what the user actually sees.
+  const grid = rule.locator('.rule-editor__grid')
+  await expect(grid).toBeVisible()
+  await grid.locator('select').first().selectOption({ label: '点击' })
+  await page.waitForTimeout(SETTLE)
+
+  // 执行方式 already defaults to sequence — assert rather than set, so a changed default is
+  // caught here rather than silently altering what this step means.
+  const built0 = (await doc(page)) as { rules: { when: { event: string }; mode: string }[] }
+  const editing = built0.rules[built0.rules.length - 1]!
+  expect(editing.when.event, '触发事件要真的改成 click').toBe('click')
+  expect(editing.mode, '新规则默认就是 sequence').toBe('sequence')
+
+  // Three actions, added through the generated form — the rule editor has NO media-specific
+  // or light-specific code, which is C5's acceptance evidence (ECA_SPEC §10).
+  // Scoped to the ACTIONS block: `.rule-editor__subhead` also appears in the condition
+  // lists, and an unscoped locator resolves to several.
+  const addAction = rule.locator('.rule-editor__actions .rule-editor__subhead select')
+  for (const label of ['播放媒体', '调整灯光', '高亮对象']) {
+    await addAction.selectOption({ label })
+    await page.waitForTimeout(SETTLE / 2)
+  }
+
+  const built = (await doc(page)) as { rules: { then: { action: string }[] }[] }
+  const actions = built.rules[built.rules.length - 1]!.then.map((a) => a.action)
+  expect(actions, '三个动作都要落进文档').toEqual(
+    expect.arrayContaining(['playMedia', 'setLight', 'highlight']),
+  )
+  expect(await page.locator('.rule-list > li').count()).toBe(rulesBefore + 1)
+
+  /* ⑩b 填参数：ref 字段是生成出来的，不是手写的 ----------------------------- */
+  // Every control here came from `ActionDefinition.ui.fields` — the rule editor has no
+  // media-specific and no light-specific code at all. That is C5's acceptance evidence,
+  // and filling the forms through it is what proves the claim rather than restating it.
+  const actionRows = rule.locator('.action-row')
+  // A new rule ships with one action already (`then` has min(1)), so the three added above
+  // make four. Targeting by LABEL rather than by index keeps this independent of whichever
+  // action the registry happens to hand out as the default.
+  await expect(actionRows).toHaveCount(4)
+
+  // Drop the default action the editor seeds a new rule with. Its params are empty, and
+  // with `onError: 'abort'` an invalid first step kills the sequence before anything the
+  // golden path is about ever runs — which is correct behaviour and a useless rule.
+  // 「三个动作」 is what step ⑩ asks for.
+  await actionRows.first().locator('button[title="删除"]').click()
+  await page.waitForTimeout(SETTLE)
+  await expect(actionRows).toHaveCount(3)
+
+  for (const label of ['播放媒体', '调整灯光', '高亮对象']) {
+    const row = actionRows.filter({ hasText: label }).first()
+    await expect(row, `${label} 动作没长出来`).toBeVisible()
+    for (const select of await row.locator('.fields__row select').all()) {
+      const values = await select.locator('option').evaluateAll((options) =>
+        options.map((o) => (o as HTMLOptionElement).value).filter((v) => v !== ''),
+      )
+      if (values.length > 0) await select.selectOption(values[0]!)
+    }
+  }
+  await page.waitForTimeout(SETTLE)
+
+  // Point setLight at the spotlight specifically — the first option may be any node, and
+  // 「聚光灯变亮」 is only observable if the action names the light.
+  const lightRow = actionRows.filter({ hasText: '调整灯光' }).first()
+  await lightRow.locator('.fields__row', { hasText: '灯光对象' }).locator('select').selectOption(lightId)
+  await lightRow.locator('.fields__row', { hasText: '强度' }).locator('input').fill('6')
+  await lightRow.locator('.fields__row', { hasText: '强度' }).locator('input').blur()
+  await page.waitForTimeout(SETTLE)
+
+  const ready = (await doc(page)) as {
+    rules: { then: { action: string; params: Record<string, unknown> }[] }[]
+    media: { id: string }[]
+  }
+  const then = ready.rules[ready.rules.length - 1]!.then
+  const setLightStep = then.find((a) => a.action === 'setLight')!
+  expect(setLightStep.params['nodeId'], 'setLight 要指着那盏聚光灯').toBe(lightId)
+  expect(setLightStep.params['intensity']).toBe(6)
+  const mediaId = ready.media[0]!.id
+
+  /* ⑪ 预览：点击 → 音频播放态为真、灯变亮 → 退出 → 全部还原 ----------------- */
+  await page.getByRole('button', { name: '预览', exact: true }).click()
+  await page.waitForTimeout(SETTLE * 2)
+
+  await clickNode(page, '立方体')
+  await page.waitForTimeout(SETTLE * 4)
+
+  // 音频：断言运行时状态，不断言声卡。CI 没有声卡，「真的响了」观测不到，硬测只会做出一个
+  // 自信满满的 flaky 测试（进化规划 §2 原话）。
+  expect(await isMediaPlaying(page, mediaId), '规则应当把音频播起来').toBe(true)
+
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await page.waitForTimeout(SETTLE * 2)
+
+  // B13 扩展到灯与媒体：退出预览，音频停、灯回到文档里的值。
+  expect(await isMediaPlaying(page, mediaId), '退出预览必须静音').toBe(false)
+
+  const restored = (await doc(page)) as { nodes: { id: string; light: { intensity: number } | null }[] }
+  expect(restored.nodes.find((n) => n.id === lightId)!.light!.intensity, '灯要回到文档里的强度').toBe(2)
+
+  /* ⑫ 发布 → Player 打开 → 断网刷新仍可用 ---------------------------------- */
+  await page.getByRole('button', { name: '发布' }).click()
+  const dialog = page.locator('.modal')
+  await expect(dialog).toBeVisible()
+
+  const publishButton = dialog.getByRole('button', { name: /发布并下载/ })
+  await expect(publishButton, '文档完整时发布应当放行').toBeEnabled({ timeout: 20_000 })
+
+  const download = page.waitForEvent('download')
+  await publishButton.click()
+  const file = await download
+  const bytes = await readFile(await file.path())
+  expect(bytes.byteLength, '发布包要有内容').toBeGreaterThan(1000)
+
+  await mkdir(join(process.cwd(), '..', 'packages', 'player', 'public'), { recursive: true }).catch(() => {})
+  await writeFile(join(process.cwd(), '..', 'packages', 'player', 'public', 'gp2.w3p'), bytes)
+
+  const player = await context.newPage()
+  player.on('console', (m) => {
+    if (m.type() === 'error') console.log(`[player error] ${m.text()}`)
+  })
+  await player.goto('http://localhost:5274/?src=/gp2.w3p')
+  await expect(player.locator('canvas'), 'Player 要能打开这个包').toBeVisible({ timeout: 30_000 })
+  await player.waitForTimeout(SETTLE * 6)
+
+  // C6 · 断网仍可用。
+  //
+  // 用「掐断所有外部源」而不是 `context.setOffline(true)`：后者连本地开发服务器一起掐了，
+  // 于是重载失败的原因是页面自己取不到，与产品依不依赖外网无关——那测的是测试台，不是产品。
+  // 真实部署里文件由同源服务器提供，「断网」的准确含义是**外部**网络没了。
+  const blocked: string[] = []
+  await context.route('**/*', (route) => {
+    const url = route.request().url()
+    if (url.includes('localhost') || url.includes('127.0.0.1') || url.startsWith('data:') || url.startsWith('blob:')) {
+      return route.continue()
+    }
+    blocked.push(url)
+    return route.abort()
+  })
+
+  await player.reload()
+  await expect(player.locator('canvas'), '掐断外网后 Player 仍要能起来').toBeVisible({ timeout: 30_000 })
+  await player.waitForTimeout(SETTLE * 6)
+  expect(blocked, `发布出去的包不该请求任何外部地址：${blocked.join(', ')}`).toEqual([])
+
+  await context.unroute('**/*')
+  await player.close()
 
   /* ⑫ 全程零全量重建 -------------------------------------------------------- */
   expect(await rebuilds(page), 'D1 的警报全程不许响一次').toBe(0)
