@@ -1,5 +1,7 @@
-import type { SceneDocument } from '@w3/schema'
-import { createGoldenPathDocument } from '@w3/schema'
+import type { Light, NodeOverrides, SceneDocument } from '@w3/schema'
+import { createGoldenPathDocument, identityTransform } from '@w3/schema'
+import { PCFSoftShadowMap } from 'three'
+import type { SpotLight } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionRegistry, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { EcaEngine } from '../../src/eca/engine.js'
@@ -21,14 +23,25 @@ import { buildPumpGlb } from '../assets/glb.js'
  * mode where every test is green and the product is broken (ECA_SPEC §6).
  */
 
-/** A stand-in for WebGLRenderer. Records calls; allocates no GL context. */
+/**
+ * A stand-in for WebGLRenderer. Records calls; allocates no GL context.
+ *
+ * `shadowMap` is part of the stand-in rather than something the production code defends
+ * against being absent: a real `WebGLRenderer` always has it, and letting the double omit
+ * it would mean the runtime had to carry an `if` for a state that cannot occur in
+ * production — an untestable branch guarding against the test harness. It is also what
+ * makes T-132's acceptance ("无 GL 断言 shadowMap 开关联动") assertable at all.
+ */
 function fakeRenderer() {
   const calls = { render: 0, setSize: 0, dispose: 0 }
+  const shadowMap = { enabled: false, type: -1 }
   return {
     calls,
+    shadowMap,
     renderer: {
       calls,
       info: { memory: { geometries: 0, textures: 0 } },
+      shadowMap,
       render: () => {
         calls.render++
       },
@@ -79,7 +92,7 @@ function makeRuntime(
   files: Map<string, ArrayBuffer> = new Map(),
 ) {
   clock = 0
-  const { renderer, calls } = fakeRenderer()
+  const { renderer, calls, shadowMap } = fakeRenderer()
   const runtime = new SceneRuntime(doc, {
     canvas: canvas(),
     resolver: createMemoryResolver(files),
@@ -89,7 +102,7 @@ function makeRuntime(
     now: () => clock,
     onLog: (level, message) => logs?.push([level, message]),
   })
-  return { runtime, calls }
+  return { runtime, calls, shadowMap }
 }
 
 beforeEach(() => {
@@ -421,5 +434,197 @@ describe('the shared RuntimeContext contract', () => {
         for (let i = 0; i < 6; i++) await Promise.resolve()
       },
     }
+  })
+})
+
+/**
+ * T-132 · the shadow pipeline.
+ *
+ * Everything here runs without a GL context: the switch is a boolean on the renderer and
+ * the per-mesh effect is two booleans on an Object3D, so "does the pipeline follow the
+ * document" is fully assertable in Node. What needs a browser is whether the resulting
+ * picture actually has a shadow in it, and that is the E2E's job.
+ */
+describe('shadows (T-132)', () => {
+  const spot = (enabled: boolean): Light => ({
+    kind: 'spot',
+    color: '#ffd9a0',
+    intensity: 3,
+    range: 0,
+    decay: 2,
+    angleDeg: 30,
+    penumbra: 0.2,
+    shadow: { enabled, quality: 'medium', bias: -0.0005 },
+  })
+
+  const LIGHT_ID = 'nd_light001'
+
+  /** The golden path plus an optional light node, and optional overrides. */
+  function docWith(options: {
+    light?: Light | null
+    coverOverrides?: NodeOverrides
+    lightOverrides?: NodeOverrides
+  }): SceneDocument {
+    const base = createGoldenPathDocument()
+    const nodes = base.nodes.map((n) =>
+      n.id === IDS.cover && options.coverOverrides
+        ? { ...n, overrides: { ...n.overrides, ...options.coverOverrides } }
+        : n,
+    )
+    if (!options.light) return { ...base, nodes }
+    return {
+      ...base,
+      nodes: [
+        ...nodes,
+        {
+          id: LIGHT_ID,
+          name: '聚光灯',
+          parent: null,
+          order: 9000,
+          assetRef: null,
+          primitive: null,
+          light: options.light,
+          transform: identityTransform(),
+          visible: true,
+          locked: false,
+          overrides: options.lightOverrides ?? {},
+        },
+      ],
+    }
+  }
+
+  it('materialises a light node as a real three light, not the placeholder group', async () => {
+    // The wiring, asserted directly. The light factory (T-131) and the carrier dispatch
+    // (T-130) were both green while NOTHING CONNECTED THEM: the graph fell back to the
+    // placeholder factory, so every document light became an empty Group — a light in the
+    // hierarchy tree, a gizmo that moves it, patches that reach it, and a scene that stays
+    // exactly as dark as it was. Neither card's tests could see it; each was exercising
+    // its own half against a stand-in of the other.
+    const doc = docWith({ light: spot(true) })
+    const { runtime } = makeRuntime(doc)
+    await runtime.load(doc)
+
+    const object = runtime.graph.objectFor(LIGHT_ID)!
+    expect((object as { isLight?: boolean }).isLight, '灯节点没有变成真的灯').toBe(true)
+    const light = object as unknown as SpotLight
+    expect(light.intensity, '文档里的强度没有到达灯').toBe(3)
+    expect(light.angle, 'angleDeg 应当已转成弧度').toBeCloseTo((30 * Math.PI) / 180, 9)
+    runtime.dispose()
+  })
+
+  it('leaves the pipeline off when nothing asks for a shadow', async () => {
+    // A depth pass nobody uses is the most expensive thing this renderer can be told to do
+    // for nothing, so "off unless asked" is the behaviour, not an optimisation.
+    const doc = docWith({ light: null })
+    const { runtime, shadowMap } = makeRuntime(doc)
+    await runtime.load(doc)
+    expect(shadowMap.enabled).toBe(false)
+    expect(runtime.graph.objectFor(IDS.cover)!.castShadow).toBe(false)
+    expect(runtime.graph.objectFor(IDS.cover)!.receiveShadow).toBe(false)
+    runtime.dispose()
+  })
+
+  it('a light with shadows off does not switch the pipeline on', async () => {
+    // The discriminating case: a light EXISTS here, so "any light at all" would pass.
+    const doc = docWith({ light: spot(false) })
+    const { runtime, shadowMap } = makeRuntime(doc)
+    await runtime.load(doc)
+    expect(shadowMap.enabled).toBe(false)
+    expect(runtime.graph.objectFor(IDS.cover)!.castShadow).toBe(false)
+    runtime.dispose()
+  })
+
+  it('one shadow-casting light turns it on, and meshes cast and receive by default', async () => {
+    const doc = docWith({ light: spot(true) })
+    const { runtime, shadowMap } = makeRuntime(doc)
+    await runtime.load(doc)
+    expect(shadowMap.enabled).toBe(true)
+    // PCFSoft, not the hard-edged default: on the large flat surfaces this product is used
+    // on, plain PCF reads as a rendering artefact rather than as a shadow.
+    expect(shadowMap.type).toBe(PCFSoftShadowMap)
+    for (const id of [IDS.body, IDS.cover]) {
+      expect(runtime.graph.objectFor(id)!.castShadow, id).toBe(true)
+      expect(runtime.graph.objectFor(id)!.receiveShadow, id).toBe(true)
+    }
+    runtime.dispose()
+  })
+
+  it('node overrides turn one node off without touching its siblings', async () => {
+    const doc = docWith({ light: spot(true), coverOverrides: { castShadow: false } })
+    const { runtime } = makeRuntime(doc)
+    await runtime.load(doc)
+
+    const cover = runtime.graph.objectFor(IDS.cover)!
+    expect(cover.castShadow, '阀盖 被单独关掉投射').toBe(false)
+    expect(cover.receiveShadow, '关掉投射不该把接收一起关掉').toBe(true)
+    expect(runtime.graph.objectFor(IDS.body)!.castShadow, '兄弟节点不受影响').toBe(true)
+    runtime.dispose()
+  })
+
+  it('does not write the mesh overrides onto a light node', async () => {
+    // `castShadow` on a light means "this light casts", and it comes from
+    // `light.shadow.enabled`. If the node walk did not skip lights, this override would
+    // silently switch a light's shadow off through an unrelated control.
+    const doc = docWith({ light: spot(true), lightOverrides: { castShadow: false } })
+    const { runtime } = makeRuntime(doc)
+    await runtime.load(doc)
+    expect(runtime.graph.objectFor(LIGHT_ID)!.castShadow).toBe(true)
+    runtime.dispose()
+  })
+
+  it('follows a patch that switches the last shadow off, without a full rebuild', async () => {
+    const on = docWith({ light: spot(true) })
+    const off = docWith({ light: spot(false) })
+    const { runtime, shadowMap } = makeRuntime(on)
+    await runtime.load(on)
+    expect(shadowMap.enabled).toBe(true)
+
+    runtime.applyPatch([{ op: 'replace', path: ['nodes', 3, 'light', 'shadow', 'enabled'], value: false }], off, on)
+    expect(shadowMap.enabled).toBe(false)
+    expect(runtime.graph.objectFor(IDS.cover)!.castShadow, '关掉后 mesh 标志位要跟着复位').toBe(false)
+    expect(runtime.fullRebuildCount, '这条 patch 不该回落全量重建').toBe(0)
+    runtime.dispose()
+  })
+
+  it('rewrites the flags after a rebuild, where every Object3D is new', async () => {
+    const doc = docWith({ light: spot(true) })
+    const { runtime } = makeRuntime(doc)
+    await runtime.load(doc)
+    // A second load rebuilds the graph from scratch. The on/off state has not moved, so
+    // only the forced re-application keeps the new objects correct.
+    await runtime.load(doc)
+    expect(runtime.graph.objectFor(IDS.cover)!.castShadow).toBe(true)
+    runtime.dispose()
+  })
+
+  it('reaches the geometry inside a node, and stops at the next node', async () => {
+    // A node materialises one Object3D that may hold several meshes, and three reads the
+    // flag per renderable object — so the whole subtree has to carry it. But a descendant
+    // that is ITSELF a document node has its own overrides, and walking through it would
+    // let a parent silently override its child.
+    const bytes = await buildPumpGlb()
+    const doc = docWith({ light: spot(true), coverOverrides: { castShadow: false } })
+    const files = new Map([[doc.assets[0]!.url, bytes]])
+    clock = 0
+    const runtime = new SceneRuntime(doc, {
+      canvas: canvas(),
+      resolver: createMemoryResolver(files),
+      mode: 'play',
+      createRenderer: () => fakeRenderer().renderer,
+      now: () => clock,
+    })
+    await runtime.load(doc)
+
+    const body = runtime.graph.objectFor(IDS.body)!
+    let meshes = 0
+    body.traverse((child) => {
+      if ((child as { isMesh?: boolean }).isMesh !== true) return
+      meshes++
+      expect(child.castShadow, '节点内部的 mesh 也要拿到标志位').toBe(true)
+    })
+    expect(meshes, '这份 GLB 里 泵体 应当真的有 mesh').toBeGreaterThan(0)
+
+    expect(runtime.graph.objectFor(IDS.cover)!.castShadow, '被单独关掉的节点不受父级影响').toBe(false)
+    runtime.dispose()
   })
 })

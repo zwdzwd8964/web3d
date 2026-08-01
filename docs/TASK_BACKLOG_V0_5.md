@@ -156,12 +156,17 @@
   旧 map → 红（three 只在首次按 mapSize 分配，不 dispose 的话"高"档永远还在 512 渲染，
   控件看起来什么也没干）。
 
-### [ ] T-132 · 阴影管线
-- **依赖** T-131 · **预估** 0.5d · **实际** ___
+### [x] T-132 · 阴影管线
+- **依赖** T-131 · **预估** 0.5d · **实际** 0.5h
 - **独占** `packages/core/src/runtime/scene-runtime.ts`（阴影段）, `packages/core/test/runtime/scene-runtime.test.ts`
 - **做** 存在任一 `shadow.enabled` 灯 → 开 `renderer.shadowMap`（PCFSoft），全关 → 关闭；阴影管线开启时 mesh 缺省 `castShadow = receiveShadow = true`，`node.overrides.castShadow / receiveShadow`（v0 字段，此前空转）接通生效；`bias` 应用。
 - **验收** 无 GL 断言对象标志位与 shadowMap 开关联动；overrides 关掉单个节点的投影有效
 - **自测** `pnpm -F @w3/core test scene-runtime`
+- **本卡抓到的一条 blocker**：`SceneRuntime` 从来没把真的 `lightFactory` 装进 `SceneGraph`，
+  所有 `node.light` 都落到占位工厂的空 Group —— 层级树里有灯、gizmo 能拖、patch 能到，
+  场景照样是黑的。T-131 与 T-130 各自全绿，因为两边都在对着对方的替身测。已装上并补一条
+  直接断言"灯节点必须变成真的 three 灯"的测试。`bias` 由 T-131 的 LightFactory 应用，
+  已有覆盖（light-factory.test.ts）
 
 ### [ ] T-133 · 环境与背景（HDRI / IBL）
 - **依赖** T-132 · **预估** 0.8d · **实际** ___

@@ -1,5 +1,5 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
-import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Scene, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
 import { ClipPlayer } from './animator/clip.js'
@@ -10,11 +10,12 @@ import { CameraController } from './camera-controller.js'
 import { HighlightLayer } from './highlight.js'
 import type { HotspotRenderer } from './hotspot-layer.js'
 import { HotspotProjector, NullHotspotRenderer } from './hotspot-layer.js'
+import { lightFactory } from './light-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
 import { SceneGraph } from './scene-graph.js'
-import type { AssetResolver, RuntimeMode } from './types.js'
+import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
 /**
  * T-031 · the composition root, and the production `RuntimeContext`.
@@ -70,12 +71,21 @@ export class SceneRuntime implements RuntimeContext {
   private readonly options: SceneRuntimeOptions
   private width = 1
   private height = 1
+  /** Whether any light in the document currently asks for shadows (T-132). */
+  private shadowsOn = false
 
   constructor(document: SceneDocument, options: SceneRuntimeOptions) {
     this.document = document
     this.options = options
 
-    this.graph = new SceneGraph()
+    // The real light factory, not the placeholder. Without this line every `node.light`
+    // materialises as the empty Group `carrier-types.ts` hands out when no factory is
+    // installed: the hierarchy tree shows a light, the transform gizmo moves it, patches
+    // reach it — and the scene stays exactly as dark as it was. T-131 built the factory
+    // and T-130 built the dispatch; nothing connected them, and no test in either card
+    // could see it, because both were testing their own half against a stand-in.
+    // Primitives are wired the same way by T-140.
+    this.graph = new SceneGraph({ lights: lightFactory })
     this.highlights = new HighlightLayer(this.graph, this.materials)
     this.camera = new CameraController(this.graph)
     this.picker = new Picker(this.graph)
@@ -98,12 +108,14 @@ export class SceneRuntime implements RuntimeContext {
       highlights: this.highlights,
       rebuild: (doc) => this.rebuild(doc),
       applyMeta: (doc) => this.applyBackground(doc),
+      applyNodeShadow: (doc, nodeId) => this.syncNodeShadowFlags(doc, nodeId),
       log: (level, message, data) => this.log(level, message, data),
     })
 
     this.scene.add(this.graph.root)
     this.installLighting()
     this.applyBackground(document)
+    this.syncShadows(document, true)
 
     if (options.canvas) this.attachRenderer(options.canvas)
   }
@@ -127,6 +139,53 @@ export class SceneRuntime implements RuntimeContext {
     }
   }
 
+  /* --- shadows (T-132) ---------------------------------------------------- */
+
+  /**
+   * Turns the shadow pipeline on exactly when some light asks for it.
+   *
+   * Shadow maps are the single most expensive thing this renderer can be asked to do, and
+   * a scene with no shadow-casting light must not pay for a depth pass it will never use.
+   * So the switch is derived from the document rather than left on: the same reasoning
+   * that keeps the default light rig conditional (D14).
+   *
+   * `force` re-applies the per-mesh flags even when the on/off state did not change —
+   * needed after a rebuild, where every Object3D is new and carries three's defaults.
+   */
+  private syncShadows(doc: SceneDocument, force = false): void {
+    const wanted = doc.nodes.some((node) => node.light !== null && 'shadow' in node.light && node.light.shadow.enabled)
+    if (this.renderer) {
+      this.renderer.shadowMap.enabled = wanted
+      // PCFSoft rather than plain PCF: the hard-edged default reads as an artefact on the
+      // large flat surfaces this product is mostly used on (equipment on a plinth).
+      this.renderer.shadowMap.type = PCFSoftShadowMap
+    }
+    if (!force && wanted === this.shadowsOn) return
+    this.shadowsOn = wanted
+    for (const node of doc.nodes) this.syncNodeShadowFlags(doc, node.id)
+  }
+
+  /**
+   * Writes one node's `castShadow` / `receiveShadow` onto its Object3D.
+   *
+   * With the pipeline on, a mesh casts and receives by DEFAULT — that is what makes a
+   * scene look right without the user touching anything — and `node.overrides` turns an
+   * individual node off. Those two fields were defined in v1 and did nothing until now;
+   * their shape is unchanged (SCHEMA_SPEC §4.1-7).
+   *
+   * Light nodes are skipped: `castShadow` on a light means "this light casts", which is
+   * the light factory's business and comes from `light.shadow.enabled`. Writing the node
+   * override onto it would silently disable a light's shadow through an unrelated control.
+   */
+  private syncNodeShadowFlags(doc: SceneDocument, nodeId: string): void {
+    const node = doc.nodes.find((n) => n.id === nodeId)
+    const object = this.graph.objectFor(nodeId)
+    if (!node || !object || node.light !== null) return
+    const cast = this.shadowsOn && (node.overrides.castShadow ?? true)
+    const receive = this.shadowsOn && (node.overrides.receiveShadow ?? true)
+    writeShadowFlags(object, cast, receive)
+  }
+
   private applyBackground(doc: SceneDocument): void {
     const background = doc.meta.background
     this.scene.background = background.type === 'transparent' ? null : new Color(background.color)
@@ -146,6 +205,9 @@ export class SceneRuntime implements RuntimeContext {
         }))
     this.renderer = create(canvas)
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
+    // The renderer usually arrives after the document, so the pipeline state has to be
+    // pushed onto it rather than waiting for the next edit.
+    this.syncShadows(this.document, true)
   }
 
   resize(width: number, height: number): void {
@@ -196,6 +258,9 @@ export class SceneRuntime implements RuntimeContext {
     this.graph.build(doc)
     this.materials.applyAll(doc, this.graph)
     this.applyBackground(doc)
+    // After the graph is rebuilt every Object3D is new and carries three's defaults, so
+    // the flags have to be written again even if the on/off state did not move.
+    this.syncShadows(doc, true)
     this.resetRuntimeState()
   }
 
@@ -203,6 +268,11 @@ export class SceneRuntime implements RuntimeContext {
   applyPatch(patches: readonly DocumentPatch[], next: SceneDocument, prev: SceneDocument): void {
     this.document = next
     this.patches.apply(patches, next, prev)
+    // Cheap enough to run per batch (a scan for one boolean) and the only way a light's
+    // `shadow.enabled` reaches the renderer: that patch is dispatched to the scene graph,
+    // which knows about the light but nothing about the render pipeline. Re-applying the
+    // per-mesh flags is guarded inside, so a gizmo drag does not walk every node.
+    this.syncShadows(next)
   }
 
   get fullRebuildCount(): number {
@@ -572,4 +642,20 @@ export class SceneRuntime implements RuntimeContext {
 function setPanel(renderer: HotspotRenderer, hotspot: { id: string }, open: boolean): void {
   const withPanels = renderer as HotspotRenderer & { setPanelOpen?: (h: unknown, open: boolean) => void }
   withPanels.setPanelOpen?.(hotspot, open)
+}
+
+/**
+ * Writes shadow flags onto a node's own object.
+ *
+ * Stops at any descendant that is itself a document node: each node materialises exactly
+ * one Object3D, and a child in the three graph is another node with its own overrides.
+ * Walking through it would let a parent's "don't cast" silently override the child's.
+ */
+function writeShadowFlags(root: Object3D, cast: boolean, receive: boolean): void {
+  root.castShadow = cast
+  root.receiveShadow = receive
+  for (const child of root.children) {
+    if (typeof (child.userData as NodeUserData).w3NodeId === 'string') continue
+    writeShadowFlags(child, cast, receive)
+  }
 }
