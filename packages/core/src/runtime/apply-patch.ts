@@ -99,7 +99,7 @@ export class PatchApplier {
       case 'nodes':
         return this.applyNodePatch(patch, indexRaw, rest, next, prev)
       case 'materials':
-        return this.applyMaterialPatch(patch, indexRaw, rest, next)
+        return this.applyMaterialPatch(patch, indexRaw, rest, next, prev)
       case 'meta': {
         // `/meta/environment/**` gets its own consumer because rebuilding a PMREM
         // environment is expensive and must not happen when the user typed a background
@@ -198,7 +198,19 @@ export class PatchApplier {
     }
 
     const node = next.nodes[index]
-    if (!node) return false
+    if (!node) {
+      // A field patch about a node this same batch REMOVES. Immer emits inverse batches in
+      // that shape routinely: restore the old value, then delete its owner. Aborting a
+      // drag-and-drop ghost produces exactly `replace /nodes/3/transform/p` followed by
+      // `remove /nodes/3` (T-146), and reading the first as unrecognised rebuilt the whole
+      // scene every time a drag was cancelled — D1's alarm firing on an ordinary gesture,
+      // which is how an alarm stops meaning anything.
+      //
+      // Narrow on purpose: only when the node was there BEFORE and is gone by id AFTER.
+      // Any other missing index is still a fallback, because it is still a surprise.
+      const removed = prev.nodes[index]
+      return removed !== undefined && !next.nodes.some((n) => n.id === removed.id)
+    }
     const [field, sub] = rest
 
     switch (field) {
@@ -257,13 +269,33 @@ export class PatchApplier {
     indexRaw: string | number | undefined,
     rest: readonly (string | number)[],
     next: SceneDocument,
+    prev: SceneDocument,
   ): boolean {
     if (indexRaw === undefined) return false
     const index = Number(indexRaw)
     if (!Number.isInteger(index)) return false
 
     // A removed material means every node overriding it must fall back to its source.
-    if (rest.length === 0 && patch.op === 'remove') return false
+    //
+    // This used to answer "rebuild the whole scene", which is correct but expensive — and
+    // it fires on an everyday action: undoing the first primitive placed in a project also
+    // undoes the 默认材质 record created alongside it (T-146). Restoring the affected nodes
+    // is what the rebuild would have achieved anyway, and it is bounded by the number of
+    // nodes that actually referenced the material.
+    if (rest.length === 0 && patch.op === 'remove') {
+      const removed = prev.materials[index]
+      if (!removed) return false
+      // Present under a different index: an index shift, not a deletion.
+      if (next.materials.some((m) => m.id === removed.id)) return true
+
+      const defs = new Map(next.materials.map((m) => [m.id, m]))
+      for (const node of next.nodes) {
+        // A node removed in the same batch is not in `next` at all — nothing to restore.
+        if (node.overrides.materialId !== removed.id) continue
+        this.targets.materials.applyToNode(node.id, null, defs, this.targets.graph)
+      }
+      return true
+    }
 
     const def: MaterialDef | undefined = next.materials[index]
     if (!def) return false

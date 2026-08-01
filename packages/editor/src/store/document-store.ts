@@ -88,6 +88,7 @@ export function createDocumentStore(initial: SceneDocument, options: DocumentSto
       const [next, patches, inverse] = produceWithPatches(prev, recipe)
       if (patches.length === 0) return null
       set((state) => ({ doc: next, revision: state.revision + 1 }))
+      pruneSelection(next, prev)
       options.onPatch?.(patches, next, prev)
       return { patches, inverse, next }
     }
@@ -95,11 +96,33 @@ export function createDocumentStore(initial: SceneDocument, options: DocumentSto
     const syncHistoryFlags = () =>
       set({ canUndo: history.canUndo, canRedo: history.canRedo, historyDepth: history.depth })
 
+    /**
+     * Drops selected ids whose nodes have just disappeared.
+     *
+     * The selection must only ever name live nodes. When it does not, the gizmo stays
+     * attached to an Object3D that is no longer in the scene and three logs
+     * 「TransformControls: The attached 3D object must be a part of the scene graph」 on
+     * every frame, forever. Undoing a placement is the everyday way in: the node goes, the
+     * selection does not, and nothing re-runs the attach (T-146 · M10 审查所得).
+     *
+     * Guarded on the node count because `write` runs once per frame of a gizmo drag, and a
+     * drag can never remove a node — an integer compare is the whole cost on that path.
+     */
+    const pruneSelection = (next: SceneDocument, prev: SceneDocument): void => {
+      if (next.nodes.length >= prev.nodes.length) return
+      const selection = get().selection
+      if (selection.length === 0) return
+      const live = new Set(next.nodes.map((n) => n.id))
+      const kept = selection.filter((id) => live.has(id))
+      if (kept.length !== selection.length) set({ selection: kept })
+    }
+
     /** Applies a stored patch set without creating a new history entry. */
     const applyStored = (patches: readonly Patch[]): void => {
       const prev = get().doc
       const next = applyPatches(prev, patches as Patch[])
       set((state) => ({ doc: next, revision: state.revision + 1 }))
+      pruneSelection(next, prev)
       options.onPatch?.(patches as Patch[], next, prev)
     }
 

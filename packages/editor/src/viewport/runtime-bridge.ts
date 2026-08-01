@@ -79,6 +79,20 @@ export function createRuntimeBridge(options: RuntimeBridgeOptions): RuntimeBridg
  * the synchronous fast path, because a gizmo drag must not be pushed onto a microtask
  * queue behind an import that happened to still be loading.
  */
+/**
+ * Resolves once every queued patch batch has reached the runtime.
+ *
+ * T-146 · a library drop has to MEASURE what it just imported before it can rest it on a
+ * surface, and the asset path is asynchronous — measuring straight after the commit
+ * measures a scene graph the nodes have not reached yet, which reads as "the model ignores
+ * where I dropped it". Callers on the fast path get an already-resolved promise.
+ */
+export function patchesSettled(): Promise<void> {
+  return settled
+}
+
+let settled: Promise<void> = Promise.resolve()
+
 export function createPatchForwarder(getRuntime: () => SceneRuntime | null) {
   // Serialises the slow path. Without it, two imports in quick succession could apply
   // their node patches in the order their assets finished parsing rather than the order
@@ -115,5 +129,6 @@ export function createPatchForwarder(getRuntime: () => SceneRuntime | null) {
         // later edit asynchronous for the rest of the session.
         queued--
       })
+    settled = queue
   }
 }

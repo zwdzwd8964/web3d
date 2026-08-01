@@ -12,6 +12,9 @@ import {
   loadLibrary,
 } from '../lib/library.js'
 import type { Library, LibraryCategory, LibraryItem, PrimitiveTemplate } from '../lib/library.js'
+import { LIBRARY_MIME, PRIMITIVE_MIME, beginDrag, endDrag } from '../viewport/drag.js'
+import { boundsOfPrimitive, restOnPoint, viewCentre } from '../viewport/place.js'
+import { getActiveRuntime } from '../viewport/runtime-registry.js'
 
 /**
  * T-141 · the resource library.
@@ -37,7 +40,8 @@ const TABS: readonly { id: LibraryCategory; label: string }[] = [
 
 /** Where a double-clicked item lands. The centre of the ground plane, not the origin of
  *  whatever the camera happens to be looking at — predictable beats clever. */
-const DROP_AT: [number, number, number] = [0, 0, 0]
+/** The landing point for a double-click: the middle of what the user is looking at (T-146). */
+const viewCentreOnGround = () => viewCentre(getActiveRuntime())
 
 export function LibraryPanel() {
   const session = useProject()
@@ -68,8 +72,9 @@ export function LibraryPanel() {
 
   const createPrimitive = (template: PrimitiveTemplate) => {
     let created: string | null = null
+    const position = restOnPoint(viewCentreOnGround(), boundsOfPrimitive(template.primitive))
     commit(`新建 ${template.label}`, (draft) => {
-      created = addPrimitive(draft, template, { position: DROP_AT }).id
+      created = addPrimitive(draft, template, { position }).id
     })
     if (created) select([created])
   }
@@ -82,6 +87,7 @@ export function LibraryPanel() {
       // The live document, not the one this render closed over: an import is async and the
       // user can edit while it runs. Committing against a stale document would resurrect
       // whatever they changed in between.
+      const target = viewCentreOnGround()
       const result = await importLibraryItem({
         item,
         doc: store.getState().doc,
@@ -89,7 +95,17 @@ export function LibraryPanel() {
         loader: session.loader,
         base,
       })
-      commit(`引入 ${item.name}`, (draft) => applyImport(draft, result))
+      commit(`引入 ${item.name}`, (draft) => {
+        applyImport(draft, result)
+        // Same landing rule as a drop, minus the cursor: the middle of what the user is
+        // looking at. A constant origin would put the object off screen the moment they
+        // orbited away from it, and «双击没反应» is how that reads.
+        for (const node of result.nodes) {
+          if (node.parent !== null) continue
+          const live = draft.nodes.find((n) => n.id === node.id)
+          if (live) live.transform.p = target
+        }
+      })
       setNote(summarizeImport(result))
     } catch (error) {
       setNote(`引入失败：${error instanceof Error ? error.message : String(error)}`)
@@ -123,11 +139,14 @@ export function LibraryPanel() {
                 className="library-grid__item"
                 draggable
                 onDragStart={(event) => {
-                  // The viewport reads this in T-142. A plain custom MIME type rather than
-                  // `text/plain`: dropping a primitive onto a text field should do nothing.
-                  event.dataTransfer.setData('application/x-w3-primitive', template.kind)
+                  // A custom MIME rather than `text/plain`: dropping a primitive onto a text
+                  // field should do nothing. The type is all `dragover` can see, so the
+                  // payload itself goes into the drag session — see `drag.ts`.
+                  event.dataTransfer.setData(PRIMITIVE_MIME, template.kind)
                   event.dataTransfer.effectAllowed = 'copy'
+                  beginDrag({ kind: 'primitive', template })
                 }}
+                onDragEnd={() => endDrag()}
                 onDoubleClick={() => createPrimitive(template)}
                 title={`双击新建${template.label}`}
               >
@@ -142,9 +161,11 @@ export function LibraryPanel() {
                 className="library-grid__item"
                 draggable
                 onDragStart={(event) => {
-                  event.dataTransfer.setData('application/x-w3-library', item.id)
+                  event.dataTransfer.setData(LIBRARY_MIME, item.id)
                   event.dataTransfer.effectAllowed = 'copy'
+                  beginDrag({ kind: 'library', item })
                 }}
+                onDragEnd={() => endDrag()}
                 onDoubleClick={() => void bringInItem(item)}
                 title={`${item.name}｜${item.license}｜${item.note ?? ''}`}
               >

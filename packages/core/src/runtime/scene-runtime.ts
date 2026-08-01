@@ -15,6 +15,7 @@ import { EnvironmentController } from './environment.js'
 import { lightFactory } from './light-factory.js'
 import { LightHelperLayer } from './light-helpers.js'
 import { primitiveFactory } from './primitive-factory.js'
+import type { Bounds } from './primitive-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
@@ -511,6 +512,35 @@ export class SceneRuntime implements RuntimeContext {
 
     const rect = canvas.getBoundingClientRect()
     return { x: ((projected.x + 1) / 2) * rect.width, y: ((-projected.y + 1) / 2) * rect.height }
+  }
+
+  /**
+   * The world-space bounding box of one or more subtrees, or null when they enclose nothing.
+   *
+   * T-146 · what a dropped library model needs and could not have: a primitive's size is
+   * known before it exists (`primitiveBounds` measures a throwaway geometry), but an
+   * imported model's is only knowable once the asset has been loaded and built. Placement
+   * therefore has to ask the live scene, and this is the only way for the editor to ask
+   * without importing three (ADR-0009).
+   *
+   * Matrices are refreshed FROM THE ROOT first, and that is not the belt-and-braces it
+   * looks like. `Box3.expandByObject` does call `updateWorldMatrix(false, true)` on what it
+   * is given — note the `false`: it refreshes the object and its children, never its
+   * ANCESTORS. So a node whose parent moved since the last rendered frame gets measured
+   * through the parent's stale `matrixWorld`, and reports where it used to be. Measured, not
+   * assumed: with the parent moved 50 m the child still reported ±1 around the origin.
+   * (`Picker.roots()` had the same shape of bug in T-142.)
+   */
+  boundsOf(nodeIds: readonly string[]): Bounds | null {
+    this.graph.root.updateMatrixWorld(true)
+    const box = new Box3()
+    for (const nodeId of nodeIds) {
+      const object = this.graph.objectFor(nodeId)
+      if (!object) continue
+      box.expandByObject(object)
+    }
+    if (box.isEmpty()) return null
+    return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] }
   }
 
   /** The canvas this runtime draws into, or null when running head-less. */

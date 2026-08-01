@@ -312,9 +312,12 @@
 - **验收** 粘贴后 `checkIntegrity` 零 error；undo 一步整树消失；输入框聚焦时快捷键不误触发（沿 T-071 语义）
 - **自测** `pnpm -F @w3/editor test clipboard`
 
-### [ ] T-146 · 库模型拖放、幽灵预览与双击落点（M10 审查补票）
-- **依赖** T-141, T-142, T-143 · **预估** 0.8d · **实际** ___
-- **独占** `packages/core/src/runtime/scene-runtime.ts`（新增 `boundsOf`）, `packages/editor/src/viewport/drag.ts`（增）, `packages/editor/src/viewport/Viewport.tsx`, `packages/editor/src/panels/LibraryPanel.tsx`, `packages/editor/test/drag.test.ts`（增）
+### [x] T-146 · 库模型拖放、幽灵预览与双击落点（M10 审查补票）
+- **依赖** T-141, T-142, T-143 · **预估** 0.8d · **实际** 2.4h
+- **独占** `packages/core/src/runtime/scene-runtime.ts`（新增 `boundsOf`）, `packages/editor/src/viewport/drag.ts`（增）, `packages/editor/src/viewport/drop-controller.ts`（增）, `packages/editor/src/viewport/Viewport.tsx`, `packages/editor/src/panels/LibraryPanel.tsx`, `packages/editor/test/drag.test.ts`（增）, `e2e/tests/placement.spec.ts`（增）
+  （**超出预划范围的四处**，都是接上手势之后才暴露、且都在同一条路径上：
+  `packages/core/src/runtime/apply-patch.ts` 两处全量重建、`packages/editor/src/lib/library.ts`
+  的材质策略、`packages/editor/src/store/document-store.ts` 的选区剪枝）
 - **为什么存在** M10 收尾审查抓到三条「卡面写了、代码没接」：库模型的拖放 MIME 全仓无人接收；
   T-142 明写的幽灵预览一个字都没有（`resolveDropPoint` 的 `exclude` 与 `offsetToRestOn` 都是
   为它写的，双双零调用者）；双击落点是世界原点而非视口中心地面。三条同源，合成一张卡修。
@@ -333,6 +336,22 @@
 - **验收** 拖库模型进视口真的多出对象且落在光标下；幽灵预览期间撤销栈深度不变、松手后恰好 +1；
   拖出视口再放手不留残留节点；双击在转过视角后仍落在画面内
 - **自测** `pnpm -F @w3/editor test drag && pnpm -F @w3/core test bounds`
+- **实际情况**：接上手势之后，四个只有在真浏览器里才看得见的缺陷立刻掉了出来，
+  **单测全绿的时候它们全都在**：
+  1. **取消一次拖拽会重建整个场景**。幽灵回滚的反向补丁形如
+     `replace /nodes/3/transform/p` + `remove /nodes/3`，第一条指着一个已经不存在的下标，
+     被当成"不认识的补丁"→ 全量重建。D1 的警报在「改主意了」这种日常动作上响，等于没有警报。
+  2. **撤销第一次放置也会重建整个场景**。第一个原始体会顺手造出 默认材质 记录，撤销时连它一起
+     删；而"删材质"是 apply-patch 里少数几条**故意**回落全量重建的路径。改成把受影响的节点还原成
+     自带材质——本来全量重建也就是干这个。顺手补了下标位移的判断：不判断的话，删掉 A 材质会把
+     用 B 材质的节点也剥光。
+  3. **库模型的落点量不出来**。资产补丁是**异步**应用的（字节要先解析），紧接着 `boundsOf` 量到的
+     是还没长出节点的场景图 → 永远 null → 模型永远不会被抬到落点表面上。
+     单测因为 stub 了 `boundsOf` 完全看不见——正是 M10 说的那种盲区。补了 `patchesSettled()`。
+  4. **撤销之后 gizmo 还挂在已经不存在的对象上**，three 每帧报一次
+     `The attached 3D object must be a part of the scene graph`（E2E 里一次跑几十条）。
+     修法是把"选区只能指活节点"变成 store 的不变量，按节点数守卫，拖 gizmo 那条每帧路径只多一次整数比较。
+  E2E 里那条 `全量重建 = 0` 的断言是唯一能同时看见 1 和 2 的东西：对象数、撤销栈深度全都是对的。
 
 ### [x] T-145 · 内置库 manifest 机制与 starter 内容
 - **依赖** T-120 · **预估** 0.8d · **实际** 0.7h

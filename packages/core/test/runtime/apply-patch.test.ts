@@ -362,3 +362,102 @@ describe('a splice does not fall back (T-130 · the golden path’s missing zero
     expect(applier.fullRebuildCount).toBe(0)
   })
 })
+
+describe('cancelling a drag does not fall back (T-146)', () => {
+  it('ignores a field patch about a node the same batch removes', () => {
+    // The inverse of a ghost preview, exactly as immer emits it: restore the position the
+    // ghost had a moment ago, then delete the ghost. Read literally, the first patch names
+    // an index that no longer exists — the batch came back unhandled and rebuilt the entire
+    // scene, every single time a drag was cancelled. D1's alarm firing on 「改主意了」 is
+    // how an alarm stops meaning anything.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    const next = { ...prev, nodes: prev.nodes.slice(0, 2) }
+
+    const result = applier.apply(
+      [
+        { op: 'replace', path: ['nodes', 2, 'transform', 'p'], value: [1, 0, 1] },
+        { op: 'remove', path: ['nodes', 2] },
+      ],
+      next,
+      prev,
+    )
+
+    expect(result.unhandled).toEqual([])
+    expect(applier.fullRebuildCount).toBe(0)
+    expect(graph.objectFor(IDS.cover)).toBeUndefined()
+  })
+
+  it('still falls back for a field patch about a node nobody removed', () => {
+    // The narrowness is the point: an index that simply is not there is still a surprise,
+    // and a surprise must stay loud. Only "was there before, gone by id now" is a no-op.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    const result = applier.apply(
+      [{ op: 'replace', path: ['nodes', 9, 'transform', 'p'], value: [1, 0, 1] }],
+      prev,
+      prev,
+    )
+    expect(result.unhandled).toHaveLength(1)
+    expect(applier.fullRebuildCount).toBe(1)
+  })
+})
+
+describe('removing a material does not fall back (T-146)', () => {
+  it('the real case: undoing the first placement removes node AND material together', () => {
+    // Placing the first primitive in a project creates the 默认材质 record alongside it, so
+    // undoing that placement removes both. Rebuilding the entire scene for it is correct
+    // and expensive — and it fires on an action people take constantly.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    const next = { ...prev, materials: [], nodes: prev.nodes.slice(0, 2) }
+
+    const result = applier.apply(
+      [
+        { op: 'remove', path: ['nodes', 2] },
+        { op: 'remove', path: ['materials', 0] },
+      ],
+      next,
+      prev,
+    )
+
+    expect(result.unhandled).toEqual([])
+    expect(applier.fullRebuildCount).toBe(0)
+    expect(graph.objectFor(IDS.cover)).toBeUndefined()
+  })
+
+  it('a node left pointing at the removed material falls back to its own', () => {
+    // The defensive half: v0.5 has no delete-material UI, so a dangling override is not
+    // reachable today. When one arrives (T-154's presets), the node has to end up showing
+    // the mesh's own material rather than keeping a colour whose record no longer exists.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    registry.applyAll(prev, graph)
+    const overridden = materialOf(IDS.cover)
+
+    const next = { ...prev, materials: [] }
+    const result = applier.apply([{ op: 'remove', path: ['materials', 0] }], next, prev)
+
+    expect(result.unhandled).toEqual([])
+    expect(applier.fullRebuildCount).toBe(0)
+    // Asserting only the counter would let a `return true` that does nothing at all pass.
+    expect(materialOf(IDS.cover)).not.toBe(overridden)
+  })
+
+  it('treats a remove as an index shift when the material is still there', () => {
+    // `materials.splice` on a longer list emits a trailing remove whose index names a
+    // material that is still in the document. Reading it as a deletion would strip the
+    // override off every node using it — the material vanishing from objects the user
+    // never touched, in response to deleting a DIFFERENT one.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    registry.applyAll(prev, graph)
+    const overridden = materialOf(IDS.cover)
+
+    const result = applier.apply([{ op: 'remove', path: ['materials', 0] }], prev, prev)
+
+    expect(result.unhandled).toEqual([])
+    expect(applier.fullRebuildCount).toBe(0)
+    expect(materialOf(IDS.cover), '材质还在文档里，节点就不该被还原').toBe(overridden)
+  })
+})

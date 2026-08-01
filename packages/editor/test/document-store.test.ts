@@ -364,3 +364,44 @@ describe('patch compaction', () => {
     expect(compacted).toHaveLength(2)
   })
 })
+
+describe('the selection only ever names live nodes (T-146)', () => {
+  it('drops a selected node that an undo removed', () => {
+    // Left in place, the gizmo stays attached to an Object3D that is no longer in the
+    // scene, and three logs 「The attached 3D object must be a part of the scene graph」 on
+    // every frame from then on. Undoing a placement is the everyday way in.
+    const store = createDocumentStore(createGoldenPathDocument())
+    const s = () => store.getState()
+    s().commit('新建', (draft) => {
+      draft.nodes.push({ ...draft.nodes[2]!, id: 'nd_new00001', parent: null })
+    })
+    s().select(['nd_new00001'])
+    expect(s().selection).toEqual(['nd_new00001'])
+
+    s().undo()
+    expect(s().selection, '节点没了，选中它的记录也得没').toEqual([])
+  })
+
+  it('keeps a selection the deletion did not touch', () => {
+    const store = createDocumentStore(createGoldenPathDocument())
+    const s = () => store.getState()
+    const survivor = s().doc.nodes[1]!.id
+    s().select([survivor, s().doc.nodes[2]!.id])
+    s().commit('删除', (draft) => {
+      draft.nodes = draft.nodes.slice(0, 2)
+    })
+    expect(s().selection).toEqual([survivor])
+  })
+
+  it('leaves the selection alone when nothing was removed', () => {
+    // The guard that keeps a 60 fps gizmo drag from paying for a scan every frame.
+    const store = createDocumentStore(createGoldenPathDocument())
+    const s = () => store.getState()
+    const before = s().selection
+    s().select([s().doc.nodes[0]!.id])
+    const selection = s().selection
+    s().commit('移动', (draft) => void (draft.nodes[0]!.transform.p = [1, 2, 3]))
+    expect(s().selection, '同一个数组对象，说明根本没重算').toBe(selection)
+    expect(before).toEqual([])
+  })
+})

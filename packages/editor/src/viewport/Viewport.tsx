@@ -6,11 +6,14 @@ import { usePreview, usePreviewStore } from '../preview/PreviewContext.jsx'
 import { PreviewController } from '../preview/controller.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
-import { PRIMITIVE_TEMPLATES, addPrimitive } from '../lib/library.js'
-import { placePrimitiveAt } from './place.js'
+import { importLibraryItem } from '../lib/library.js'
+import { acceptsDrag, endDrag, getDrag } from './drag.js'
+import { DropController } from './drop-controller.js'
+import { boundsOfPrimitive, resolveDropPoint, restOnPoint } from './place.js'
 import { SnapToolbar } from './SnapToolbar.js'
 import { ANGLE_STEP_DEG, getSnap, onSnapChange, snapPosition } from './snap.js'
 import { fulfilPick, isPicking } from './pick-request.js'
+import { patchesSettled } from './runtime-bridge.js'
 import { setActiveRuntime } from './runtime-registry.js'
 
 /**
@@ -37,12 +40,15 @@ export function Viewport() {
   const previewStore = usePreviewStore()
   const previewActive = usePreview((s) => s.active)
   const controllerRef = useRef<PreviewController | null>(null)
-  const { commit, previewStart, preview, previewCommit, toggleSelection, clearSelection } = useDocumentActions()
+  const { commit, previewStart, preview, previewCommit, previewAbort, toggleSelection, clearSelection, select } =
+    useDocumentActions()
   const selection = useDocumentSelector((s) => s.selection)
 
   const [mode, setMode] = useState<GizmoMode>('translate')
   const [space, setSpace] = useState<GizmoSpace>('world')
   const [ready, setReady] = useState(false)
+  /** A failed library import has to say so; the drop looked like it worked. */
+  const [dropError, setDropError] = useState<string | null>(null)
 
   // Read inside the mount-only effect's callbacks, which would otherwise close over the
   // value `mode` had at mount and label every drag "移动对象".
@@ -331,47 +337,100 @@ export function Viewport() {
    * model import is async, and committing against a stale document would resurrect whatever
    * the user changed while it ran.
    */
-  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    const runtime = runtimeRef.current
-    const canvas = canvasRef.current
-    if (!runtime || !canvas) return
+  const dropRef = useRef<DropController | null>(null)
+  if (!dropRef.current) {
+    dropRef.current = new DropController({
+      previewStart,
+      preview,
+      previewCommit,
+      previewAbort,
+      select,
+      boundsOf: (ids) => runtimeRef.current?.boundsOf(ids) ?? null,
+      settle: patchesSettled,
+      importItem: (item) =>
+        importLibraryItem({
+          item,
+          doc: store.getState().doc,
+          storage: session.storage,
+          loader: session.loader,
+          // The app's own origin, from the document itself — never a constant (C6).
+          base: document.baseURI,
+        }),
+      onError: (message) => setDropError(message),
+    })
+  }
 
-    const kind = event.dataTransfer.getData('application/x-w3-primitive')
-    if (!kind) return
+  /** Pointer position in canvas coordinates, or null when there is no canvas yet. */
+  const pointerOf = (event: React.DragEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height }
+  }
+
+  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    // `dataTransfer.getData` is unreadable during dragover (protected mode), so what is
+    // being dragged comes from the session store and only the TYPES are read here.
+    if (!acceptsDrag(Array.from(event.dataTransfer.types))) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+
+    const payload = getDrag()
+    const runtime = runtimeRef.current
+    const pointer = pointerOf(event)
+    if (!payload || !runtime || !pointer) return
+    dropRef.current?.over(payload, (primitive, exclude) =>
+      restOnPoint(
+        resolveDropPoint(runtime, store.getState().doc, pointer, { exclude }).point,
+        boundsOfPrimitive(primitive),
+      ),
+    )
+  }
+
+  /**
+   * The pointer left the viewport — roll the ghost back.
+   *
+   * `relatedTarget` guards against the leave that fires when the pointer crosses onto a
+   * CHILD of the viewport (the overlay, the toolbar): without it the ghost would flicker
+   * out of existence every time the cursor passed over the tools row.
+   */
+  const onDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget
+    if (next instanceof globalThis.Node && event.currentTarget.contains(next)) return
+    dropRef.current?.leave()
+  }
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!acceptsDrag(Array.from(event.dataTransfer.types))) return
     event.preventDefault()
 
-    const template = PRIMITIVE_TEMPLATES.find((t) => t.kind === kind)
-    if (!template) return
+    const payload = getDrag()
+    const runtime = runtimeRef.current
+    const pointer = pointerOf(event)
+    endDrag()
+    if (!payload || !runtime || !pointer) {
+      dropRef.current?.leave()
+      return
+    }
 
-    const rect = canvas.getBoundingClientRect()
-    const doc = store.getState().doc
-    const { position } = placePrimitiveAt(runtime, doc, template.primitive, {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    })
-
-    let created: string | null = null
-    commit(`放置 ${template.label}`, (draft) => {
-      // T-143 · the grid applies to where things LAND as well as to where they are dragged.
-      // Only the document ever sees the snapped value; the snap setting itself stays out.
-      created = addPrimitive(draft, template, { position: snapPosition(position) }).id
-    })
-    if (created) toggleSelection(created, false)
+    setDropError(null)
+    void dropRef.current?.drop(
+      payload,
+      (primitive, exclude) =>
+        restOnPoint(
+          resolveDropPoint(runtime, store.getState().doc, pointer, { exclude }).point,
+          boundsOfPrimitive(primitive),
+        ),
+      () => resolveDropPoint(runtime, store.getState().doc, pointer).point,
+    )
   }
 
   return (
     <div
       className="viewport"
       ref={hostRef}
-      onDragOver={(event) => {
-        // Only claim the drop when it is ours; letting the browser handle the rest keeps a
-        // file dragged onto the viewport from being swallowed silently.
-        if (!event.dataTransfer.types.includes('application/x-w3-primitive')) return
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'copy'
-      }}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
       {/* The canvas is inserted before this overlay by the mount effect. */}
@@ -397,6 +456,14 @@ export function Viewport() {
           全览
         </button>
       </div>
+      {dropError !== null && (
+        <div className="viewport__note" role="status">
+          {dropError}
+          <button type="button" className="tbtn" onClick={() => setDropError(null)}>
+            知道了
+          </button>
+        </div>
+      )}
     </div>
   )
 }

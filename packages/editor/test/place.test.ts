@@ -186,11 +186,17 @@ describe('placePrimitiveAt', () => {
 })
 
 describe('offsetToRestOn', () => {
-  it('reports the delta to move an already-placed subtree onto the hit', () => {
+  it('reports the delta to move an already-built subtree onto the hit', () => {
     // Library models arrive from the import pipeline with their own transforms; the drop
     // moves the root by a delta rather than overwriting a position it did not choose.
-    const bounds = { min: [-1, 0, -1] as const, max: [1, 2, 1] as const }
-    expect(offsetToRestOn([5, 0.2, -3], bounds, [0, 0, 0])).toEqual([5, 0.2, -3])
-    expect(offsetToRestOn([5, 0.2, -3], bounds, [1, 1, 1])).toEqual([4, -0.8, -4])
+    // WORLD bounds in, because that is what a measurement of a built subtree gives you
+    // (`SceneRuntime.boundsOf`) — the root's own position is already inside them.
+    const centred = { min: [-1, 0, -1] as const, max: [1, 2, 1] as const }
+    expect(offsetToRestOn([5, 0.2, -3], centred)).toEqual([5, 0.2, -3])
+
+    // A subtree already sitting at x=10 with its origin off to one side: the delta has to
+    // account for both, which is the case the old local-bounds signature got wrong.
+    const offCentre = { min: [9, 1, -1] as const, max: [11, 3, 1] as const }
+    expect(offsetToRestOn([0, 0, 0], offCentre)).toEqual([-10, -1, 0])
   })
 })

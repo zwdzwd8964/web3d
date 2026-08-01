@@ -80,6 +80,25 @@ export function boundsOfPrimitive(primitive: Primitive): Bounds {
 }
 
 /**
+ * Where the middle of the current view meets the ground plane — the landing point for a
+ * double-click, which has no cursor position of its own.
+ *
+ * The world origin is the fallback, not the rule (T-146). It was the rule until M10's review:
+ * a constant lands the object off screen the moment the user has orbited away from the
+ * origin, and 「双击没反应」 is how that reads from the outside.
+ */
+export function viewCentre(runtime: SceneRuntime | null): Vec3 {
+  if (!runtime) return [0, 0, 0]
+  const canvas = runtime.canvas
+  const width = canvas?.clientWidth ?? 0
+  const height = canvas?.clientHeight ?? 0
+  if (width <= 0 || height <= 0) return [0, 0, 0]
+  // Looking at or above the horizon: the ray never meets the ground, and the origin is the
+  // one place the user can always find again.
+  return runtime.picker.pickPlane(width / 2, height / 2, width, height, runtime.camera.camera, 0) ?? [0, 0, 0]
+}
+
+/**
  * Where a primitive dropped at `pointer` should be created.
  *
  * The whole placement decision in one call, so the drop handler is three lines and this is
@@ -96,16 +115,18 @@ export function placePrimitiveAt(
 }
 
 /**
- * Where an already-instantiated subtree should go so it rests on `hit`.
+ * The delta to move an already-built subtree by, so that it rests on `hit`.
  *
- * Used for library models: the nodes come out of the import pipeline positioned by their
- * own transforms, and this returns the offset to apply to the ROOT of that subtree.
+ * For library models. A primitive's size is known before it exists, but an imported model's
+ * is not: it has to be built and MEASURED (`SceneRuntime.boundsOf`), and only then can the
+ * drop know how far to move it. So this takes the subtree's **world** bounds and returns a
+ * delta, rather than taking local bounds and returning a position — the root arrives from
+ * the import pipeline with a transform this has no business overwriting.
+ *
+ * The root's current position does not appear because it cancels: the measurement already
+ * includes it. T-146 changed the signature for exactly that reason — the old one took local
+ * bounds plus the root position, and had no caller to hold it honest.
  */
-export function offsetToRestOn(hit: Vec3, bounds: Bounds, currentRootPosition: Vec3): Vec3 {
-  const target = restOnPoint(hit, bounds)
-  return [
-    target[0] - currentRootPosition[0],
-    target[1] - currentRootPosition[1],
-    target[2] - currentRootPosition[2],
-  ]
+export function offsetToRestOn(hit: Vec3, worldBounds: Bounds): Vec3 {
+  return restOnPoint(hit, worldBounds)
 }

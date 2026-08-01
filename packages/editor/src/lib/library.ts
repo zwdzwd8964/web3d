@@ -1,5 +1,12 @@
 import type { FactoryContext, IdFactory, Node, Primitive, PrimitiveKind, SceneDocument, Vec3 } from '@w3/schema'
-import { PRIMITIVE_KINDS, PRIMITIVE_LABELS, createPrimitiveNode, ensureDefaultMaterial, identityTransform } from '@w3/schema'
+import {
+  DEFAULT_MATERIAL_NAME,
+  PRIMITIVE_KINDS,
+  PRIMITIVE_LABELS,
+  createPrimitiveNode,
+  ensureDefaultMaterial,
+  identityTransform,
+} from '@w3/schema'
 import type { AssetLoader } from '@w3/core'
 import type { StorageProvider } from '@w3/storage'
 import { importAsset } from './import-flow.js'
@@ -164,6 +171,9 @@ export const itemsOf = (library: Library, category: LibraryCategory): readonly L
 /* Primitives                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** `'ensure'` creates the shared 默认材质 record if it is missing; `'existing'` never does. */
+export type MaterialPolicy = 'ensure' | 'existing'
+
 export interface PrimitiveTemplate {
   readonly kind: PrimitiveKind
   readonly label: string
@@ -200,13 +210,22 @@ export const PRIMITIVE_TEMPLATES: readonly PrimitiveTemplate[] = PRIMITIVE_KINDS
 export function addPrimitive(
   draft: SceneDocument,
   template: PrimitiveTemplate,
-  options: { position?: Vec3; name?: string; ctx?: FactoryContext } = {},
+  options: { position?: Vec3; name?: string; ctx?: FactoryContext; material?: MaterialPolicy } = {},
 ): Node {
-  const materialId = ensureDefaultMaterial(draft, options.ctx)
+  // T-146 · `'existing'` is for the drag ghost. Creating the shared record and then undoing
+  // that creation is what a cancelled drag would do, and a material REMOVE is one of the
+  // few patches the runtime deliberately answers with a full rebuild — so an ordinary
+  // "changed my mind" gesture rebuilt the entire scene. The ghost borrows the record if the
+  // project already has one and goes without if it does not (core's own neutral grey is the
+  // same colour); the drop creates it for real.
+  const materialId =
+    options.material === 'existing'
+      ? (draft.materials.find((m) => m.name === DEFAULT_MATERIAL_NAME)?.id ?? null)
+      : ensureDefaultMaterial(draft, options.ctx)
   const node = createPrimitiveNode(draft, {
     name: options.name ?? template.label,
     primitive: template.primitive,
-    overrides: { materialId },
+    ...(materialId !== null ? { overrides: { materialId } } : {}),
     ...(options.position ? { transform: { ...identityTransform(), p: options.position } } : {}),
     ...(options.ctx ? { ctx: options.ctx } : {}),
   })
