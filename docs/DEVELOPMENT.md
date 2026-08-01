@@ -183,6 +183,78 @@ pnpm -F @w3/core test eca
 
 ---
 
+## 4.5 如何新增一种材质预设 / 一种灯 / 一条库内容（v0.5）
+
+这三件事被刻意做成了「改一处数据，不碰逻辑」。如果你发现自己在改逻辑，多半是走错路了。
+
+### 4.5.1 新增一种材质预设
+
+**改一个文件，加一个对象。** `packages/editor/src/lib/material-presets.ts` 的
+`MATERIAL_PRESETS` 数组：
+
+```ts
+{
+  id: 'anodised-aluminium',      // 稳定 key，会被写进 material.preset 做溯源
+  label: '阳极氧化铝',            // 面板上的按钮文字，中文
+  base: 'standard',              // 'standard' | 'physical'（后者才有玻璃/清漆参数）
+  params: {
+    ...blank(),                  // maps: {}，别漏
+    color: '#c9ccd1',
+    roughness: 0.35,
+    metalness: 1,
+    opacity: 1,
+    transparent: false,
+  },
+}
+```
+
+**必须写全量参数。** 半套参数会从"它恰好被应用到的那个材质"继承剩下的，于是同一个预设
+在不同物体上长得不一样——而预设存在的全部意义就是防止这件事。
+`material-presets.test.ts` 里有一条测试逐个检查每个预设都写了 color / roughness /
+metalness / opacity / transparent / maps，漏了会红。
+
+**physical 专属参数只能出现在 `base: 'physical'` 上。** 写在 standard 上渲染器不读，
+完整性检查 I15 会报 warn，测试也会红。
+
+**透射 > 0 的必须 `transparent: true`。** three 的透射走单独的渲染目标，不透明材质
+根本进不去，玻璃会渲染成一坨实心的。同样有测试盯着。
+
+应用预设写的是**全量参数进文档**（D16），不是存一个预设名然后运行时去查库——
+后者会让发布包在没有库文件的环境里渲染错误，且改一次预设、历史项目全变。
+`preset` 字段只是溯源用的名字，**没有任何代码拿它反查参数**。
+
+### 4.5.2 新增一种灯
+
+**大概率你不需要**——五种灯（环境光 / 半球光 / 平行光 / 点光源 / 聚光灯）就是 three 提供的
+全部常用类型。真要加（比如面光源），改动是：
+
+1. `packages/schema/src/light.ts`：`LIGHT_KINDS` 加一项，`LightSchema` 加一个分支，
+   `LIGHT_LABELS` 加中文名 → **这是改 schema，三件套走起**（§5）；
+2. `packages/core/src/runtime/light-factory.ts`：`build()` 里加一个 case，造出对应的
+   three 对象；`write()` 里把新字段写进去；
+3. `packages/editor/src/lib/light-edit.ts`：`defaultLight()` 加一个 case。
+
+编辑器面板、层级树图标、资源库分区、gizmo、撤销、拾取**全都不用改**——
+灯是节点（D12），这些机制它本来就有。
+
+方向由**节点自身的旋转**决定（局部 -Z，D13），文档里没有 target 对象，也不要加一个。
+
+### 4.5.3 新增一条内置库内容
+
+内置库是 **manifest 机制 + 内容包**（D17）：机制在代码里，内容不在。
+
+- `packages/editor/public/library/manifest.json` 加一项，`license` 字段**必填**；
+- 文件放进 `packages/editor/public/library/` 对应目录；
+- 跑 `node scripts/check-library-manifest.mjs`（也已挂进 `pnpm check:constitution`）。
+
+三条会当场 fail 的红线：**任何 `http(s)://`**（C6：内网部署会看到碎图）、
+**缺 license**（版权风险 V1）、**总量超 40 MB**。
+
+库内容**不进 bundle**：用户真的用到时才走既有导入管线成为项目资产（hash 查重、体检、
+缩略图一样不少）。发布出去的 `.w3p` 完全不知道有个库存在。
+
+---
+
 ## 5. 改 schema = 三件套
 
 `schemaVersion` +1 **且** 一个 `Migration` **且** 一份 fixture。三者缺一不可。
