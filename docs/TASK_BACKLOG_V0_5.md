@@ -756,10 +756,27 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
 - **实际耗时**：0.4 天
 
 
-### [ ] T-183 · HDRI 端到端验证
+### [x] T-183 · HDRI 端到端验证
 - **独占** `packages/core/test/runtime/environment-wiring.test.ts`（增）, `e2e/tests/golden-path-2.spec.ts`
 - **做** 「HDRI 照亮场景」全仓零验证：`EnvironmentController` 只在隔离桩里测过，删掉 `await this.environment.apply(doc)` 全套测试照绿。补 `SceneRuntime` 接线断言 + E2E 断言**渲染器**（`scene.environment` 非空）。
 - **验收** 上述删除能让测试转红
+- **实际情况**：`EnvironmentController` 本身测得很足，24 条里 18 条都是它的——**但全部直接
+  驱动控制器**，于是「runtime 到底调没调它」一条都没测到。删掉 `SceneRuntime.load` 里的
+  `await this.environment.apply(doc)`，全仓绿。一个完全正确、但没人调用的控制器，在播放器里
+  是黑背景，在编辑器里什么都没有。
+- 补的六条全部走 `SceneRuntime` 并断言 `runtime.scene`（three 真正要画的那个对象）。
+  三个调用点各是一种「HDRI 不出现」的方式：打开文档、构造时就带着、改环境的 patch。
+- **两次「测试写得像在测那件事，其实没测」**：
+  1. 六条里三条一开始用**带 HDRI 的文档构造 runtime**，而构造函数本身就会 apply——
+     贴图在测试做任何事之前就已经在场景里了，删掉被测的那行毫无变化。D1 变异抓出来的。
+     改成「runtime 出生时没有 HDRI，之后才拿到」。
+  2. 原来那条「画布晚到」测的是**公开 API 到不了的路径**：`attachRenderer` 是私有的，
+     只在构造函数里调。改成它真实的形状：直接带画布和 HDRI 构造，没人调 `load`。
+- 顺带把 `renderer` 私有字段的断言改成**持有注入的那个桩**，而不是为测试放宽生产可见性。
+- **变异检验**：D1 load 不 apply → 2 红（第一版是绿的）；D2 构造时不 apply → 1 红；
+  D3 patch 路径不 apply → 1 红；D4 色调映射恒为 ACES（破 G0.5-6）→ 2 红。
+- **实际耗时**：0.5 天
+
 
 ### [ ] T-184 · O(n²) 性能悬崖收口
 - **独占** `packages/schema/src/index-builder.ts`, `packages/editor/src/panels/tree-dnd.ts`, `packages/editor/src/App.tsx`, `packages/core/src/runtime/{apply-patch,scene-runtime,primitive-factory}.ts`

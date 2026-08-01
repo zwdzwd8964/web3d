@@ -356,3 +356,150 @@ describe('EnvironmentController · things that go wrong', () => {
     expect(compiled, '渲染器到位后应当补做预过滤').toHaveLength(1)
   })
 })
+
+/**
+ * T-183 · the runtime actually calling any of this.
+ *
+ * Everything above drives `EnvironmentController` directly, which is why deleting
+ * `await this.environment.apply(doc)` from `SceneRuntime.load` left the whole suite green
+ * (T-176 审查所得). A controller that works perfectly and is never called renders a black
+ * background in the player and nothing in the editor, and no test above can tell.
+ *
+ * So these go through `SceneRuntime` and assert on `runtime.scene` — the object three will
+ * actually draw. There are three call sites and each is a separate way for the HDRI to not
+ * show up: opening a document, attaching a canvas later, and editing the environment.
+ */
+describe('SceneRuntime wires the environment up (T-183)', () => {
+  const stubRenderer = () =>
+    ({
+      info: { memory: { geometries: 0, textures: 0 } },
+      shadowMap: { enabled: false, type: -1 },
+      toneMapping: NoToneMapping,
+      toneMappingExposure: 1,
+      render: () => undefined,
+      setSize: () => undefined,
+      dispose: () => undefined,
+      domElement: {} as HTMLCanvasElement,
+    }) as unknown as WebGLRenderer
+
+  /** A prefilter that needs no GL, standing in for PMREM. */
+  const fakeCompile = () => {
+    const texture = new DataTexture()
+    return { texture, dispose: () => texture.dispose() }
+  }
+
+  /**
+   * The renderer comes back alongside the runtime because `SceneRuntime.renderer` is
+   * private — and it should stay private. Holding the stub the runtime was handed asserts
+   * the same thing without widening production API to suit a test.
+   */
+  const makeRuntime = async (doc: SceneDocument) => {
+    const { SceneRuntime } = await import('../../src/runtime/scene-runtime.js')
+    const { NullHotspotRenderer } = await import('../../src/runtime/hotspot-layer.js')
+    const renderer = stubRenderer()
+    const runtime = new SceneRuntime(doc, {
+      canvas: { clientWidth: 800, clientHeight: 600 } as HTMLCanvasElement,
+      resolver: { resolve: async () => makeHdr() },
+      mode: 'edit',
+      createRenderer: () => renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      compileEnvMap: fakeCompile,
+      now: () => 0,
+    })
+    return { runtime, renderer }
+  }
+
+  const lit = () => docWith({ hdriAssetId: HDRI_ID, background: 'hdri' })
+  const unlit = () => docWith({ hdriAssetId: null })
+
+  /**
+   * Every runtime here is BORN without an HDRI and is handed one later.
+   *
+   * Constructing it from the lit document instead made three of these pass for the wrong
+   * reason: `attachRenderer` applies the environment too, so the map was already resident
+   * before the test did anything, and deleting the call under test changed nothing. The
+   * mutation caught it — the version that read fine was the version that tested nothing.
+   */
+
+  it('load() puts the map on the scene before it resolves', async () => {
+    // `load` is the ONE moment a caller can wait for the scene to be complete — the publish
+    // thumbnail and the parity trace both shoot immediately after it. An environment that
+    // arrives three frames later is a black frame in both.
+    const { runtime } = await makeRuntime(unlit())
+    await runtime.load(lit())
+
+    expect(runtime.scene.environment, '打开文档就该有环境贴图').not.toBeNull()
+    expect(runtime.scene.background, '背景设成 hdri 就该是那张图，不是颜色').toBe(runtime.scene.environment)
+    runtime.dispose()
+  })
+
+  it('turns tone mapping on, which is what makes the HDRI look right rather than flat', async () => {
+    const { runtime, renderer } = await makeRuntime(unlit())
+    await runtime.load(lit())
+    expect(renderer.toneMapping).toBe(ACESFilmicToneMapping)
+
+    // …and back off with no HDRI, which is gate G0.5-6: a v0 document must look EXACTLY
+    // as it did, and an ACES curve over an unchanged scene is a visible change.
+    await runtime.load(unlit())
+    expect(renderer.toneMapping, '没有 HDRI 就必须回到 v0 的 NoToneMapping').toBe(NoToneMapping)
+    runtime.dispose()
+  })
+
+  it('applies from the CONSTRUCTOR when the document already names one', async () => {
+    // `attachRenderer` is private and only ever runs from the constructor, so this — not a
+    // late-arriving canvas — is that call site's real shape: a runtime built straight onto
+    // a canvas with an HDRI already in the document, and nobody calling `load`. Without it
+    // the prefilter never runs and tone mapping stays at the renderer's default, so the
+    // scene opens flat and only fixes itself if the user happens to edit the environment.
+    const { runtime, renderer } = await makeRuntime(lit())
+    // The constructor cannot await — `new` is synchronous — so the resolve lands a few
+    // microtasks later. That is exactly why nothing noticed when it was not happening.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runtime.scene.environment, '构造时就带着 HDRI 的文档也要挂上').not.toBeNull()
+    expect(renderer.toneMapping).toBe(ACESFilmicToneMapping)
+    runtime.dispose()
+  })
+
+  it('follows a patch that sets the HDRI, without a full rebuild', async () => {
+    const { runtime } = await makeRuntime(unlit())
+    await runtime.load(unlit())
+    expect(runtime.scene.environment).toBeNull()
+
+    const before = unlit()
+    const next = lit()
+    runtime.applyPatch(
+      [
+        { op: 'replace', path: ['meta', 'environment', 'hdriAssetId'], value: HDRI_ID },
+        { op: 'replace', path: ['meta', 'background', 'type'], value: 'hdri' },
+      ],
+      next,
+      before,
+    )
+    expect(runtime.fullRebuildCount, '设一张环境贴图不该整场重建（铁律 11）').toBe(0)
+
+    // The patch path is fire-and-forget by contract (D1 keeps applyPatch synchronous), so
+    // the resolve lands a microtask later — which is precisely why nothing awaited it and
+    // why nothing noticed it was never called.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(runtime.scene.environment, '改环境的 patch 要真的把图挂上去').not.toBeNull()
+    runtime.dispose()
+  })
+
+  it('clears it again when the user presses 清除环境', async () => {
+    const { runtime } = await makeRuntime(unlit())
+    await runtime.load(lit())
+    expect(runtime.scene.environment).not.toBeNull()
+
+    const cleared = docWith({ hdriAssetId: null })
+    runtime.applyPatch(
+      [{ op: 'replace', path: ['meta', 'environment', 'hdriAssetId'], value: null }],
+      cleared,
+      lit(),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runtime.scene.environment, '清除环境要真的清掉').toBeNull()
+    runtime.dispose()
+  })
+})
