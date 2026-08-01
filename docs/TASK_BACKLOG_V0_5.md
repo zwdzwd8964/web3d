@@ -235,12 +235,22 @@
 
 ## E14 · 对象库与放置体验
 
-### [ ] T-140 · PrimitiveFactory：七种原始体
-- **依赖** T-130 · **预估** 0.5d · **实际** ___
+### [x] T-140 · PrimitiveFactory：七种原始体
+- **依赖** T-130 · **预估** 0.5d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/primitive-factory.ts`, `packages/core/test/runtime/primitive-factory.test.ts`
+  （+ `scene-runtime.ts` 一行接线，+ [ADR-0017](adr/0017-原始体的朝向与分段数.md)）
 - **做** 七种语义尺寸 → BufferGeometry（分段数固化在 core，不进文档，进化规划 §4.1.2）；参数 patch → 几何重建 + 旧几何 dispose；bbox 正确（贴面放置依赖它）；`overrides.materialId` 缺失时兜底渲染中性灰 standard 并 warn（文档态由编辑器创建时显式挂默认材质，D15）。
 - **验收** 每种一条尺寸断言（bbox 与语义尺寸一致）；参数更新后旧几何已 dispose（`renderer.info` 断言）
 - **自测** `pnpm -F @w3/core test primitive-factory`
+- **实际情况**：规范只冻结了语义尺寸，没写**朝向**与**分段数**，两者都是改不回来的决定，
+  按铁律 12 先写 [ADR-0017](adr/0017-原始体的朝向与分段数.md)：七种体全部沿用 three 的默认
+  朝向（plane 因此是竖着的，想要地面自己转 90°，且这个旋转落在文档的 `transform.r` 里——
+  烘进几何等于给用户一份看不见也改不掉的隐藏状态），分段数写死在 core。
+  旧几何 dispose 用 three 的 `dispose` 事件断言，不用 `renderer.info`——后者要真 GL 上下文，
+  而这条断言的内容（"改一次尺寸不泄漏一个 buffer"）本身不需要 GPU。
+  **接线断言单独写了一条**：T-132 刚因为"工厂建好了、分发建好了、没人接线"栽过一次，
+  同形状的坑一个文件之隔，不靠推断。变异检验：去掉 `{ primitives: primitiveFactory }`
+  → 3 条转红。
 
 ### [ ] T-141 · 资源库面板（对象页签）
 - **依赖** T-122, T-140, T-145 · **预估** 1d · **实际** ___

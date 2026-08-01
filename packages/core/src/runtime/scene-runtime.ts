@@ -14,6 +14,7 @@ import { HotspotProjector, NullHotspotRenderer } from './hotspot-layer.js'
 import { EnvironmentController } from './environment.js'
 import { lightFactory } from './light-factory.js'
 import { LightHelperLayer } from './light-helpers.js'
+import { primitiveFactory } from './primitive-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
@@ -98,14 +99,15 @@ export class SceneRuntime implements RuntimeContext {
     this.document = document
     this.options = options
 
-    // The real light factory, not the placeholder. Without this line every `node.light`
-    // materialises as the empty Group `carrier-types.ts` hands out when no factory is
-    // installed: the hierarchy tree shows a light, the transform gizmo moves it, patches
-    // reach it — and the scene stays exactly as dark as it was. T-131 built the factory
-    // and T-130 built the dispatch; nothing connected them, and no test in either card
-    // could see it, because both were testing their own half against a stand-in.
-    // Primitives are wired the same way by T-140.
-    this.graph = new SceneGraph({ lights: lightFactory })
+    // The REAL factories, not the placeholders. Without this line every `node.light` and
+    // every `node.primitive` materialises as the empty Group `carrier-types.ts` hands out
+    // when no factory is installed: the hierarchy tree shows the object, the gizmo moves
+    // it, patches reach it — and nothing is drawn. That is not hypothetical; it is what
+    // T-132 found for lights, after T-131 built the factory and T-130 built the dispatch
+    // and nothing connected them. Neither card's tests could see it, because each was
+    // testing its own half against a stand-in of the other. Both halves are asserted
+    // wired in `scene-runtime.test.ts` and `primitive-factory.test.ts`.
+    this.graph = new SceneGraph({ lights: lightFactory, primitives: primitiveFactory })
     this.highlights = new HighlightLayer(this.graph, this.materials)
     this.camera = new CameraController(this.graph)
     this.picker = new Picker(this.graph)

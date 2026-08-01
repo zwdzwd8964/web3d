@@ -94,6 +94,7 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 | 7 | `checkIntegrity` 新增 `I3-actions-unchecked` 一档 info：未注入动作解析器时显式声明"动作参数内的引用未检查" | — （不改变任何检查项语义，仅拒绝把"没查"报成"通过"） |
 | 11 | T-110 明列的「逐级加载压力测试」在任何规范里都没有定义，实现为场景副本倍增阶梯（×1/×2/×4/×8） | ADR-0016 |
 | 12 | HDR 解析用 `HDRLoader` 而非进化规划写的 `RGBELoader` | — （three 0.185 里 `RGBELoader` 是已废弃别名，构造即打印弃用警告；同一个 RGBE 解析器，零新增依赖，不构成设计取舍） |
+| 13 | 原始体的朝向与分段数：规范只冻结了语义尺寸，两者都没写 | ADR-0017 |
 
 `@w3/schema` 中另加了两个规范未列出的文件：`selectors.ts`（纯查询，T-014 点名要 `getAncestors`
 等）与 `rule.ts`（承载 EventDescriptor / Condition / Action 信封 / Rule 的数据形状——
