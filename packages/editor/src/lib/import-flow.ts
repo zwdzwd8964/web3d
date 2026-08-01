@@ -1,8 +1,8 @@
-import type { Asset, AssetAudit, AssetStats, IdFactory, Node, SceneDocument } from '@w3/schema'
-import { collectAllIds, defaultIdFactory, remapAssetRefs } from '@w3/schema'
+import type { Asset, AssetAudit, AssetStats, IdFactory, Media, Node, SceneDocument } from '@w3/schema'
+import { collectAllIds, createMediaRecord, defaultIdFactory, remapAssetRefs } from '@w3/schema'
 import type { MigrationReport } from '@w3/schema'
 import type { AuditResult } from '@w3/core'
-import { AssetLoader, auditGlb, auditImage, computeNormalization, instantiate, renderThumbnail } from '@w3/core'
+import { AssetLoader, auditGlb, auditImage, auditMedia, computeNormalization, instantiate, renderThumbnail } from '@w3/core'
 import type { LoadedAsset } from '@w3/core'
 import type { BlobHash, StorageProvider } from '@w3/storage'
 import { extensionOf, hashBytes, hashToPath } from '@w3/storage'
@@ -23,6 +23,8 @@ export type ImportStage =
   | 'hashing'
   | 'deduplicating'
   | 'auditing'
+  /** v0.5 · reading a media file's length from the browser (T-160). */
+  | 'measuring'
   | 'normalizing'
   | 'storing'
   | 'thumbnailing'
@@ -48,6 +50,14 @@ export interface ImportOptions {
   readonly now?: () => string
   readonly onProgress?: (progress: ImportProgress) => void
   /**
+   * Reads a media file's length, in seconds. Injected because it needs an
+   * `HTMLMediaElement`, and the import pipeline's tests run in plain Node.
+   *
+   * Resolving to null means 「浏览器不肯说」 — a real outcome for a container it can store
+   * but not decode — and the media record then carries no `durationS` at all.
+   */
+  readonly readDuration?: (bytes: ArrayBuffer, mimeType: string) => Promise<number | null>
+  /**
    * Renders the asset's thumbnail. Injected so the flow stays testable in Node — the
    * real one needs a GPU, and a missing thumbnail must never be able to fail an import.
    */
@@ -72,6 +82,8 @@ export interface ImportResult {
    * function, not its use.
    */
   readonly remapped?: SceneDocument
+  /** v0.5 · the media record an audio/video import creates alongside the asset (T-160). */
+  readonly media?: Media
   /** True when the bytes were already in storage — a second upload of the same file. */
   readonly deduplicated: boolean
   readonly hash: BlobHash
@@ -82,7 +94,7 @@ export interface ImportResult {
 /* -------------------------------------------------------------------------- */
 
 /** The asset kinds the importer can produce. `media` arrives in T-160. */
-export type ImportKind = 'model' | 'texture' | 'hdri'
+export type ImportKind = 'model' | 'texture' | 'hdri' | 'audio' | 'video'
 
 /** Extension → kind. The extension is the user's declaration; the header check confirms it. */
 const KIND_BY_EXTENSION: Record<string, ImportKind> = {
@@ -94,6 +106,14 @@ const KIND_BY_EXTENSION: Record<string, ImportKind> = {
   '.webp': 'texture',
   '.ktx2': 'texture',
   '.hdr': 'hdri',
+  // v0.5 · T-160. A whitelist rather than a sniff: the browser decides whether it can play
+  // a container, and finding that out AFTER storing the bytes means an asset the user can
+  // see in the library and can never hear.
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.ogg': 'audio',
+  '.mp4': 'video',
+  '.webm': 'video',
 }
 
 /** What a file picker should accept today. Kept next to the table it is derived from. */
@@ -124,7 +144,9 @@ export async function importAsset(options: ImportOptions): Promise<ImportResult>
   if (kind === null) {
     throw new Error(`不支持的文件类型：${options.file.name}。当前支持 ${IMPORT_ACCEPT}`)
   }
-  return kind === 'model' ? importModel(options) : importImage(options, kind === 'hdri' ? 'hdri' : 'texture')
+  if (kind === 'model') return importModel(options)
+  if (kind === 'audio' || kind === 'video') return importMedia(options, kind)
+  return importImage(options, kind === 'hdri' ? 'hdri' : 'texture')
 }
 
 /**
@@ -326,6 +348,10 @@ export function applyImport(draft: SceneDocument, result: ImportResult): void {
   }
 
   draft.nodes.push(...(result.nodes as Node[]))
+
+  // v0.5 · an audio or video import also creates the media entry the user picks from
+  // (T-160). Same commit as the asset: 「导入了但媒体库里没有」 is a state with no meaning.
+  if (result.media && !draft.media.some((m) => m.id === result.media!.id)) draft.media.push(result.media)
 }
 
 /**
@@ -383,4 +409,135 @@ export async function placeInstance(options: {
     existingIds: collectAllIds(doc),
   })
   return nodes
+}
+
+/** What a browser needs to be told the bytes are, to decide whether it can play them. */
+const MEDIA_MIME: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+}
+
+/**
+ * T-160 · imports an audio or video file.
+ *
+ * Produces TWO records: an `Asset` (the bytes, hashed and graded like everything else) and a
+ * `Media` (what the user names, picks and plays). They are separate because one file can be
+ * referenced by several media entries in principle, and because `durationS` is a property of
+ * the content rather than of the storage.
+ *
+ * `durationS` is read once, here, and written into the document. Reading it at play time
+ * instead would mean `playMedia` could not know how long to await until the file had already
+ * started downloading — and D19's whole point is that a sequence knows its own timing.
+ */
+export async function importMedia(options: ImportOptions, kind: 'audio' | 'video'): Promise<ImportResult> {
+  const { file, doc, storage } = options
+  const newId = options.newId ?? defaultIdFactory
+  const now = options.now ?? (() => new Date().toISOString())
+  const report = (stage: ImportStage, message: string) => options.onProgress?.({ stage, message })
+
+  report('hashing', '正在计算内容哈希…')
+  const hash = await hashBytes(new Uint8Array(file.bytes))
+
+  report('deduplicating', '正在查重…')
+  const deduplicated = await storage.hasBlob(hash)
+  const existing = doc.assets.find((a) => a.hash === hash)
+
+  report('auditing', '正在体检…')
+  const audit = auditMedia(file.bytes.byteLength, { now, scope: kind })
+
+  report('measuring', '正在读取时长…')
+  const extension = extensionOf(file.name)
+  const durationS = await readDurationOf(options, file.bytes, MEDIA_MIME[extension] ?? '')
+
+  if (existing) {
+    // The bytes are already here, but the user still asked for a media entry — the same
+    // narration used at two steps is two entries with two names pointing at one file.
+    const media = createMediaRecord(doc, {
+      type: kind,
+      assetId: existing.id,
+      name: file.name,
+      ...(durationS === null ? {} : { durationS }),
+      ctx: { newId, now },
+    })
+    report('done', '导入完成')
+    return { asset: existing, audit, nodes: [], media, deduplicated: true, hash }
+  }
+
+  report('storing', '正在写入存储…')
+  if (!deduplicated) await storage.putBlob(new Uint8Array(file.bytes))
+
+  const assetId = newId('asset', collectAllIds(doc))
+  const asset: Asset = {
+    id: assetId,
+    type: kind,
+    name: file.name,
+    hash,
+    url: hashToPath(hash, extension || (kind === 'audio' ? '.mp3' : '.mp4')),
+    version: 1,
+    lineageId: assetId,
+    stats: audit.stats satisfies AssetStats,
+    audit: audit.audit satisfies AssetAudit,
+  }
+
+  const media = createMediaRecord(
+    { ...doc, assets: [...doc.assets, asset] },
+    {
+      type: kind,
+      assetId,
+      name: file.name,
+      ...(durationS === null ? {} : { durationS }),
+      ctx: { newId, now },
+    },
+  )
+
+  report('done', '导入完成')
+  return { asset, audit, nodes: [], media, deduplicated, hash }
+}
+
+/**
+ * Reads a duration, and treats every failure as 「不知道」 rather than as an error.
+ *
+ * A container the browser can store but not decode is a real case (an exotic codec in an
+ * `.mp4`), and it must not stop the import: the file is still in the project, still listed,
+ * still downloadable. What it costs is that `playMedia` cannot await it — D19 says resolve
+ * immediately and warn, which is what an absent `durationS` means downstream.
+ */
+async function readDurationOf(options: ImportOptions, bytes: ArrayBuffer, mimeType: string): Promise<number | null> {
+  const read = options.readDuration ?? browserDurationReader()
+  if (!read) return null
+  try {
+    const seconds = await read(bytes, mimeType)
+    return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null
+  } catch {
+    return null
+  }
+}
+
+/** How long a browser waits for metadata before giving up and calling the length unknown. */
+export const DURATION_TIMEOUT_MS = 5_000
+
+/** The browser reader, or nothing outside a browser (the tests and the parity run). */
+export function browserDurationReader(): ImportOptions['readDuration'] | undefined {
+  if (typeof document === 'undefined' || typeof URL.createObjectURL !== 'function') return undefined
+  return (bytes, mimeType) =>
+    new Promise<number | null>((resolve) => {
+      const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }))
+      const element = document.createElement(mimeType.startsWith('video') ? 'video' : 'audio')
+      // Revoked on every path, including the timeout: one leaked object URL pins the whole
+      // file in memory for the life of the tab.
+      const finish = (value: number | null) => {
+        clearTimeout(timer)
+        element.removeAttribute('src')
+        URL.revokeObjectURL(url)
+        resolve(value)
+      }
+      const timer = setTimeout(() => finish(null), DURATION_TIMEOUT_MS)
+      element.preload = 'metadata'
+      element.onloadedmetadata = () => finish(Number.isFinite(element.duration) ? element.duration : null)
+      element.onerror = () => finish(null)
+      element.src = url
+    })
 }

@@ -298,3 +298,40 @@ export function auditImage(bytes: ArrayBuffer, options: AuditOptions & { scope: 
   if (!info) throw new Error('无法识别的图片格式，支持 png / jpg / webp / ktx2 / hdr')
   return grade(measureImage(info, bytes.byteLength), options)
 }
+
+/**
+ * Measures an audio or video file (T-160).
+ *
+ * There is nothing to inspect inside the bytes: an MP3's length is in a header format that
+ * differs per encoder, and a container's dimensions need a demuxer. So the only measurement
+ * is SIZE — which is also the only one the policy grades for these scopes, and the only one
+ * that costs the user anything before playback starts.
+ *
+ * `durationS` is read separately, by the browser, at import (SCHEMA_SPEC §6.5). It is a
+ * document field rather than an audit metric because it is a property of the content, not a
+ * budget to stay under.
+ */
+export interface MediaMeasurements extends AuditMeasurements {
+  readonly audioBytes: number
+  readonly videoBytes: number
+}
+
+export function measureMedia(byteLength: number): MediaMeasurements {
+  return {
+    tris: 0,
+    materials: 0,
+    textures: 0,
+    bytes: byteLength,
+    textureBytes: 0,
+    nodes: 0,
+    animations: [],
+    maxTextureSize: 0,
+    audioBytes: byteLength,
+    videoBytes: byteLength,
+  }
+}
+
+/** Grades an audio or video file against its scope's one limit. */
+export function auditMedia(byteLength: number, options: AuditOptions & { scope: 'audio' | 'video' }): AuditResult {
+  return grade(measureMedia(byteLength), options)
+}

@@ -5,7 +5,15 @@ import { Document, NodeIO } from '@gltf-transform/core'
 import { MemoryProvider, hashBytes } from '@w3/storage'
 import { produce } from 'immer'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { applyImport, classifyImport, importAsset, importModel, placeInstance, summarizeImport } from '../src/lib/import-flow.js'
+import {
+  applyImport,
+  classifyImport,
+  importAsset,
+  importMedia,
+  importModel,
+  placeInstance,
+  summarizeImport,
+} from '../src/lib/import-flow.js'
 import { ProjectSession } from '../src/project/session.js'
 
 /**
@@ -403,5 +411,138 @@ describe('T-150 · image and environment imports', () => {
         loader: session.loader,
       }),
     ).rejects.toThrow(/无法识别的图片格式/)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* T-160 · media import                                                        */
+/* -------------------------------------------------------------------------- */
+
+describe('media import (T-160)', () => {
+  const bytes = (size = 1024) => new ArrayBuffer(size)
+
+  /** Imports a media file with an injected duration reader, so no browser is needed. */
+  const importOne = (
+    doc: SceneDocument,
+    name: string,
+    kind: 'audio' | 'video',
+    duration: number | null = 12.5,
+    size = 1024,
+  ) =>
+    importMedia(
+      {
+        file: { name, bytes: bytes(size) },
+        doc,
+        storage,
+        loader: session.loader,
+        readDuration: async () => duration,
+      },
+      kind,
+    )
+
+  it('classifies the whitelisted formats and nothing else', () => {
+    // A whitelist rather than a sniff: the browser decides whether it can play a container,
+    // and finding that out AFTER storing the bytes means an asset the user can see in the
+    // library and can never hear.
+    expect(classifyImport('讲解.mp3')).toBe('audio')
+    expect(classifyImport('讲解.wav')).toBe('audio')
+    expect(classifyImport('讲解.ogg')).toBe('audio')
+    expect(classifyImport('演示.mp4')).toBe('video')
+    expect(classifyImport('演示.webm')).toBe('video')
+    expect(classifyImport('讲解.aac')).toBeNull()
+    expect(classifyImport('演示.mov')).toBeNull()
+  })
+
+  it('creates an asset AND a media record', async () => {
+    const doc = createGoldenPathDocument()
+    const result = await importOne(doc, '讲解.mp3', 'audio')
+
+    expect(result.asset.type).toBe('audio')
+    expect(result.media).toBeDefined()
+    expect(result.media!.type).toBe('audio')
+    expect(result.media!.assetId).toBe(result.asset.id)
+    expect(result.media!.name, '默认名字就是原文件名').toBe('讲解.mp3')
+  })
+
+  it('records the duration the browser reported', async () => {
+    const result = await importOne(createGoldenPathDocument(), '讲解.mp3', 'audio', 12.5)
+    expect(result.media!.durationS).toBe(12.5)
+  })
+
+  it('OMITS durationS when the browser will not say', async () => {
+    // Absent means 「不知道」 and `playMedia` resolves immediately with a warning (D19).
+    // A fabricated length would hang a sequence on a number nobody measured.
+    const result = await importOne(createGoldenPathDocument(), '讲解.mp3', 'audio', null)
+    expect(result.media!.durationS).toBeUndefined()
+    expect('durationS' in result.media!).toBe(false)
+  })
+
+  it('treats a nonsense duration as unknown', async () => {
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = await importOne(createGoldenPathDocument(), '讲解.mp3', 'audio', value)
+      expect(result.media!.durationS, `${value}`).toBeUndefined()
+    }
+  })
+
+  it('survives a duration reader that throws', async () => {
+    // A container the browser can store but not decode is a real case, and it must not stop
+    // the import: the file is still in the project, still listed, still downloadable.
+    const doc = createGoldenPathDocument()
+    const result = await importMedia(
+      {
+        file: { name: '讲解.mp3', bytes: bytes() },
+        doc,
+        storage,
+        loader: session.loader,
+        readDuration: async () => {
+          throw new Error('decode failed')
+        },
+      },
+      'audio',
+    )
+    expect(result.media!.durationS).toBeUndefined()
+    expect(result.asset.type).toBe('audio')
+  })
+
+  it('applyImport lands both records in one commit, and the document validates', async () => {
+    const before = createGoldenPathDocument()
+    const result = await importOne(before, '讲解.mp3', 'audio')
+    const after = produce(before, (draft) => applyImport(draft, result))
+
+    expect(after.assets).toHaveLength(before.assets.length + 1)
+    expect(after.media).toHaveLength(before.media.length + 1)
+    expect(errorsOf(checkIntegrity(after))).toEqual([])
+  })
+
+  it('a second import of the same bytes reuses the asset but adds a media entry', async () => {
+    // The same narration used at two steps is two entries with two names over one file.
+    const before = createGoldenPathDocument()
+    const first = await importOne(before, '讲解.mp3', 'audio')
+    const withFirst = produce(before, (draft) => applyImport(draft, first))
+    const second = await importOne(withFirst, '讲解.mp3', 'audio')
+    const after = produce(withFirst, (draft) => applyImport(draft, second))
+
+    expect(second.deduplicated).toBe(true)
+    expect(second.asset.id).toBe(first.asset.id)
+    expect(after.assets).toHaveLength(before.assets.length + 1)
+    expect(after.media).toHaveLength(before.media.length + 2)
+    expect(errorsOf(checkIntegrity(after))).toEqual([])
+  })
+
+  it('grades against the media limits and says something specific when over', async () => {
+    const over = await importOne(createGoldenPathDocument(), '讲解.wav', 'audio', 12.5, 11 * 1024 * 1024)
+    const failing = over.audit.failing.map((f) => f.metric)
+
+    expect(failing).toContain('audioBytes')
+    const advice = over.audit.failing.find((f) => f.metric === 'audioBytes')!.advice
+    expect(advice, '建议要能照着做，不能只说"太大了"').toMatch(/MP3|单声道|拆/)
+  })
+
+  it('does not grade a video against the audio limit', async () => {
+    // 11 MB is over the audio limit and well under the video one. Grading every scope
+    // against every metric is how a report becomes noise nobody reads.
+    const video = await importOne(createGoldenPathDocument(), '演示.mp4', 'video', 30, 11 * 1024 * 1024)
+    expect(video.audit.failing.map((f) => f.metric)).not.toContain('audioBytes')
+    expect(video.audit.verdict).not.toBe('block')
   })
 })

@@ -483,12 +483,21 @@
 
 ## E16 · 多媒体
 
-### [ ] T-160 · 媒体导入与记录
-- **依赖** T-150 · **预估** 0.8d · **实际** ___
+### [x] T-160 · 媒体导入与记录
+- **依赖** T-150 · **预估** 0.8d · **实际** 0.7h
 - **独占** `packages/editor/src/lib/import-flow.ts`（媒体段）, `packages/core/src/assets/policy.ts`（媒体阈值）, 对应测试
 - **做** audio / video / image 导入 → asset（对应 type）+ media 记录（`name` = 原文件名；`durationS` 经 `HTMLMediaElement` 元数据读取，失败置空 + warn）；policy 增量：音频 ≤ 10MB、视频 ≤ 50MB、格式白名单（mp3/wav/ogg · mp4/webm · png/jpg/webp）。
 - **验收** `durationS` 与真实时长误差 < 0.1s；超标与格式外文件的 advice 具体
-- **自测** `pnpm -F @w3/editor test import-flow`
+- **自测** `pnpm -F @w3/editor test import-flow`（31）
+- **实际情况**：格式判定用**白名单**而不是嗅探——能不能播是浏览器说了算，而在**存完字节之后**
+  才发现播不了，等于给了用户一个在库里看得见、永远听不到的资产。
+  `durationS` 在导入时读一次写进文档，而不是播的时候现读：D19 的整个意思就是 sequence 得知道
+  自己的时长，现读意味着 `playMedia` 要等文件开始下载才知道该 await 多久。
+  读时长的函数是**注入**的（要 `HTMLMediaElement`，而导入管线的测试跑在纯 Node）；读失败、读出
+  0 / NaN / Infinity 一律当作**不知道**，`durationS` 整个字段省略——编一个没人量过的数字会把
+  sequence 挂在上面。
+  **「误差 < 0.1s」这条在 T-161 的 E2E 里用一段合成的、已知长度的 WAV 验**：本卡的注入式读取
+  证明不了浏览器读得准，只能证明我的代码把浏览器说的话原样收下了。
 
 ### [ ] T-161 · 媒体库面板
 - **依赖** T-160 · **预估** 0.5d · **实际** ___

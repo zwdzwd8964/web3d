@@ -27,6 +27,10 @@ export interface AssetPolicy {
   readonly maxImageBytes: number
   /** v0.5 · a standalone `.hdr` imported as an environment map. */
   readonly maxHdriBytes: number
+  /** v0.5 · an audio file. Small on purpose: it downloads before anyone hears it. */
+  readonly maxAudioBytes: number
+  /** v0.5 · a video file. */
+  readonly maxVideoBytes: number
 }
 
 export const DEFAULT_POLICY: AssetPolicy = {
@@ -46,6 +50,12 @@ export const DEFAULT_POLICY: AssetPolicy = {
   // decode time, not about the GPU.
   maxImageBytes: 8 * 1024 * 1024,
   maxHdriBytes: 32 * 1024 * 1024,
+
+  // v0.5 · media (T-160). Both are about WAITING, not about the GPU: a narration clip is
+  // heard once and a video plays inside a hotspot panel the size of a postcard, so the
+  // limits are set where the download stops being unnoticeable on a slow internal network.
+  maxAudioBytes: 10 * 1024 * 1024,
+  maxVideoBytes: 50 * 1024 * 1024,
 }
 
 /** A measurement is flagged "接近上限" once it passes this fraction of the limit. */
@@ -58,7 +68,7 @@ export const WARN_RATIO = 0.8
  * graded against `maxTriangles` reports "三角面数 0 / 300,000 通过", which is not wrong and
  * is exactly the kind of noise that teaches people to stop reading the report.
  */
-export type PolicyScope = 'model' | 'image' | 'hdri'
+export type PolicyScope = 'model' | 'image' | 'hdri' | 'audio' | 'video'
 
 export interface MetricSpec {
   readonly metric: string
@@ -138,6 +148,25 @@ export const METRICS: readonly MetricSpec[] = [
     scopes: ['image'],
     advice: (v, l) =>
       `图片 ${formatBytes(v)} 超出 ${formatBytes(l)}。建议改存 JPEG（无透明通道时）或转 KTX2；贴图的下载时间直接变成用户打开场景的等待时间。`,
+  },
+  /* --- v0.5 · media (T-160) ------------------------------------------------ */
+  {
+    metric: 'audioBytes',
+    label: '音频文件大小',
+    limit: (p) => p.maxAudioBytes,
+    unit: 'bytes',
+    scopes: ['audio'],
+    advice: (v, l) =>
+      `音频 ${formatBytes(v)} 超出 ${formatBytes(l)}。建议转 MP3 128kbps 单声道（讲解语音用不到立体声），或把长录音拆成按步骤触发的短段——用户听到第一个字之前要等的就是这段下载。`,
+  },
+  {
+    metric: 'videoBytes',
+    label: '视频文件大小',
+    limit: (p) => p.maxVideoBytes,
+    unit: 'bytes',
+    scopes: ['video'],
+    advice: (v, l) =>
+      `视频 ${formatBytes(v)} 超出 ${formatBytes(l)}。建议压到 720p / H.264，码率 2Mbps 上下；视频在热点面板里播放，尺寸远小于原始分辨率，多出来的像素只变成等待时间。`,
   },
   {
     metric: 'hdriBytes',
