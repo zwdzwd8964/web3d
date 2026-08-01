@@ -108,3 +108,34 @@ test('④ 清除槽位真的清掉', async ({ page }) => {
   await page.locator('.field', { hasText: '基础色' }).getByRole('button', { name: '清除基础色贴图' }).click()
   await expect(slot).toHaveText('（未设置）')
 })
+
+test('⑤ 预设应用到共享材质前先问，「分离后应用」只改这一个', async ({ page }) => {
+  // The trap this guards is the one everyone hits first: pick 「玻璃」 on one bolt and the
+  // whole pump turns to glass. The runtime's clone-on-write cannot help here — the DOCUMENT
+  // has one record, and the other objects may be behind the camera.
+  await page.goto('/')
+  await expect(page.locator('canvas.viewport__canvas')).toBeVisible()
+  await page.waitForTimeout(SETTLE * 3)
+
+  // Put 泵体 on 阀盖's material, so the record really is shared.
+  await page.locator('.tree-row__name', { hasText: '泵体' }).click()
+  await page.getByRole('button', { name: '材质' }).click()
+  await page.locator('.field', { hasText: '材质' }).locator('select').selectOption({ index: 1 })
+  await page.waitForTimeout(SETTLE)
+  await expect(page.getByText('个对象共用', { exact: false })).toBeVisible()
+
+  const materialCount = async () =>
+    await page.locator('.field', { hasText: '材质' }).locator('select option').count()
+  const before = await materialCount()
+
+  await page.getByRole('button', { name: '玻璃', exact: true }).click()
+  // Asked, not applied: the question is the feature.
+  await expect(page.getByText('要应用到哪里', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: '分离后应用' }).click()
+  await page.waitForTimeout(SETTLE)
+
+  // A new record exists, and this node is on it alone.
+  expect(await materialCount()).toBe(before + 1)
+  await expect(page.getByText('个对象共用', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('物理参数')).toBeVisible()
+})

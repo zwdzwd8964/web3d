@@ -1147,3 +1147,11 @@ code {
   min-height: 76px;
   color: #8d99a5;
 }
+
+/* T-154 · the preset buttons. A wrapping row: ten of them, all equally reachable. */
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+}

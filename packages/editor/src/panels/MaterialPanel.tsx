@@ -12,6 +12,8 @@ import {
   setUv,
   usersOfMaterial,
 } from '../lib/material-edit.js'
+import { MATERIAL_PRESETS, applyPreset, nodesUsing, separateMaterial } from '../lib/material-presets.js'
+import type { MaterialPreset } from '../lib/material-presets.js'
 import { commonValue } from '../lib/selection-values.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { NumberField, TextField } from '../widgets/NumberField.js'
@@ -41,6 +43,8 @@ export function MaterialPanel() {
   const selection = useDocumentSelector((s) => s.selection)
   const { commit, preview, previewStart, previewCommit } = useDocumentActions()
   const [picking, setPicking] = useState<keyof MaterialMaps | null>(null)
+  /** A preset waiting on the 「分离 / 全部」 question, when the material is shared. */
+  const [pendingPreset, setPendingPreset] = useState<MaterialPreset | null>(null)
 
   const selected = useMemo(() => doc.nodes.filter((n) => selection.includes(n.id)), [doc.nodes, selection])
   const materialId = useMemo(() => commonValue(selected, (n) => n.overrides.materialId ?? null), [selected])
@@ -67,6 +71,45 @@ export function MaterialPanel() {
   }
 
   const uv = material?.params.uv ?? IDENTITY_UV
+
+  /**
+   * Applies a preset, asking first when the material is shared.
+   *
+   * The question is not a nag: 「这份材质另外 3 个对象也在用」 is the difference between a
+   * one-object change and a scene-wide one, and it is invisible from the viewport when the
+   * other objects are behind the camera. Asking once beats an undo the user has to guess at.
+   */
+  const choosePreset = (preset: MaterialPreset) => {
+    if (!material) return
+    if (nodesUsing(doc, material.id).length > 1) {
+      setPendingPreset(preset)
+      return
+    }
+    commit(`应用预设 ${preset.label}`, (draft) => applyPreset(draft, material.id, preset))
+  }
+
+  /** 「应用到全部」 — the shared record itself takes the preset. */
+  const applyToAll = (preset: MaterialPreset) => {
+    if (!material) return
+    commit(`应用预设 ${preset.label}`, (draft) => applyPreset(draft, material.id, preset))
+    setPendingPreset(null)
+  }
+
+  /**
+   * 「分离后应用」 — one commit: separate every selected node, then fill the copies.
+   *
+   * One entry rather than two, because "separate" on its own is not something the user
+   * asked for: they asked for this object to look like glass.
+   */
+  const separateThenApply = (preset: MaterialPreset) => {
+    commit(`分离并应用预设 ${preset.label}`, (draft) => {
+      for (const nodeId of selection) {
+        const copyId = separateMaterial(draft, nodeId)
+        if (copyId) applyPreset(draft, copyId, preset)
+      }
+    })
+    setPendingPreset(null)
+  }
 
   /** One uv control. Dragging previews; releasing commits — D2, one drag one undo entry. */
   const uvField = (label: string, value: number, write: (draft: SceneDocument, v: number) => void, step: number) => (
@@ -126,7 +169,54 @@ export function MaterialPanel() {
             <>
               {/* 铁律 9 is enforced by the runtime, but the user still has to be able to SEE
                   which case they are in before they drag a slider. */}
-              {users > 1 && <p className="panel__note">这份材质被 {users} 个对象共用，改动会同时生效。</p>}
+              {users > 1 && (
+                <p className="panel__note">
+                  这份材质被 {users} 个对象共用，改动会同时生效。
+                  <button
+                    type="button"
+                    className="tbtn"
+                    onClick={() =>
+                      commit('分离材质', (draft) => {
+                        for (const nodeId of selection) separateMaterial(draft, nodeId)
+                      })
+                    }
+                  >
+                    分离材质
+                  </button>
+                </p>
+              )}
+
+              <fieldset className="fieldset">
+                <legend>预设</legend>
+                {pendingPreset !== null ? (
+                  <p className="panel__note">
+                    「{pendingPreset.label}」要应用到哪里？这份材质另有 {users - 1} 个对象在用。
+                    <button type="button" className="tbtn" onClick={() => separateThenApply(pendingPreset)}>
+                      分离后应用
+                    </button>
+                    <button type="button" className="tbtn" onClick={() => applyToAll(pendingPreset)}>
+                      应用到全部
+                    </button>
+                    <button type="button" className="tbtn" onClick={() => setPendingPreset(null)}>
+                      取消
+                    </button>
+                  </p>
+                ) : (
+                  <div className="presets">
+                    {MATERIAL_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className="tbtn"
+                        aria-pressed={material.preset === preset.id}
+                        onClick={() => choosePreset(preset)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
 
               <TextField
                 label="名称"
