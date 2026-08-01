@@ -14,7 +14,8 @@
     "  nd_b3n5m7k9 阀盖 (has the click rule)   nd_r5t8y1u3 泵组 (has none)",
     "  hs_q1s3u5w7 拆卸提示                      step (number, default 1)",
     "hover 与 hotspotClick 必须在脚本里：它们是唯一两条曾经在两侧含义不同的输入路径，",
-    "脚本不含它们时 parity 会一直绿着，而分叉照旧存在。"
+    "脚本不含它们时 parity 会一直绿着，而分叉照旧存在。",
+    "v0.5 · T-171：末尾两步覆盖 setLight 与 playMedia(await:true)。灯与媒体是 v0.5 新增的两条轨迹，脚本不含它们时 parity 会一直绿着而分叉照旧存在——与 hover / hotspotClick 当年同理。时刻必须排在既有末步之后：replay 的 while(clock < atMs) 只前进不后退，插一个更小的 atMs 会让它在末尾瞬间触发，await 那一步来不及跑完就被拆台打断。"
   ],
   "steps": [
     {
@@ -117,6 +118,21 @@
     {
       "atMs": 7000,
       "note": "留出时间让最后一条 sequence 跑完，否则两侧只是同样地『还没结束』",
+      "event": {
+        "kind": "idle"
+      }
+    },
+    {
+      "atMs": 7400,
+      "note": "v0.5 · 点击泵体触发灯光+媒体规则：setLight 立即，playMedia await 0.4s",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_v7w9x2z4"
+      }
+    },
+    {
+      "atMs": 8200,
+      "note": "v0.5 · 空转到音频播完之后：await 的那一步必须在两侧同一时刻结束",
       "event": {
         "kind": "idle"
       }
