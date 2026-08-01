@@ -300,9 +300,14 @@
   不动——一个会冻住 gizmo 的关闭开关比没有开关更糟。角度在**边界**处转弧度（用户输入一律是度）。
   三次变异检验：向下取整、Y 也吸附、0 直接透传给 three。
 
-### [ ] T-144 · 复制 / 粘贴 / Ctrl+D
-- **依赖** T-122 · **预估** 0.5d · **实际** ___
+### [x] T-144 · 复制 / 粘贴 / Ctrl+D
+- **依赖** T-122 · **预估** 0.5d · **实际** 1.0h
 - **独占** `packages/editor/src/store/clipboard.ts`, `packages/editor/src/shortcuts.ts`（增）, `packages/editor/test/clipboard.test.ts`
+  （+ `packages/editor/src/App.tsx`：原先长在 App 里的 `useShortcuts` 搬进新模块，App 只剩一行 import）
+- **记** 快捷键的判断逻辑抽成纯函数 `handleShortcut(event, deps)`，hook 只负责接线：编辑器单测跑在纯 Node（无 jsdom），
+  留在 `useEffect` 里的规则只能被描述、无法被执行。「一次粘贴一条 commit」的断言用**补丁批次数**而不是 undo 步数——
+  History 会把 500ms 内同名 commit 合并，逐节点提交在 undo 下看起来一模一样（变异 M7 第一次存活）。
+  `taken.add(id)` 的变异（M4）同样存活过一次：顺序 id 工厂自带计数器，无论传什么都不会重复；补了一条会撞的工厂才照出来。
 - **做** 复制节点**子树**：全部新 id、保持相对层级与 order 间隔、材质引用共享（不 clone 记录）、**不复制规则与热点**（灰区裁决）；粘贴位置 = 原位偏移 `[0.2, 0, 0.2]`；一次粘贴一条 commit；剪贴板为内存态（跨项目粘贴不支持）。
 - **验收** 粘贴后 `checkIntegrity` 零 error；undo 一步整树消失；输入框聚焦时快捷键不误触发（沿 T-071 语义）
 - **自测** `pnpm -F @w3/editor test clipboard`

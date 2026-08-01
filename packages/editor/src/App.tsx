@@ -1,6 +1,6 @@
 import { checkIntegrity, errorsOf, warningsOf } from '@w3/schema'
 import { createActionRefResolver } from '@w3/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Splitter } from './layout/Splitter.js'
 import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
@@ -22,6 +22,7 @@ import { useAutoSave } from './project/useAutoSave.js'
 import { useDocumentActions, useDocumentSelector } from './store/StoreContext.js'
 import { Viewport } from './viewport/Viewport.js'
 import { fullRebuildCount } from './viewport/runtime-registry.js'
+import { useShortcuts } from './shortcuts.js'
 
 /**
  * T-060 · the editor shell.
@@ -63,34 +64,6 @@ export function App() {
       <StatusBar />
     </div>
   )
-}
-
-/**
- * T-071's keyboard layer, in its minimal form.
- *
- * The guard against firing while a text field has focus is not optional: without it,
- * Ctrl+Z inside the rename box undoes a scene edit instead of the typing, which is the
- * kind of bug that erodes trust in undo generally.
- */
-function useShortcuts() {
-  const { undo, redo } = useDocumentActions()
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
-      if (!(event.ctrlKey || event.metaKey)) return
-      const key = event.key.toLowerCase()
-      if (key === 'z' && !event.shiftKey) {
-        event.preventDefault()
-        undo()
-      } else if ((key === 'z' && event.shiftKey) || key === 'y') {
-        event.preventDefault()
-        redo()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [undo, redo])
 }
 
 function TopBar() {
