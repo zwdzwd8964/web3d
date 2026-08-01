@@ -18,10 +18,12 @@ import { primitiveFactory } from './primitive-factory.js'
 import type { Bounds } from './primitive-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
+import { TextureCache, browserTextureDecoder } from './texture-cache.js'
 import { Picker } from './picker.js'
 import { SceneGraph } from './scene-graph.js'
 import type { LiveLight } from '../eca/headless.js'
 import type { EnvMapCompiler } from './environment.js'
+import type { TextureDecoder } from './texture-cache.js'
 import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
 /**
@@ -45,6 +47,8 @@ export interface SceneRuntimeOptions {
   readonly hotspotRenderer?: HotspotRenderer
   /** T-133 · injected in tests; production prefilters through PMREM, which needs GL. */
   readonly compileEnvMap?: EnvMapCompiler
+  /** T-151 · injected in tests; production uses `createImageBitmap`, which needs a browser. */
+  readonly decodeTexture?: TextureDecoder
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
@@ -66,6 +70,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly scene = new Scene()
   readonly graph: SceneGraph
   readonly materials = new MaterialRegistry()
+  /** T-151 · one Texture per texture asset, shared by every material that references it. */
+  readonly textures: TextureCache
   readonly highlights: HighlightLayer
   readonly camera: CameraController
   readonly picker: Picker
@@ -109,6 +115,15 @@ export class SceneRuntime implements RuntimeContext {
     // testing its own half against a stand-in of the other. Both halves are asserted
     // wired in `scene-runtime.test.ts` and `primitive-factory.test.ts`.
     this.graph = new SceneGraph({ lights: lightFactory, primitives: primitiveFactory })
+    // Injected so the whole cache — keying, ref counting, disposal — runs in plain Node
+    // (C8). Absent outside a browser, where there is nothing to decode into.
+    const decode = options.decodeTexture ?? browserTextureDecoder()
+    this.textures = new TextureCache({
+      resolver: options.resolver,
+      ...(decode ? { decode } : {}),
+      log: (level, message, data) => this.log(level, message, data),
+    })
+    this.materials.setTextureSource(this.textures)
     this.highlights = new HighlightLayer(this.graph, this.materials)
     this.camera = new CameraController(this.graph)
     this.picker = new Picker(this.graph)
@@ -356,6 +371,11 @@ export class SceneRuntime implements RuntimeContext {
     // Idempotent, and required on the first call: the graph materialises geometry through
     // this source, and a graph built before it was set holds only placeholders.
     this.graph.setAssetSource(this.loader)
+    // T-151 · textures the document's materials reference. `applyParams` is synchronous by
+    // D1's contract, so the bytes have to be resident BEFORE the patches that use them —
+    // the same division of labour the model loader already uses.
+    await this.textures.ensure(doc)
+    this.materials.applyAll(doc, this.graph)
     return loaded
   }
 
@@ -433,6 +453,7 @@ export class SceneRuntime implements RuntimeContext {
     if (this.disposed) return
     this.disposed = true
     this.stop()
+    this.textures.dispose()
     for (const wait of this.waits) {
       clearTimeout(wait.timer)
       wait.reject(new AbortError())

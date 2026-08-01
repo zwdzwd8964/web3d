@@ -392,12 +392,24 @@
   和 `AssetPanel.tsx` 的 accept / 分派（不改它的话新路径无法从 UI 到达，等于交付了一段
   死代码）。三次变异检验：JPEG 帧头假设固定偏移、NPOT 变成 fail、grade 忽略 scope。
 
-### [ ] T-151 · 贴图槽位应用与纹理缓存（core）
-- **依赖** T-130, T-150 · **预估** 0.8d · **实际** ___
+### [x] T-151 · 贴图槽位应用与纹理缓存（core）
+- **依赖** T-130, T-150 · **预估** 0.8d · **实际** 1.1h
 - **独占** `packages/core/src/runtime/material-registry.ts`, `packages/core/src/runtime/texture-cache.ts`, `packages/core/test/runtime/material-registry.test.ts`
 - **做** 六个贴图槽位接通：`AssetResolver` 取字节 → Texture（按 assetId 缓存 + 引用计数 dispose）；**色彩空间按槽位固定处理**（D3 的表不变：map/emissiveMap 走 sRGB，normal/roughness/metalness/ao 保持线性）；`uv` 块（repeat / offset / rotationDeg）应用到全部已挂槽位；aoMap 的 UV 通道按 three 0.185 行为处理并加回归断言；一切仍走 clone-on-write。
 - **验收** 共享同源材质的两个 mesh，其一挂图另一不变（铁律 9 回归）；uv 更新增量生效不重建材质实例
-- **自测** `pnpm -F @w3/core test material-registry`
+- **自测** `pnpm -F @w3/core test material-registry`（30）+ `pnpm -F @w3/core test texture-cache`（11）
+- **实际情况**：`setTextureSource` 在这张卡之前**全仓没有一个调用者**——六个槽位的代码在，
+  喂给它的东西没有，又一处"两半都在、中间没接线"。
+  解码函数是注入的：`createImageBitmap` 要浏览器，而缓存里真正会出错的部分（键、并发去重、
+  引用计数、释放）跑在纯 Node（C8）。
+  **取消贴图必须真的取消**：原来的 `if (assetId === undefined) continue` 会把上一张图留在材质上，
+  面板里删掉法线贴图看不出任何变化，用户会再删一次。
+  uv 每次 apply 都重写一遍，因为 three 把 repeat/offset/rotation 存在 **Texture** 上而缓存让
+  Texture 跨材质共享——两个材质用同一张图不同平铺时后写的赢。这是"一资产一 Texture"的已知代价，
+  登记在代码注释里，换来的是不炸显存。
+  aoMap 那条变异第一次**存活**：three 0.185 的 `Texture.channel` 默认就是 0，所以我那条断言测的是
+  three 不是我的代码（注释里"three 默认读第二套 uv"也是错的，已改）。改成"贴图带着 channel=1 进来
+  也要被拉回 0"才转红。
 
 ### [ ] T-153 · physical 参数与 base 升级（core）
 - **依赖** T-151 · **预估** 0.5d · **实际** ___

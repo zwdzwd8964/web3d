@@ -1,5 +1,14 @@
 import type { Material as MaterialDef, MaterialMaps, SceneDocument } from '@w3/schema'
-import { Color, LinearSRGBColorSpace, SRGBColorSpace, DoubleSide, FrontSide, BackSide } from 'three'
+import {
+  BackSide,
+  ClampToEdgeWrapping,
+  Color,
+  DoubleSide,
+  FrontSide,
+  LinearSRGBColorSpace,
+  RepeatWrapping,
+  SRGBColorSpace,
+} from 'three'
 import type { Material, Mesh, Object3D, Texture } from 'three'
 import type { SceneGraph } from './scene-graph.js'
 
@@ -21,10 +30,10 @@ import type { SceneGraph } from './scene-graph.js'
  * scene where every part legitimately shares one steel material.
  */
 
-/** Where a texture assetId turns into a three Texture. Injected; core does no I/O. */
-export interface TextureSource {
-  get(assetId: string): Texture | undefined
-}
+// `TextureSource` moved to `texture-cache.ts` when the cache arrived (T-151): the thing
+// that PRODUCES textures should own the shape of the handle it hands out.
+import type { TextureSource } from './texture-cache.js'
+export type { TextureSource }
 
 /**
  * D3 · colour space is fixed per slot and is deliberately NOT a document field.
@@ -267,12 +276,82 @@ export function applyParams(material: Material, def: MaterialDef, textures: Text
 
   for (const slot of Object.keys(TEXTURE_SLOT_COLOR_SPACE) as TextureSlot[]) {
     const assetId = p.maps[slot]
-    if (assetId === undefined) continue
+
+    // Unsetting a slot has to CLEAR it. Skipping the undefined case leaves the previous
+    // texture hanging on the material, so removing a normal map in the panel does nothing
+    // visible and the user removes it again, and again.
+    if (assetId === undefined) {
+      if (target[slot] != null) target[slot] = null
+      continue
+    }
+
     const texture = textures.get(assetId)
+    // Not yet resident: leave whatever is there rather than blanking the material while an
+    // image decodes. The host calls `TextureCache.ensure` before handing patches over, so
+    // this is the "still loading" window, not a missing asset.
     if (!texture) continue
     texture.colorSpace = TEXTURE_SLOT_COLOR_SPACE[slot]
+    // The ao map's uv channel is a RUNTIME decision, like its colour space (D3) — the
+    // document does not carry one and the user cannot mis-set it.
+    //
+    // Measured rather than assumed: `Texture.channel` defaults to 0 in three 0.185, which
+    // is also where glTF ao maps almost always live, so this is a no-op for a texture the
+    // cache just built. It is written down anyway because the value is NOT inherently
+    // per-texture — three carries it on the Texture, so a texture that reached us with
+    // channel 1 (a glTF that declared texCoord: 1, a future path that reuses a loaded
+    // texture) would silently sample a uv set our meshes may not even have. Pinning it
+    // here costs one assignment and removes a whole class of "the ao map does nothing".
+    if (slot === 'aoMap') texture.channel = 0
     target[slot] = texture
   }
 
+  applyUv(target, def)
+
   material.needsUpdate = true
 }
+
+/**
+ * The UV transform, applied to EVERY slot the material has (v0.5 §4.2).
+ *
+ * three stores repeat/offset/rotation on the Texture, not on the material — and textures
+ * are shared between materials by the cache. So the transform is written on every apply
+ * rather than once: two materials using the same concrete map at different tilings must
+ * each get their own, and the last one to apply wins for a shared instance. That is a
+ * known limit of one-texture-per-asset, and it is registered rather than hidden: the
+ * alternative (a Texture per material per slot) is the VRAM blow-up the cache exists to
+ * prevent.
+ *
+ * `rotationDeg` in, radians out — every angle the user types in this product is degrees.
+ */
+function applyUv(target: Material & Record<string, unknown>, def: MaterialDef): void {
+  const uv = def.params.uv
+  for (const slot of Object.keys(TEXTURE_SLOT_COLOR_SPACE) as TextureSlot[]) {
+    const texture = target[slot]
+    if (!isTexture(texture)) continue
+
+    if (uv === undefined) {
+      // No uv block means the schema's identity, not "leave whatever was there": a texture
+      // reused from another material would otherwise arrive pre-tiled.
+      texture.repeat.set(1, 1)
+      texture.offset.set(0, 0)
+      texture.rotation = 0
+    } else {
+      texture.repeat.set(uv.repeat[0], uv.repeat[1])
+      texture.offset.set(uv.offset[0], uv.offset[1])
+      texture.rotation = (uv.rotationDeg * Math.PI) / 180
+    }
+
+    // Tiling below 1× is a crop; at or above it the texture must wrap or the surface shows
+    // one copy and stretched edge pixels for the rest.
+    const wrap = texture.repeat.x > 1 || texture.repeat.y > 1 ? RepeatWrapping : ClampToEdgeWrapping
+    texture.wrapS = wrap
+    texture.wrapT = wrap
+    // Rotation is around the uv origin by default, which spins the texture off the surface.
+    // The centre is what every authoring tool means by "rotate the texture".
+    texture.center.set(0.5, 0.5)
+    texture.needsUpdate = true
+  }
+}
+
+const isTexture = (value: unknown): value is Texture =>
+  typeof value === 'object' && value !== null && (value as { isTexture?: boolean }).isTexture === true

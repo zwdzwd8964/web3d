@@ -1,6 +1,14 @@
 import type { Material as MaterialDef } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
-import { Color, LinearSRGBColorSpace, MeshStandardMaterial, SRGBColorSpace, Texture } from 'three'
+import {
+  ClampToEdgeWrapping,
+  Color,
+  LinearSRGBColorSpace,
+  MeshStandardMaterial,
+  RepeatWrapping,
+  SRGBColorSpace,
+  Texture,
+} from 'three'
 import type { Mesh } from 'three'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { MaterialRegistry, TEXTURE_SLOT_COLOR_SPACE, applyParams, countUsers } from '../../src/runtime/material-registry.js'
@@ -219,7 +227,7 @@ describe('applyParams()', () => {
         preset: 'custom',
         params: { maps: { map: 'ast_00000001', normalMap: 'ast_00000002' } },
       },
-      { get: (id) => (id === 'ast_00000001' ? map : id === 'ast_00000002' ? normalMap : undefined) },
+      { get: (id: string) => (id === 'ast_00000001' ? map : id === 'ast_00000002' ? normalMap : undefined) },
     )
 
     // Getting this backwards tints the whole scene and gets blamed on the artist.
@@ -312,5 +320,152 @@ describe('the graph being rebuilt under the registry', () => {
 
     expect(materialOf(IDS.cover).color.getHexString()).toBe(original)
     expect(registry.isCloned(IDS.cover)).toBe(false)
+  })
+})
+
+describe('texture slots and the uv block (T-151)', () => {
+  /** A material def with the given maps and uv, spelled out so each test reads on its own. */
+  const def = (params: Partial<MaterialDef['params']>): MaterialDef =>
+    ({
+      id: 'mat_00000001',
+      name: '贴图材质',
+      base: 'standard',
+      preset: 'custom',
+      params: { maps: {}, ...params },
+    }) as MaterialDef
+
+  const source = (textures: Record<string, Texture>) => ({ get: (id: string) => textures[id] })
+
+  it('CLEARS a slot the material no longer sets', () => {
+    // Skipping the undefined case leaves the previous texture on the material, so removing
+    // a normal map in the panel does nothing visible — and the user removes it again.
+    const normalMap = new Texture()
+    const material = new MeshStandardMaterial()
+    const textures = source({ ast_00000002: normalMap })
+
+    applyParams(material, def({ maps: { normalMap: 'ast_00000002' } }), textures)
+    expect(material.normalMap).toBe(normalMap)
+
+    applyParams(material, def({ maps: {} }), textures)
+    expect(material.normalMap, '取消贴图必须真的取消').toBeNull()
+  })
+
+  it('leaves a slot alone while its texture is still decoding', () => {
+    // Not the same as "unset": blanking the material mid-load makes an image arriving a
+    // moment later look like a flicker, and a genuinely missing asset look identical to a
+    // slow one.
+    const map = new Texture()
+    const material = new MeshStandardMaterial()
+    applyParams(material, def({ maps: { map: 'ast_00000001' } }), source({ ast_00000001: map }))
+
+    applyParams(material, def({ maps: { map: 'ast_00000001' } }), source({}))
+    expect(material.map).toBe(map)
+  })
+
+  it('applies repeat / offset / rotation to every slot the material has', () => {
+    const map = new Texture()
+    const normalMap = new Texture()
+    const material = new MeshStandardMaterial()
+
+    applyParams(
+      material,
+      def({
+        maps: { map: 'ast_00000001', normalMap: 'ast_00000002' },
+        uv: { repeat: [4, 2], offset: [0.25, 0.5], rotationDeg: 90 },
+      }),
+      source({ ast_00000001: map, ast_00000002: normalMap }),
+    )
+
+    for (const texture of [map, normalMap]) {
+      expect([texture.repeat.x, texture.repeat.y]).toEqual([4, 2])
+      expect([texture.offset.x, texture.offset.y]).toEqual([0.25, 0.5])
+      expect(texture.rotation).toBeCloseTo(Math.PI / 2, 6)
+      // Rotating around the uv origin spins the texture off the surface; every authoring
+      // tool means "around the middle" by this control.
+      expect([texture.center.x, texture.center.y]).toEqual([0.5, 0.5])
+    }
+  })
+
+  it('wraps when tiling above 1×, clamps otherwise', () => {
+    // Without RepeatWrapping the surface shows one copy of the image and stretched edge
+    // pixels for the rest of it, which reads as a broken texture rather than as a setting.
+    const map = new Texture()
+    const material = new MeshStandardMaterial()
+    const textures = source({ ast_00000001: map })
+
+    applyParams(material, def({ maps: { map: 'ast_00000001' }, uv: { repeat: [3, 3], offset: [0, 0], rotationDeg: 0 } }), textures)
+    expect(map.wrapS).toBe(RepeatWrapping)
+    expect(map.wrapT).toBe(RepeatWrapping)
+
+    applyParams(material, def({ maps: { map: 'ast_00000001' }, uv: { repeat: [1, 1], offset: [0, 0], rotationDeg: 0 } }), textures)
+    expect(map.wrapS).toBe(ClampToEdgeWrapping)
+  })
+
+  it('resets the transform when the material has no uv block', () => {
+    // Textures are shared between materials by the cache, so "no uv block" has to mean the
+    // schema's identity rather than "leave whatever the last material set" — otherwise a
+    // texture arrives pre-tiled from somewhere the user never looked.
+    const map = new Texture()
+    map.repeat.set(8, 8)
+    map.rotation = 1
+    const material = new MeshStandardMaterial()
+
+    applyParams(material, def({ maps: { map: 'ast_00000001' } }), source({ ast_00000001: map }))
+
+    expect([map.repeat.x, map.repeat.y]).toEqual([1, 1])
+    expect(map.rotation).toBe(0)
+  })
+
+  it('pins the ao map to uv0 whatever channel the texture arrived with', () => {
+    // Two assertions, and only the second one is about our code. `Texture.channel` defaults
+    // to 0 in three 0.185 — asserting that alone would be a test of three, and it passed
+    // with the line deleted (变异 H2 存活). What the runtime actually guarantees is that a
+    // texture reaching us with channel 1 — a glTF declaring texCoord: 1, or any future path
+    // that reuses a loaded texture — still samples the uv set our meshes have.
+    expect(new Texture().channel, 'three 0.185 的默认值，变了要知道').toBe(0)
+
+    const aoMap = new Texture()
+    aoMap.channel = 1
+    const material = new MeshStandardMaterial()
+    applyParams(material, def({ maps: { aoMap: 'ast_00000003' } }), source({ ast_00000003: aoMap }))
+    expect(aoMap.channel, '通道由运行时决定，不继承贴图从哪来').toBe(0)
+  })
+
+  it('updating uv does not replace the material instance (增量生效)', () => {
+    const map = new Texture()
+    const material = new MeshStandardMaterial()
+    const textures = source({ ast_00000001: map })
+
+    applyParams(material, def({ maps: { map: 'ast_00000001' }, uv: { repeat: [1, 1], offset: [0, 0], rotationDeg: 0 } }), textures)
+    const version = material.version
+    applyParams(material, def({ maps: { map: 'ast_00000001' }, uv: { repeat: [2, 2], offset: [0, 0], rotationDeg: 0 } }), textures)
+
+    expect(material.map, '同一个 Texture 实例').toBe(map)
+    expect(map.repeat.x).toBe(2)
+    expect(material.version).toBeGreaterThan(version)
+  })
+})
+
+describe('铁律 9 with textures (T-151 验收)', () => {
+  it('hanging a map on one of two meshes sharing a material leaves the other bare', () => {
+    // The textbook symptom of getting this wrong: the user drags a wood texture onto one
+    // chair and every chair in the room turns to wood. Colour params already had this
+    // regression; a map assignment writes a different property and needed its own.
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    expect(materialOf(IDS.body), '前提：两个 mesh 共享同一个材质实例').toBe(materialOf(IDS.cover))
+
+    const map = new Texture()
+    registry.setTextureSource({ get: (id: string) => (id === 'ast_tex00001' ? map : undefined) })
+
+    const withMap: MaterialDef = {
+      ...doc.materials[0]!,
+      params: { ...doc.materials[0]!.params, maps: { map: 'ast_tex00001' } },
+    }
+    registry.applyToNode(IDS.cover, withMap.id, defsOf([withMap]), graph)
+
+    expect(materialOf(IDS.cover).map, '挂图的那个要有图').toBe(map)
+    expect(materialOf(IDS.body).map, '旁边那个必须还是光的').toBeNull()
+    expect(materialOf(IDS.body), '而且不能再是同一个实例了').not.toBe(materialOf(IDS.cover))
   })
 })
