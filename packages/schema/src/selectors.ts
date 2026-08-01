@@ -12,7 +12,42 @@ export function getNode(doc: SceneDocument, nodeId: string): Node | undefined {
   return doc.nodes.find((n) => n.id === nodeId)
 }
 
-const byOrder = (a: Node, b: Node) => a.order - b.order || a.id.localeCompare(b.id)
+/**
+ * Sibling order: `order`, then id as the tie-break so it is total and stable.
+ *
+ * Exported alongside `groupChildren` because more than one place has to order siblings, and
+ * two definitions of sibling order would put the hierarchy tree and the index in different
+ * orders for the same document.
+ */
+export const byOrder = (a: Node, b: Node) => a.order - b.order || a.id.localeCompare(b.id)
+
+/**
+ * Every node grouped under its parent id (null key = roots), each bucket sorted.
+ *
+ * One pass. `getChildren` scans the whole array, so anything that needed the children of
+ * MANY nodes — building the index, walking the tree, collecting a subtree — was doing it
+ * once per node, which is O(n²). Measured on a 1000-node assembly (T-184): `buildIndex`
+ * 6.5 ms, at 2000 nodes 25 ms, at 4000 nodes 103 ms. Four times the work for twice the
+ * document, on the path of every structural edit.
+ *
+ * Every node gets a bucket, including leaves, so `get(id)` returning undefined means "no
+ * such node" rather than "no children".
+ *
+ * A `parent` naming no node keeps the node under the roots: that document is broken and
+ * `checkIntegrity` says so, but until someone fixes it the object still has to be reachable
+ * in the tree. Dropping it would make a corrupt file quietly lose objects instead.
+ */
+export function groupChildren(doc: SceneDocument): Map<string | null, Node[]> {
+  const out = new Map<string | null, Node[]>()
+  out.set(null, [])
+  for (const node of doc.nodes) out.set(node.id, [])
+  for (const node of doc.nodes) {
+    const bucket = node.parent !== null && out.has(node.parent) ? out.get(node.parent) : out.get(null)
+    bucket!.push(node)
+  }
+  for (const bucket of out.values()) if (bucket.length > 1) bucket.sort(byOrder)
+  return out
+}
 
 /** Direct children, sorted by `order` (SCHEMA_SPEC §4.1-4). */
 export function getChildren(doc: SceneDocument, parentId: string | null): Node[] {
@@ -25,10 +60,11 @@ export function getRootNodes(doc: SceneDocument): Node[] {
 
 /** Descendants, depth-first in `order`, excluding `nodeId` itself. Cycle-safe. */
 export function getDescendants(doc: SceneDocument, nodeId: string): Node[] {
+  const children = groupChildren(doc)
   const out: Node[] = []
   const seen = new Set<string>([nodeId])
   const walk = (id: string) => {
-    for (const child of getChildren(doc, id)) {
+    for (const child of children.get(id) ?? []) {
       if (seen.has(child.id)) continue
       seen.add(child.id)
       out.push(child)
@@ -67,9 +103,10 @@ export function wouldCreateCycle(doc: SceneDocument, nodeId: string, newParentId
 
 /** Depth-first walk from the roots, yielding each node with its depth. */
 export function walkTree(doc: SceneDocument, visit: (node: Node, depth: number) => void): void {
+  const children = groupChildren(doc)
   const seen = new Set<string>()
   const walk = (parentId: string | null, depth: number) => {
-    for (const node of getChildren(doc, parentId)) {
+    for (const node of children.get(parentId) ?? []) {
       if (seen.has(node.id)) continue
       seen.add(node.id)
       visit(node, depth)

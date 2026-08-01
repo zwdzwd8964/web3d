@@ -145,13 +145,32 @@ export interface Bounds {
  * wrong the first time the geometry changed — and the symptom (objects dropped slightly
  * into the floor) is one nobody traces back to a duplicated formula.
  *
- * Costs one throwaway geometry per call, which is per drop, not per frame.
+ * Costs one throwaway geometry per DISTINCT primitive. It used to be one per call, and the
+ * comment here used to say "per drop, not per frame" — which stopped being true when drag
+ * placement started calling it from `dragover`, i.e. on every pointer move, building and
+ * destroying a sphere's worth of geometry each time (T-184).
+ *
+ * The memo holds exactly one entry, which is all this shape of use needs: during a drag the
+ * primitive is the same object every time, so the hit rate is 100% and there is no cache to
+ * grow, evict, or invalidate. A keyed cache would buy nothing here and could be held past
+ * the drag that filled it.
  */
+let lastBoundsKey: string | null = null
+let lastBounds: Bounds = { min: [0, 0, 0], max: [0, 0, 0] }
+
 export function primitiveBounds(primitive: Primitive): Bounds {
+  const key = JSON.stringify(primitive)
+  if (key === lastBoundsKey) return lastBounds
+
   const geometry = buildGeometry(primitive)
   geometry.computeBoundingBox()
   const box = geometry.boundingBox
   geometry.dispose()
-  if (!box) return { min: [0, 0, 0], max: [0, 0, 0] }
-  return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] }
+  const bounds: Bounds = box
+    ? { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] }
+    : { min: [0, 0, 0], max: [0, 0, 0] }
+
+  lastBoundsKey = key
+  lastBounds = bounds
+  return bounds
 }

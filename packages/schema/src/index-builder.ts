@@ -6,7 +6,7 @@ import type { Material } from './material.js'
 import type { Media } from './media.js'
 import type { Node } from './node.js'
 import type { Action, Condition, EventType, Rule, ValueExpr } from './rule.js'
-import { getChildren } from './selectors.js'
+import { groupChildren } from './selectors.js'
 import type { Variable } from './variable.js'
 import type { Viewpoint } from './viewpoint.js'
 
@@ -135,9 +135,8 @@ export function buildIndex(doc: SceneDocument, options: BuildIndexOptions = {}):
   const variableById = new Map(doc.variables.map((v) => [v.id, v]))
   const mediaById = new Map(doc.media.map((m) => [m.id, m]))
 
-  const childrenOf = new Map<string | null, Node[]>()
-  childrenOf.set(null, getChildren(doc, null))
-  for (const node of doc.nodes) childrenOf.set(node.id, getChildren(doc, node.id))
+  // One grouping pass, not one filter per node — see `groupChildren` for the measurements.
+  const childrenOf = groupChildren(doc)
 
   const rulesByEvent = new Map<EventType, Rule[]>()
   for (const rule of doc.rules) {

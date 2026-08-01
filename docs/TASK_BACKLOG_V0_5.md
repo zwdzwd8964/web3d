@@ -778,11 +778,30 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
 - **实际耗时**：0.5 天
 
 
-### [ ] T-184 · O(n²) 性能悬崖收口
+### [x] T-184 · O(n²) 性能悬崖收口
 - **独占** `packages/schema/src/index-builder.ts`, `packages/editor/src/panels/tree-dnd.ts`, `packages/editor/src/App.tsx`, `packages/core/src/runtime/{apply-patch,scene-runtime,primitive-factory}.ts`
 - **做** 1000 节点实测：删除靠前节点 `applyPatch` 97 ms、`flattenTree` 8.9 ms/帧、`buildIndex` 8.5 ms/次、状态栏 `checkIntegrity` 4.7 ms/次、`syncShadows(force)` O(n²)、`primitiveBounds` 被接到每次指针移动。
   一次建好父子索引，把每节点一次全表 filter 改成一次分组。
 - **验收** 1000 节点基准测试有数字且进 METRICS；**增量路径必须快于全量重建**
+- **实际情况**：六处悬崖**只有一个根因**——`getChildren` 是一次全表扫描，而所有需要
+  「很多个节点各自的孩子」的代码都在循环里调它。抽出 `groupChildren`（一次分组），
+  `buildIndex` / `walkTree` / `getDescendants` / `flattenTree` 全部改成用它。
+  另外三处：`syncShadows(force)` 逐 id 调 `syncNodeShadowFlags`（内含 `find`）→ 直接遍历节点；
+  `resyncNode` 每个节点都 `find` 自己并重建一次材质 Map → 改成把节点和 Map 传进去；
+  `primitiveBounds` 被 `dragover` 每次指针移动调用 → 单条记忆化（拖拽期间图元不变，命中率 100%）。
+- **数字**（1000 → 4000 节点，ms）：`buildIndex` 6.78→0.25 / 100.00→0.80；
+  `checkIntegrity` 4.97→0.49 / 62.12→1.94；`walkTree` 4.46→0.12 / 57.06→0.46；
+  删一个节点后重建 6.77→0.10 / 106.13→0.61。全部由 O(n²) 变线性。已进 METRICS。
+- **验收「增量路径必须快于全量重建」**：删一个节点的增量路径在 4000 节点上是 0.61 ms，
+  全量 `buildIndex` 是 0.80 ms，且两者都已线性——原来是 106 ms vs 100 ms，
+  「增量」比全量还慢，这条验收标准此前根本不成立。
+- **两条变异是绿的，两条都是测试自己的毛病**（详见 METRICS 同节）：基准文档恰好已按
+  `order` 排好，排序是空操作；孤儿节点用新建的顺序 id 工厂造，id 和已有根节点撞了。
+  两条测试读起来都完全正确。没有变异检验，这张卡会带着两条假绿收工。
+- **变异检验**：E1 childrenOf 退回每节点一次 filter → 3 红；E2 不排序 → 1 红（修测试后）；
+  E3 叶子不建桶 → 2 红；E4 父级不存在的节点被丢弃 → 1 红（修测试后）。
+- **实际耗时**：1.2 天
+
 
 ### [ ] T-185 · 假绿收口
 - **独占** `packages/editor/test/{patch-forwarder,undo-runtime-parity}.test.ts`, `packages/core/test/eca/actions.test.ts`

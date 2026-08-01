@@ -1,5 +1,5 @@
 import type { Node, SceneDocument } from '@w3/schema'
-import { ORDER_STEP, getChildren, getOrderBetween, renumberSiblings, wouldCreateCycle } from '@w3/schema'
+import { ORDER_STEP, getChildren, getOrderBetween, groupChildren, renumberSiblings, wouldCreateCycle } from '@w3/schema'
 
 /**
  * T-063 · hierarchy drag-and-drop.
@@ -130,14 +130,19 @@ export interface TreeRow {
  * the row renderer free of recursion.
  */
 export function flattenTree(doc: SceneDocument, collapsed: ReadonlySet<string>): TreeRow[] {
+  // One grouping pass for the whole tree. This used to call `getChildren` twice per node —
+  // once to iterate and once just to ask whether the row needs a disclosure triangle — and
+  // each of those scans the entire node array. On a 1000-node assembly that was 8.9 ms of
+  // the render that follows EVERY document change (T-184), which is over half a frame spent
+  // deciding where to draw triangles.
+  const children = groupChildren(doc)
   const rows: TreeRow[] = []
   const seen = new Set<string>()
   const walk = (parent: string | null, depth: number) => {
-    for (const node of getChildren(doc, parent)) {
+    for (const node of children.get(parent) ?? []) {
       if (seen.has(node.id)) continue // a corrupted parent chain must not hang the panel
       seen.add(node.id)
-      const children = getChildren(doc, node.id)
-      rows.push({ node, depth, hasChildren: children.length > 0 })
+      rows.push({ node, depth, hasChildren: (children.get(node.id)?.length ?? 0) > 0 })
       if (!collapsed.has(node.id)) walk(node.id, depth + 1)
     }
   }

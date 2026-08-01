@@ -1,4 +1,4 @@
-import type { Material as MaterialDef, SceneDocument } from '@w3/schema'
+import type { Material as MaterialDef, Node, SceneDocument } from '@w3/schema'
 import type { HighlightLayer } from './highlight.js'
 import type { MaterialRegistry } from './material-registry.js'
 import type { SceneGraph } from './scene-graph.js'
@@ -351,20 +351,27 @@ export class PatchApplier {
     }
     if (pending.length > 0) return false
 
+    // Built once for the whole batch. `resyncNode` used to build it per node, so a commit
+    // that touched every node rebuilt this map n times (T-184).
+    const defs = new Map(next.materials.map((m) => [m.id, m]))
     for (const node of next.nodes) {
       if (before.get(node.id) === node) continue // untouched by this commit
       if (!before.has(node.id)) continue // freshly added above, already current
-      if (!this.resyncNode(node.id, next)) return false
+      if (!this.resyncNode(node, defs)) return false
     }
     return true
   }
 
-  /** Re-applies everything about one node that the graph mirrors. */
-  private resyncNode(nodeId: string, doc: SceneDocument): boolean {
-    const node = doc.nodes.find((n) => n.id === nodeId)
-    if (!node) return false
+  /**
+   * Re-applies everything about one node that the graph mirrors.
+   *
+   * Takes the node and the material defs rather than looking either up: every caller
+   * already holds the node, and the `find` plus the per-call `Map` rebuild made a
+   * whole-array commit O(n²) — 97 ms to delete one node out of 1000 (T-184).
+   */
+  private resyncNode(node: Node, defs: Map<string, MaterialDef>): boolean {
+    const nodeId = node.id
     const { graph, materials } = this.targets
-    const defs = new Map(doc.materials.map((m) => [m.id, m]))
     const carrierOk =
       node.primitive !== null ? graph.setPrimitive(nodeId, node) : node.light !== null ? graph.setLight(nodeId, node) : true
 

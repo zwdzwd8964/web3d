@@ -1,4 +1,4 @@
-import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
+import type { Node, SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
@@ -312,7 +312,10 @@ export class SceneRuntime implements RuntimeContext {
     }
     if (!force && wanted === this.shadowsOn) return
     this.shadowsOn = wanted
-    for (const node of doc.nodes) this.syncNodeShadowFlags(doc, node.id)
+    // Straight over the nodes, NOT `syncNodeShadowFlags` per id: that one looks its node up
+    // with `find`, so calling it in a loop scanned the array once per node. O(n²) on a path
+    // that runs whenever the first shadow-casting light is switched on (T-184).
+    for (const node of doc.nodes) this.writeNodeShadow(node)
   }
 
   /**
@@ -329,8 +332,15 @@ export class SceneRuntime implements RuntimeContext {
    */
   private syncNodeShadowFlags(doc: SceneDocument, nodeId: string): void {
     const node = doc.nodes.find((n) => n.id === nodeId)
-    const object = this.graph.objectFor(nodeId)
-    if (!node || !object || node.light !== null) return
+    if (node) this.writeNodeShadow(node)
+  }
+
+  /** The per-node half, with the node already in hand. */
+  private writeNodeShadow(node: Node): void {
+    const object = this.graph.objectFor(node.id)
+    // A light casts shadows by having one, not by receiving one — writing these onto it
+    // would be meaningless, and `writeShadowFlags` walks a subtree to do it.
+    if (!object || node.light !== null) return
     const cast = this.shadowsOn && (node.overrides.castShadow ?? true)
     const receive = this.shadowsOn && (node.overrides.receiveShadow ?? true)
     writeShadowFlags(object, cast, receive)
