@@ -318,7 +318,7 @@ export function applyParams(material: Material, def: MaterialDef, textures: Text
       continue
     }
 
-    const texture = textures.get(assetId)
+    const texture = textures.get(assetId, samplerVariant(slot, def))
     // Not yet resident: leave whatever is there rather than blanking the material while an
     // image decodes. The host calls `TextureCache.ensure` before handing patches over, so
     // this is the "still loading" window, not a missing asset.
@@ -461,6 +461,26 @@ export function rebuildForBase(material: Material, base: string): Material {
  *
  * `rotationDeg` in, radians out — every angle the user types in this product is degrees.
  */
+/**
+ * The sampler state this (slot, material) pair will write onto its texture.
+ *
+ * Everything below lives ON the three `Texture`, not on the material — so two uses that
+ * disagree on any of it cannot share one instance. Asking the cache for a variant per
+ * distinct combination is what stops them fighting. Uses that AGREE still share, so the
+ * count stays bounded by the number of distinct settings, not by the number of materials.
+ *
+ * Two reproduced failures this keys off (T-176 审查所得):
+ *   - colour space: the same image in 「基础色」 and 「粗糙度」 — the last slot written wins,
+ *     so the base colour is sampled linear and the object renders washed out;
+ *   - uv: two materials tiling one image differently — the last one applied wins, and
+ *     「分离材质」 does not separate it, because the material was never what they shared.
+ */
+function samplerVariant(slot: TextureSlot, def: MaterialDef): string {
+  const uv = def.params.uv
+  const tiling = uv === undefined ? '1,1|0,0|0' : `${uv.repeat.join(',')}|${uv.offset.join(',')}|${uv.rotationDeg}`
+  return `${TEXTURE_SLOT_COLOR_SPACE[slot]}|${tiling}|${slot === 'aoMap' ? 'ao' : ''}`
+}
+
 function applyUv(target: Material & Record<string, unknown>, def: MaterialDef): void {
   const uv = def.params.uv
   for (const slot of Object.keys(TEXTURE_SLOT_COLOR_SPACE) as TextureSlot[]) {
@@ -486,7 +506,7 @@ function applyUv(target: Material & Record<string, unknown>, def: MaterialDef): 
     // Tiling below 1× is a crop; at or above it the texture must wrap or the surface shows
     // one copy and stretched edge pixels for the rest.
     const wrap = texture.repeat.x > 1 || texture.repeat.y > 1 ? RepeatWrapping : ClampToEdgeWrapping
-    if (texture.wrapS === wrap && texture.wrapT === wrap) return
+    if (texture.wrapS === wrap && texture.wrapT === wrap) continue
 
     texture.wrapS = wrap
     texture.wrapT = wrap

@@ -1,4 +1,4 @@
-import type { Material as MaterialDef } from '@w3/schema'
+import type { Asset, Material as MaterialDef } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
 import {
   ClampToEdgeWrapping,
@@ -12,6 +12,7 @@ import {
 } from 'three'
 import type { Mesh } from 'three'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { TextureCache } from '../../src/runtime/texture-cache.js'
 import {
   MaterialRegistry,
   TEXTURE_SLOT_COLOR_SPACE,
@@ -715,5 +716,133 @@ describe('switching base rebuilds the instance (T-153)', () => {
 
     const material = new MeshStandardMaterial()
     expect(rebuildForBase(material, 'basic')).toBe(material)
+  })
+})
+
+/**
+ * T-181 · one image, two uses that disagree about how to sample it.
+ *
+ * `colorSpace`, `repeat`, `offset` and `rotation` live on the three `Texture`, not on the
+ * material. One shared instance means the last writer wins — and BOTH surviving failures
+ * here were invisible to the existing tests, because every one of them injects a stub
+ * source that hands back the same Texture regardless of who asked (T-176 审查所得).
+ *
+ * So these drive the REAL `TextureCache`. A stub cannot fail this way, which is precisely
+ * why the bug lived through 44 green tests.
+ */
+describe('sharing one texture between disagreeing slots (T-181)', () => {
+  const asset = (id: string): Asset => ({
+    id,
+    type: 'texture',
+    name: 'surface.png',
+    hash: `blob_${id}`,
+    url: `blob:${id}`,
+    version: 1,
+    lineageId: id,
+    stats: { tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 1024, nodes: 0, animations: [] },
+  })
+
+  const realCache = async (id: string) => {
+    const cache = new TextureCache({
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      decode: async () => ({ width: 4, height: 4 }) as unknown as TexImageSource,
+    })
+    await cache.load(asset(id))
+    return cache
+  }
+
+  const def = (params: Partial<MaterialDef['params']>, id = 'mat_00000001'): MaterialDef =>
+    ({ id, name: '贴图材质', base: 'standard', preset: 'custom', params: { maps: {}, ...params } }) as MaterialDef
+
+  it('keeps the base colour sRGB when the same image is also the roughness map', async () => {
+    // The reproduced failure: 基础色 and 粗糙度 pointing at one image. Roughness is DATA and
+    // must be linear; base colour is a COLOUR and must be sRGB. Sharing one Texture means
+    // whichever slot is written last decides — and the loop writes roughnessMap after map,
+    // so the base colour is sampled linear and the object renders washed out. Nothing in
+    // the panel says why, and 「分离材质」 does not help: the material was never shared.
+    const cache = await realCache('ast_tex00001')
+    const material = new MeshStandardMaterial()
+
+    applyParams(material, def({ maps: { map: 'ast_tex00001', roughnessMap: 'ast_tex00001' } }), cache)
+
+    expect(material.map!.colorSpace, '基础色必须是 sRGB').toBe(SRGBColorSpace)
+    expect(material.roughnessMap!.colorSpace, '粗糙度是数据，必须线性').toBe(LinearSRGBColorSpace)
+    expect(material.map, '两个槽不能是同一个 Texture 实例').not.toBe(material.roughnessMap)
+  })
+
+  it('lets two materials tile one image differently', async () => {
+    // 「分离材质」 separates materials. It does not separate the Texture underneath them, so
+    // before this the second material's tiling silently overwrote the first's.
+    const cache = await realCache('ast_tex00001')
+    const wall = new MeshStandardMaterial()
+    const floor = new MeshStandardMaterial()
+
+    applyParams(wall, def({ maps: { map: 'ast_tex00001' }, uv: { repeat: [1, 1], offset: [0, 0], rotationDeg: 0 } }), cache)
+    applyParams(
+      floor,
+      def({ maps: { map: 'ast_tex00001' }, uv: { repeat: [8, 8], offset: [0, 0], rotationDeg: 0 } }, 'mat_00000002'),
+      cache,
+    )
+
+    expect(floor.map!.repeat.toArray(), '后设的材质要拿到自己的平铺').toEqual([8, 8])
+    expect(wall.map!.repeat.toArray(), '先设的材质不该被后一个改掉').toEqual([1, 1])
+  })
+
+  it('shares the instance again when two uses AGREE — the count stays bounded', async () => {
+    // Isolation is only affordable if agreement still shares. A Texture per (material, slot)
+    // would put an unbounded number of instances on the GPU, which is the bug this fix would
+    // be trading for.
+    const cache = await realCache('ast_tex00001')
+    const a = new MeshStandardMaterial()
+    const b = new MeshStandardMaterial()
+    const same: Partial<MaterialDef['params']> = {
+      maps: { map: 'ast_tex00001' },
+      uv: { repeat: [4, 4], offset: [0, 0], rotationDeg: 0 },
+    }
+
+    applyParams(a, def(same), cache)
+    applyParams(b, def(same, 'mat_00000002'), cache)
+
+    expect(a.map, '设置相同就该共享同一个实例').toBe(b.map)
+    expect(cache.variantCount, '一种采样状态一个实例').toBe(1)
+    expect(cache.size, '解码出来的图始终只有一张').toBe(1)
+  })
+
+  it('applies uv to EVERY slot, not just up to the first one already wrapped', async () => {
+    // `applyUv` RETURNED instead of continuing once a slot's wrap mode already matched, so
+    // every slot after it kept the identity uv. Reaching it needs tiling at or below 1×,
+    // where the wanted wrap IS the default a fresh texture carries — the first slot matches
+    // immediately and the rest of the material is silently skipped. Tiling above 1× never
+    // triggers it, which is exactly why an obvious-looking test of this passed either way.
+    const cache = await realCache('ast_tex00001')
+    const material = new MeshStandardMaterial()
+
+    applyParams(
+      material,
+      def({
+        maps: { map: 'ast_tex00001', normalMap: 'ast_tex00001' },
+        uv: { repeat: [1, 1], offset: [0, 0], rotationDeg: 45 },
+      }),
+      cache,
+    )
+
+    const quarter = Math.PI / 4
+    expect(material.map!.rotation).toBeCloseTo(quarter)
+    expect(material.normalMap!.rotation, '第二个槽也要跟着转，否则法线和基础色错开').toBeCloseTo(quarter)
+    // Rotation is around the uv origin unless `center` is moved, which spins the texture
+    // clean off the surface — so the skipped slot is visibly wrong, not merely unrotated.
+    expect(material.normalMap!.center.toArray(), '旋转中心也要设，否则贴图转出表面').toEqual([0.5, 0.5])
+  })
+
+  it('frees the variants when the asset goes, not just the original', async () => {
+    // Otherwise the isolation fix becomes a leak: the entry count returns to zero while the
+    // clones stay on the GPU forever.
+    const cache = await realCache('ast_tex00001')
+    const material = new MeshStandardMaterial()
+    applyParams(material, def({ maps: { map: 'ast_tex00001', roughnessMap: 'ast_tex00001' } }), cache)
+    expect(cache.variantCount).toBe(2)
+
+    cache.dispose()
+    expect(cache.variantCount, '销毁要连副本一起回收').toBe(0)
   })
 })

@@ -31,9 +31,25 @@ export interface TextureCacheOptions {
   readonly log?: (level: LogLevel, message: string, data?: unknown) => void
 }
 
-/** What the registry sees: a synchronous look-up that never does I/O. */
+/**
+ * What the registry sees: a synchronous look-up that never does I/O.
+ *
+ * `variant` asks for an INSTANCE of the asset that this caller may write sampler state onto.
+ * One Texture per asset is what keeps VRAM bounded, but `colorSpace`, `repeat`, `offset` and
+ * `rotation` all live ON the Texture — so a single shared instance means every material
+ * writing them fights every other one. Two failures, both reproduced (T-176 审查所得):
+ *
+ *   - the same image in 「基础色」 and 「粗糙度」 ends up LINEAR, and the base colour is
+ *     sampled wrong — the object renders washed out with nothing explaining it;
+ *   - two materials using one image at different tilings: the last one applied wins, and
+ *     the 「分离材质」 button the user just pressed does not separate this.
+ *
+ * So the cache hands out one instance per (asset, variant). Variants share the decoded
+ * image — `clone()` copies the reference, not the pixels — so the CPU cost is one decode
+ * however many variants exist.
+ */
 export interface TextureSource {
-  get(assetId: string): Texture | undefined
+  get(assetId: string, variant?: string): Texture | undefined
 }
 
 interface Entry {
@@ -46,6 +62,8 @@ export class TextureCache implements TextureSource {
   private entries = new Map<string, Entry>()
   /** In-flight loads, so two materials referencing one asset do not decode it twice. */
   private loading = new Map<string, Promise<Texture | null>>()
+  /** Per-(asset, variant) instances, so sampler state cannot leak between materials. */
+  private variants = new Map<string, Texture>()
   private readonly options: TextureCacheOptions
 
   constructor(options: TextureCacheOptions) {
@@ -64,8 +82,25 @@ export class TextureCache implements TextureSource {
    * be synchronous. Loading is the host's job, before the patches are handed over — the
    * same division `AssetLoader` already uses for models.
    */
-  get(assetId: string): Texture | undefined {
-    return this.entries.get(assetId)?.texture
+  get(assetId: string, variant = ''): Texture | undefined {
+    const base = this.entries.get(assetId)
+    if (!base) return undefined
+    if (variant === '') return base.texture
+
+    const key = `${assetId}::${variant}`
+    const existing = this.variants.get(key)
+    if (existing) return existing
+
+    // Shares the decoded image; only the sampler state is per-variant.
+    const clone = base.texture.clone()
+    clone.needsUpdate = true
+    this.variants.set(key, clone)
+    return clone
+  }
+
+  /** How many variant instances exist. Bounded, and asserted to be — see the tests. */
+  get variantCount(): number {
+    return this.variants.size
   }
 
   has(assetId: string): boolean {
@@ -148,6 +183,11 @@ export class TextureCache implements TextureSource {
       if (wanted.has(assetId)) continue
       entry.texture.dispose()
       this.entries.delete(assetId)
+      for (const [key, variant] of [...this.variants]) {
+        if (!key.startsWith(`${assetId}::`)) continue
+        variant.dispose()
+        this.variants.delete(key)
+      }
     }
   }
 
@@ -158,7 +198,9 @@ export class TextureCache implements TextureSource {
 
   dispose(): void {
     for (const entry of this.entries.values()) entry.texture.dispose()
+    for (const variant of this.variants.values()) variant.dispose()
     this.entries.clear()
+    this.variants.clear()
     this.loading.clear()
   }
 }

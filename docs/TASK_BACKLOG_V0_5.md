@@ -718,11 +718,24 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
   **保留名字的尾巴而不是开头**：导出器给的名字长这样 `Assembly_Rev3_SubAssembly_…_Bolt_M6x20`，
   能把两个零件区分开的信息全在末尾，从右边截等于把一层结构变成四十行一模一样的东西（变异 A2 抓这条）。
 
-### [ ] T-181 · 共享 Texture 的 colorSpace 与 UV 隔离
+### [x] T-181 · 共享 Texture 的 colorSpace 与 UV 隔离
 - **独占** `packages/core/src/runtime/texture-cache.ts`, `material-registry.ts`, 对应测试
 - **做** 一资产一 Texture 让 `colorSpace` 与 uv 变换互相踩踏：同一张图同时挂「基础色」与「粗糙度」→ 最终线性 → 物体发白（已实测复现）；两个材质用同一张图不同平铺 → 后写的赢。
   按**用途**（colorSpace）分变体，uv 按材质分变体；变体共享解码后的 image，不重复解码。
 - **验收** 上述两个场景各一条测试；变体数有上界且被断言
+- **实际情况**：修的地方不是材质，是 **Texture 实例的分配策略**。`colorSpace` / `repeat` /
+  `offset` / `rotation` 都长在 three 的 Texture 上而不是材质上，所以「一个资产一个 Texture」
+  这条省显存的规则同时意味着「谁最后写谁说了算」。改成**一个 (资产, 采样状态) 一个实例**：
+  采样状态相同的用法照旧共享，实例数由「有几种不同设置」决定，不由「有几个材质」决定，
+  clone 共享已解码的图，解码次数不变。
+- 顺带修了 `applyUv` 里一个 `return` 该是 `continue`：第一个槽的 wrap 已经对了就整个函数
+  退出，后面的槽全部拿不到 uv。**只有平铺 ≤1× 时才够得着**（想要的 wrap 恰好是默认值），
+  所以变异 B5 第一版没抓住——我把测试改成 1× + 旋转 45° 才让它红。这条比 bug 本身值得记：
+  一个"显然在测这件事"的测试可以完全够不着它要测的分支。
+- **变异检验**：B1 变体退回共享 → 4 红；B2 key 丢 colorSpace → 2 红；B3 key 丢 uv → 1 红；
+  B4 每次都造新实例 → 1 红（无界会被抓）；B5 早退回 return → 1 红；B6 dispose 不回收副本 → 1 红。
+- **实际耗时**：0.6 天
+
 
 ### [ ] T-182 · 预览态摘掉编辑期物件（C3）
 - **独占** `packages/editor/src/preview/controller.ts`, `packages/core/src/runtime/light-helpers.ts`
