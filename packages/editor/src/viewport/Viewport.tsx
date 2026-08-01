@@ -8,6 +8,8 @@ import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
 import { PRIMITIVE_TEMPLATES, addPrimitive } from '../lib/library.js'
 import { placePrimitiveAt } from './place.js'
+import { SnapToolbar } from './SnapToolbar.js'
+import { ANGLE_STEP_DEG, getSnap, onSnapChange, snapPosition } from './snap.js'
 import { fulfilPick, isPicking } from './pick-request.js'
 import { setActiveRuntime } from './runtime-registry.js'
 
@@ -124,6 +126,13 @@ export function Viewport() {
       },
     })
     gizmoRef.current = gizmo
+    // T-143 · the gizmo lives outside React, so it subscribes to the session store rather
+    // than being re-rendered with a prop. Applied immediately too: a viewport remounted
+    // mid-session must not silently forget the grid the user is working on.
+    const applySnap = (settings: { translate: number | null; rotate: boolean }) =>
+      gizmo.setSnap({ translate: settings.translate, rotateDeg: settings.rotate ? ANGLE_STEP_DEG : null })
+    applySnap(getSnap())
+    const unsubscribeSnap = onSnapChange(applySnap)
     runtime.scene.add(gizmo.helper, gizmo.proxyObject)
 
     let cancelled = false
@@ -139,6 +148,7 @@ export function Viewport() {
 
     return () => {
       cancelled = true
+      unsubscribeSnap()
       resize.disconnect()
       controllerRef.current?.dispose()
       controllerRef.current = null
@@ -344,7 +354,9 @@ export function Viewport() {
 
     let created: string | null = null
     commit(`放置 ${template.label}`, (draft) => {
-      created = addPrimitive(draft, template, { position }).id
+      // T-143 · the grid applies to where things LAND as well as to where they are dragged.
+      // Only the document ever sees the snapped value; the snap setting itself stays out.
+      created = addPrimitive(draft, template, { position: snapPosition(position) }).id
     })
     if (created) toggleSelection(created, false)
   }
@@ -380,6 +392,7 @@ export function Viewport() {
         >
           {space === 'world' ? '世界' : '局部'}
         </button>
+        <SnapToolbar />
         <button type="button" className="tbtn" onClick={() => runtimeRef.current?.camera.frameAll()}>
           全览
         </button>

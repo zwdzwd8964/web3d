@@ -286,12 +286,19 @@
   matrixWorld 就是单位阵，也就是原点），改成"先刷新→再移开→必须打不中"才有判别力。
   C6 守卫还抓到我在源码里写的 `http://localhost/` 兜底常量会进 bundle——`base` 改为必填参数。
 
-### [ ] T-143 · 吸附（网格 / 角度）
-- **依赖** T-142 · **预估** 0.5d · **实际** ___
+### [x] T-143 · 吸附（网格 / 角度）
+- **依赖** T-142 · **预估** 0.5d · **实际** 0.5h
 - **独占** `packages/core/src/runtime/gizmo.ts`（snap API）, `packages/editor/src/viewport/SnapToolbar.tsx`, `packages/editor/test/snap.test.ts`
 - **做** core gizmo 增 `setSnap({ translate?: number; rotateDeg?: number })`；工具栏：网格 0.1 / 0.5 / 1 m 三档 + 角度 15° 开关；吸附同时作用于 gizmo 拖拽与 T-142 的放置落点；设置为**编辑器会话态**（不进文档、不进 localStorage，D18）。
 - **验收** 开吸附拖动后文档坐标为格点值；关吸附行为与 v0 完全一致
 - **自测** `pnpm -F @w3/editor test snap` + `pnpm dev` 目视
+- **实际情况**：会话态放在 `viewport/snap.ts`（独占外新增一个文件）——不能只住在 SnapToolbar 里，
+  因为**读它的另一个是 gizmo，而 gizmo 根本不是 React 组件**（ADR-0009）；两个所有者会长出
+  「工具栏显示 0.5m 而拖拽是自由的」。吸附**只作用于 X/Z**：Y 是物体**停靠**的高度，来自射线
+  命中的表面，把它也四舍五入会把刚放上桌面的盒子抬起来或压进地板——网格是平面图，不是立体点阵。
+  `setSnap` 把 0 归一成 null：three 把 `translationSnap: 0` 读成"吸附到 0 的倍数"，手柄会直接
+  不动——一个会冻住 gizmo 的关闭开关比没有开关更糟。角度在**边界**处转弧度（用户输入一律是度）。
+  三次变异检验：向下取整、Y 也吸附、0 直接透传给 three。
 
 ### [ ] T-144 · 复制 / 粘贴 / Ctrl+D
 - **依赖** T-122 · **预估** 0.5d · **实际** ___

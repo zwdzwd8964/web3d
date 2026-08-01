@@ -94,6 +94,35 @@ export class Gizmo {
     this.controls.setSpace(space)
   }
 
+  /**
+   * v0.5 · T-143 · grid and angle snapping.
+   *
+   * `null` on either axis turns that one off, which is not the same as zero — three treats
+   * `translationSnap: 0` as "snap to multiples of 0" and the handle stops moving at all.
+   *
+   * Degrees in, radians out: every angle the user types in this product is in degrees
+   * (SCHEMA_SPEC §4.4), and converting at the boundary means no caller ever has to remember
+   * which side of it they are on.
+   *
+   * The setting itself is EDITOR SESSION STATE and does not live here — a gizmo does not
+   * remember whether the user likes snapping, it just applies what it is told. D18 keeps it
+   * out of the document too: it is a tool setting, not a property of the scene.
+   */
+  setSnap(snap: { translate?: number | null; rotateDeg?: number | null }): void {
+    if (snap.translate !== undefined) {
+      this.controls.translationSnap = snap.translate === null || snap.translate <= 0 ? null : snap.translate
+    }
+    if (snap.rotateDeg !== undefined) {
+      this.controls.rotationSnap =
+        snap.rotateDeg === null || snap.rotateDeg <= 0 ? null : (snap.rotateDeg * Math.PI) / 180
+    }
+  }
+
+  /** What the gizmo is currently snapping to. Metres and radians, as three stores them. */
+  get snap(): { translate: number | null; rotate: number | null } {
+    return { translate: this.controls.translationSnap, rotate: this.controls.rotationSnap }
+  }
+
   setEnabled(enabled: boolean): void {
     this.controls.enabled = enabled
     this.controlsHelper.visible = enabled && this.selection.length > 0
