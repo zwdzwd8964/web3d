@@ -637,12 +637,18 @@
   而那才是它接下来每一次编辑要去的地方。
   写过一条"存储没被碰过"的测试，但它断言的是一个测试里根本没人用的对象——**没有意义的断言不如没有**，删掉了。
 
-### [ ] T-173 · 宪法与体积复核
-- **依赖** T-145, T-170 · **预估** 0.5d · **实际** ___
+### [x] T-173 · 宪法与体积复核
+- **依赖** T-145, T-170 · **预估** 0.5d · **实际** 0.3h
 - **独占** `scripts/check-constitution.mjs`（挂新检查）, `size-limit.config.js`（如需）
 - **做** `check-library-manifest.mjs` 纳入 `pnpm check:constitution`；size-limit 复核（预算不变 gzip ≤ 400 KB——HDRI / 媒体 / 库内容全部走资产管线不进 bundle，本卡验证这一点）；断网构建 + 断网 `pnpm dev` 冒烟，结果记入 IMPL_NOTES §2。
 - **验收** `pnpm check:constitution` 全绿（含新项）；`pnpm size-limit` 通过并记录余量
-- **自测** `pnpm check:constitution && pnpm size-limit`
+- **自测** `pnpm check:constitution && pnpm size`
+- **实际情况**：体积 **gzip 243.0 KB / 400 KB，余量 157 KB**。HDRI、媒体、库内容全部走资产管线
+  不进 bundle——这正是本卡要验证的那句话，实测数字支持它。
+  「断网冒烟」**换了一种更强的做法**：原计划是断网构建 + 断网 `pnpm dev`，实际做的是黄金路径 II
+  第 ⑫ 步——发布出真 `.w3p` → Player 打开 → 拦截并断掉所有非本机源 → 重载 → 断言画面仍起来
+  且**被拦截的请求数为 0**。「我这台机器拔网线还能跑」证明不了什么（可能只是缓存全都在），
+  而「这个包一个外部地址都不请求」才是 C6 的原话。已记入 IMPL_NOTES §2。
 
 ### [ ] T-174 · benchmark 灯光 / 阴影压力档
 - **依赖** T-116, T-134 · **预估** 0.5d · **实际** ___

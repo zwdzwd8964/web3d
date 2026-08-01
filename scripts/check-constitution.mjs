@@ -21,6 +21,11 @@ const GUARDS = [
   { article: 'MVP §3', script: 'check-deps-direction.mjs', args: [], what: 'package dependency graph has no reverse edges' },
   { article: 'C6', script: 'check-no-external.mjs', args: REQUIRE_BUILD ? [] : ['--allow-missing'], what: 'no external URL in build output' },
   { article: 'C6', script: 'sync-vendor.mjs', args: ['--check'], what: 'Draco / KTX2 decoders are vendored and match the locked three' },
+  // v0.5 · T-173. The built-in library is content that ships WITH the app, so every file it
+  // names is a C6 surface: one `https://` in a manifest entry and an air-gapped deployment
+  // shows a broken tile. The licence field is enforced by the same script (D17 · 版权风险 V1),
+  // because content nobody can account for is a legal problem, not a rendering one.
+  { article: 'C6 + D17', script: 'check-library-manifest.mjs', args: [], what: 'built-in library manifest: no external URL, every item licensed, within budget' },
 ]
 
 /** Articles no script can prove. Printed on every run so the gap stays visible. */
