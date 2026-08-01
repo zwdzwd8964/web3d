@@ -168,12 +168,20 @@
   直接断言"灯节点必须变成真的 three 灯"的测试。`bias` 由 T-131 的 LightFactory 应用，
   已有覆盖（light-factory.test.ts）
 
-### [ ] T-133 · 环境与背景（HDRI / IBL）
-- **依赖** T-132 · **预估** 0.8d · **实际** ___
+### [x] T-133 · 环境与背景（HDRI / IBL）
+- **依赖** T-132 · **预估** 0.8d · **实际** 0.7h
 - **独占** `packages/core/src/runtime/environment.ts`, `packages/core/src/runtime/scene-runtime.ts`（环境段）, `packages/core/test/runtime/environment.test.ts`
 - **做** `AssetResolver` 取 `.hdr` 字节 → `RGBELoader.parse` → PMREM → `scene.environment`（`intensity` 走 `scene.environmentIntensity`）；`background.type === 'hdri'` 时同图作背景；`exposure` → `toneMappingExposure`；`hdriAssetId` 非空切 ACESFilmic、清空还原 v0 现状（进化规划 §4.1.4）；卸载与切换时 dispose PMREM 与纹理。
 - **验收** 设 → 清 → 再设无泄漏（`renderer.info` 纹理计数还原）；无 HDRI 文档的 toneMapping 与 v0 相同
 - **自测** `pnpm -F @w3/core test environment`
+- **实际情况**：三处需要记：①用 `HDRLoader` 而不是卡片写的 `RGBELoader`——同一个 RGBE
+  解析器，后者在 three 0.185 里是**已废弃别名**，构造时会打印弃用警告；零新增依赖
+  （登记进 IMPL_NOTES §3）。②PMREM 需要真 GL，所以把「equirect → 预过滤」抽成可注入的
+  `compile`，其余（选哪张、何时重取、场景读什么、释放什么）全是文档逻辑，纯 Node 可测；
+  `renderer.info` 计数要 GL，改为对自己分配的对象记账并在测试里说明。③`scene.background`
+  的所有权整体收进 `EnvironmentController`——原来 `applyBackground` 会在任何 meta 变更时
+  把 `background.color` 刷到 HDRI 背景上，症状（改个项目名字，HDRI 背景变回灰）看起来
+  和背景色八竿子打不着。
 
 ### [ ] T-134 · 默认灯架条件退场 + 老文档观感回归
 - **依赖** T-133 · **预估** 0.5d · **实际** ___

@@ -1,5 +1,5 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
-import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
 import { ClipPlayer } from './animator/clip.js'
@@ -10,11 +10,13 @@ import { CameraController } from './camera-controller.js'
 import { HighlightLayer } from './highlight.js'
 import type { HotspotRenderer } from './hotspot-layer.js'
 import { HotspotProjector, NullHotspotRenderer } from './hotspot-layer.js'
+import { EnvironmentController } from './environment.js'
 import { lightFactory } from './light-factory.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
 import { SceneGraph } from './scene-graph.js'
+import type { EnvMapCompiler } from './environment.js'
 import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
 /**
@@ -36,6 +38,8 @@ export interface SceneRuntimeOptions {
   /** Injected in tests; production builds a real WebGLRenderer. */
   readonly createRenderer?: (canvas: HTMLCanvasElement) => WebGLRenderer
   readonly hotspotRenderer?: HotspotRenderer
+  /** T-133 · injected in tests; production prefilters through PMREM, which needs GL. */
+  readonly compileEnvMap?: EnvMapCompiler
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
@@ -58,6 +62,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly hotspots: HotspotProjector
   readonly loader: AssetLoader
   readonly patches: PatchApplier
+  /** T-133 · owns scene.environment / background / tone mapping. */
+  readonly environment: EnvironmentController
 
   private renderer: WebGLRenderer | null = null
   private hotspotRenderer: HotspotRenderer
@@ -102,12 +108,24 @@ export class SceneRuntime implements RuntimeContext {
       onAnimationEnd: (animationId, completed) => this.emit({ event: 'animationEnd', animationId, completed }),
       onWarn: (message) => this.log('warn', message),
     })
+    this.environment = new EnvironmentController({
+      scene: this.scene,
+      renderer: () => this.renderer,
+      resolve: (url) => options.resolver.resolve(url),
+      log: (level, message, data) => this.log(level, message, data),
+      ...(options.compileEnvMap ? { compile: options.compileEnvMap } : {}),
+    })
     this.patches = new PatchApplier({
       graph: this.graph,
       materials: this.materials,
       highlights: this.highlights,
       rebuild: (doc) => this.rebuild(doc),
       applyMeta: (doc) => this.applyBackground(doc),
+      // T-133 · rebuilding a PMREM environment is expensive, so it gets its own consumer
+      // and is NOT triggered by someone typing a background colour. Fire-and-forget with
+      // logging inside: `applyPatch` is synchronous by contract (D1), and making it async
+      // would put an await in every editor keystroke's path.
+      applyEnvironment: (doc) => void this.environment.apply(doc),
       applyNodeShadow: (doc, nodeId) => this.syncNodeShadowFlags(doc, nodeId),
       log: (level, message, data) => this.log(level, message, data),
     })
@@ -186,9 +204,16 @@ export class SceneRuntime implements RuntimeContext {
     writeShadowFlags(object, cast, receive)
   }
 
+  /**
+   * The backdrop, delegated in full to the environment controller (T-133).
+   *
+   * It used to write `scene.background` here. With `background.type: 'hdri'` in v2 the two
+   * would fight: this one would paint `background.color` over the environment map the
+   * moment any meta field changed, and the symptom — the HDRI backdrop reverting to grey
+   * when you rename the project — would look like anything but a background-colour writer.
+   */
   private applyBackground(doc: SceneDocument): void {
-    const background = doc.meta.background
-    this.scene.background = background.type === 'transparent' ? null : new Color(background.color)
+    this.environment.syncScene(doc)
   }
 
   private attachRenderer(canvas: HTMLCanvasElement): void {
@@ -205,6 +230,9 @@ export class SceneRuntime implements RuntimeContext {
         }))
     this.renderer = create(canvas)
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
+    // Tone mapping and the prefilter both live on the renderer, so a document that was
+    // loaded before the canvas existed has to be re-applied onto it now.
+    void this.environment.apply(this.document)
     // The renderer usually arrives after the document, so the pipeline state has to be
     // pushed onto it rather than waiting for the next edit.
     this.syncShadows(this.document, true)
@@ -223,6 +251,10 @@ export class SceneRuntime implements RuntimeContext {
     await this.ensureAssets(doc)
     this.graph.setAssetSource(this.loader)
     this.rebuild(doc)
+    // Awaited, unlike the patch path: `load` is the one moment a caller can wait for the
+    // scene to be complete, and an environment that arrives three frames later is exactly
+    // the flicker the publish thumbnail and the parity trace would capture.
+    await this.environment.apply(doc)
     this.camera.frameAll()
   }
 
@@ -327,6 +359,9 @@ export class SceneRuntime implements RuntimeContext {
     this.camera.dispose()
     this.highlights.clearAll()
     this.materials.dispose()
+    // Before the graph: the environment holds a PMREM render target, which is VRAM nobody
+    // else will ever free — scene.clear() only detaches it.
+    this.environment.dispose()
     this.graph.dispose()
     this.loader.dispose()
     this.hotspotRenderer.dispose()
