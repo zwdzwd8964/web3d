@@ -192,6 +192,58 @@ fire-and-forget 会漏未处理拒绝——读代码确认它内部全捕获，�
 它背后的对象——picker 按距离取最近命中，代理半径 0.18 且位于灯的中心，实测点击穿过它后面
 的物体仍然命中物体（`follows the light when the node moves` 那条用的就是这个位置关系）。
 
+### T-176 · v0.5 全量对抗式审查
+
+五个维度并行找问题（规范一致性 / 假绿测试 / 宪法违背 / 性能悬崖 / 数据完整性与迁移），
+**共 27 条**；其中 blocker/major 17 条。前 4 条各由**三个独立视角试图证伪**（读代码 / 找反例 /
+可达性），**四条全部存活**（被驳 0–1 / 3）。
+
+#### 已修（6 条，每条附变异检验）
+
+| 严重度 | 发现 | 为什么没人早点发现 | 处置 |
+|---|---|---|---|
+| **blocker** | **发布包不含贴图与 HDRI 字节**。`referencedHashes` 遍历 `nodes[].assetRef`、`animations[].assetId`、`media[].assetId`，**唯独漏了 `materials[].params.maps.*` 与 `meta.environment.hdriAssetId`** | 贴图的引用方式和模型不一样：**没有节点指向它**，只有材质槽位指向它；而 `meta.environment` 根本不是谁在遍历的集合。包能打出来、播放器能打开、场景没有贴图也没有环境——v0.5 的招牌功能在任何发布出去的东西里静默消失 | ✅ 已修 + 两条测试（含"仍然不收没人引用的资产"守住窄度）。变异 Z3 → 红 |
+| **blocker** | **`asset.stats` 泄漏测量键**，凡导入过图片/HDRI/音频的项目都发布不出去 | 面板用 `checkIntegrity`，它不重跑 schema 校验；导入测试也全都只断言 `checkIntegrity` | ✅ **T-170 第 ⑫ 步当场抓到**并修（黑名单改白名单）+ 三条 `validate` 级回归。变异 U1 → 红 |
+| **blocker** | **`playMedia` 的 audio 约束在生产路径上从来不存在**。I14 第三句靠 `RefTarget.expectType` 执行，而生产解析器从不产出这个字段——`ActionDefinition.refs` 的返回类型**连声明它的位置都没有**。唯一覆盖它的测试自造了一个假解析器 | 进化规划 §1.3 的灰区裁决「视频进 ECA 动作 —— 不做，I14 挡住」整条建立在一道不存在的闸门上。可达路径：导入 .mp4 → 媒体记录 type=video → 出现在 playMedia 下拉（`refKind` 没有子类型）→ 零 error → 发布通过 → 播放时 `<audio>` 拒绝，被 catch 吞成「浏览器不允许自动播放」——一个与真实原因毫无关系的诊断 | ✅ 已修：`refs` 允许 `expectType`，`playMedia` 声明 `'audio'`。新增 `i14-gate.test.ts` **测生产解析器而不是替身**。变异 Z2 → 3 条红 |
+| **blocker** | **整块 `/nodes` 补丁路径吞掉 `assetRef` 变化**：二次上传模型后视口仍画旧几何 | §5.3 的 remap 保留每个 node id 并整体替换数组，所以 `before`/`after` 的 id 集合完全相同，逐个 resync 全部"成功"，批次算作已处理。逐下标路径一直写着 `case 'assetRef': return false`，**整块路径没有**。`fullRebuildCount` 全程为 0——正是为这种情况准备的警报 | ✅ 已修 + 两条测试。变异 Z1 → 红 |
+| **blocker** | **拖材质滑块时每帧重传该材质的所有贴图**：`applyUv` 无条件 `texture.needsUpdate = true` | repeat/offset/rotation 是**uniform**，three 每帧本来就重算 uv 矩阵；只有 wrap 模式是采样器参数、才需要重新绑定。6 张 2048² 贴图拖一秒 ≈ 60 × 100 MB 重传，且因为一资产一 Texture，重传打到所有共用它的材质 | ✅ 已修：只在 wrap 真的改变时置位。变异 Y1 → 红 |
+| **major** | **换灯光类型不钳位 intensity**：聚光灯 15 → 环境光（上限 10）写出 `intensity: 15` | 文档**存得下**，自动保存落盘；下次打开 `migrate` 校验失败 → 编辑器回退到样例场景 → **用户看到自己的工程消失了**。每一步都是静默的 | ✅ 已修（钳到目标类型上限）+ 两条测试 |
+
+同一轮里我自己顺手修的三条（不在 27 条内，但同源）：
+`rotationDeg` 控件没有 min/max（与灯光强度**同一种坏法**：存得下、打不开）、
+`@w3/editor` 的 `--passWithNoTests`（**卡片自测命令在测试文件不存在时也会绿**）、
+`setLightParams` 的 `Record<string, unknown>`（把"别写进错误的键"这件事交给调用方，改成结构性的类型约束）。
+
+#### 假绿（本轮最有价值的一类）
+
+| 发现 | 处置 |
+|---|---|
+| **黄金路径 II 第 ⑪ 步「灯变亮 → 退出 → 还原」两个断言都不成立**：唯一关于灯的断言读的是**文档**，而 `setLight` 写的是 three 对象、根本不写文档。**这条断言在用户从未点过「预览」时同样成立** | ✅ 已修：新增 `__w3DevLightOf` 只读钩子，断言**渲染器手上的值**。变异 X1（`setLight` 改成空操作）→ 红；改之前不会 |
+| `createPatchForwarder`（生产用的补丁转发器）**零单测**，而自称「与 main.tsx 同一套接线」的 `undo-runtime-parity` 实际直接调 `runtime.applyPatch`，绕开了它 | 登记。把 `'assets'` 改成 `'asset'` 两套测试照绿 |
+| `undo-runtime-parity` 的 snapshot 自称覆盖「文档编辑能改的一切」，**完全不含 v0.5 的灯光/原始体/贴图/阴影标志位** | 登记 |
+| 「规则编辑器只认六种字段」的守卫**写死了一个错误集合**：混入不存在的 `vec3`、漏掉真实存在的 `valueExpr`，与 `FieldDescriptor` 之间没有任何机械联系 | 登记（我自己写的那条，同一个毛病） |
+
+#### 登记不修（有据可查，留给 v1 或下一张卡）
+
+- **blocker（测试缺口，非缺陷）**「HDRI 照亮场景」全仓零验证：`EnvironmentController` 只在隔离桩里测过，
+  `SceneRuntime` 的接线和 E2E 都只断言文档。删掉 `await this.environment.apply(doc)` 全套测试照绿。
+- **major** 编辑器预览没有摘掉灯光 helper 与拾取代理球 → 预览里点得到灯、播放器里点不到（C3 分叉）。
+- **major** 一资产一 Texture 是共享实例，`colorSpace` 与 UV 变换却逐槽位、逐材质写在上面：
+  同一张图同时挂「基础色」与「粗糙度」→ 最终 colorSpace 为线性 → 整个物体发白。**已实测复现。**
+- **major** 四条 O(n²) 性能悬崖，1000 节点量级实测：删除靠前节点 `applyPatch` 97 ms、
+  `flattenTree` 8.9 ms/帧、`buildIndex` 8.5 ms/次、状态栏 `checkIntegrity` 4.7 ms/次。
+  **`fullRebuildCount` 全程为 0——增量路径比它要避免的兜底路径慢 30 倍，没有任何自动化信号看得见。**
+- **major** 导入的模型若有超过 120 字符的物体名 → 生成的节点违反 `NodeSchema` → 整份工程打不开。
+- 其余 minor 6 条（D19 的「先到者为准」只等 `durationS`、规则编辑器媒体下拉显示文件名而非
+  `media.name`、`resetScene` 的 `describe()` 未随 v0.5 更新、executor 对 media 的 B9 直接放行、
+  `syncShadows(force)` 的 O(n²)、`primitiveBounds` 被接到了每次指针移动上）。
+
+> **这一轮最该记住的一条**：四条存活的 blocker 里，有三条的共同形状是
+> **「引用不是从它被指向的地方走过去的」**——贴图没有节点指向它（发布漏字节）、
+> `expectType` 没有生产者（I14 形同虚设）、整块 `/nodes` 路径不认识 `assetRef`（重传旧几何）。
+> 每一条都有周边的测试全绿。M10 → M11 → M12 的三条教训是同一件事的三个切面，
+> T-176 给它加了第四个：**测试是沿着你想到的引用路径写的，缺陷长在你没想到的那条上。**
+
 ### T-170 写到一半发现的一条（**规划缺口**，已开 T-137）
 
 | 严重度 | 发现 | 处置 |

@@ -48,6 +48,17 @@ if (import.meta.env.DEV) {
     active?.projectToScreen(nodeId) ?? null
 
   /**
+   * DEV-only read-back of a light's LIVE parameters.
+   *
+   * `setLight` writes the three object, never the document (that is what makes it an ECA
+   * action rather than an edit). So 「灯变亮了」 and 「退出预览后灯回到 3」 are claims about
+   * the RENDERER, and asserting them against `doc.nodes[i].light.intensity` is vacuous —
+   * that value never moved. T-170's step ⑪ did exactly that until T-176's review caught it:
+   * the assertion passed whether or not the user ever pressed 预览.
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevLightOf'] = (nodeId: string) => active?.lightOf(nodeId) ?? null
+
+  /**
    * DEV-only read-back of the live document.
    *
    * For the assertions the DOM cannot make: 「包围盒底面对齐地面」 is a number in

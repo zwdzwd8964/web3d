@@ -240,3 +240,43 @@ describe('createPackageResolver()', () => {
     await expect(resolver.resolve('assets/zz/zz/nope.glb')).rejects.toThrow(StorageError)
   })
 })
+
+describe('v0.5 资产也要进包（T-176 审查所得）', () => {
+  /** The golden path plus a texture on a material and an HDRI as the environment. */
+  const withV05Assets = () => {
+    const base = createGoldenPathDocument()
+    const asset = (id: string, type: string, hash: string) => ({
+      ...base.assets[0]!,
+      id,
+      type,
+      hash,
+      name: `${id}.bin`,
+    })
+    return {
+      ...base,
+      assets: [
+        ...base.assets,
+        asset('ast_tex00001', 'texture', `sha256:${'b'.repeat(64)}`),
+        asset('ast_hdr00001', 'hdri', `sha256:${'c'.repeat(64)}`),
+      ],
+      materials: base.materials.map((m) => ({ ...m, params: { ...m.params, maps: { map: 'ast_tex00001' } } })),
+      meta: { ...base.meta, environment: { ...base.meta.environment, hdriAssetId: 'ast_hdr00001' } },
+    } as ReturnType<typeof createGoldenPathDocument>
+  }
+
+  it('包含材质贴图与环境贴图的字节', () => {
+    // 症状有多糟：包能打出来、播放器能打开、场景**没有贴图也没有环境**——v0.5 的招牌功能
+    // 在任何发布出去的东西里静默消失。没人发现是因为贴图的引用方式和模型不一样：
+    // 没有节点指向它，只有材质槽位指向它，而 meta.environment 根本不是谁在遍历的集合。
+    const hashes = referencedHashes(withV05Assets())
+    expect(hashes.has(`sha256:${'b'.repeat(64)}`), '材质贴图的字节必须进包').toBe(true)
+    expect(hashes.has(`sha256:${'c'.repeat(64)}`), '环境贴图的字节必须进包').toBe(true)
+  })
+
+  it('仍然不收没人引用的资产', () => {
+    // 这条守着上一条的窄度：包大小是发布体验的一部分，全收等于把废弃资产也发出去。
+    const doc = withV05Assets()
+    const unused = { ...doc, materials: doc.materials.map((m) => ({ ...m, params: { ...m.params, maps: {} } })) }
+    expect(referencedHashes(unused).has(`sha256:${'b'.repeat(64)}`)).toBe(false)
+  })
+})

@@ -315,6 +315,21 @@ export class PatchApplier {
     const before = new Map(prev.nodes.map((n) => [n.id, n]))
     const after = new Map(next.nodes.map((n) => [n.id, n]))
 
+    // A node whose ASSET changed cannot be reconciled: its geometry has to be built again
+    // from different bytes, and only a rebuild knows how. The per-index path has always
+    // said so (`case 'assetRef': return false`), but the WHOLE-`/nodes` path did not — and
+    // that is the path a re-upload takes, because §5.3's remap keeps every node id and
+    // replaces the array wholesale. So `before`/`after` had identical id sets, every node
+    // resynced "successfully", the batch counted as handled, and the viewport kept drawing
+    // the OLD model while the tree, the asset panel and the 「已迁移 N 项」 dialog all
+    // showed the new one. `fullRebuildCount` stayed 0 — the alarm for exactly this.
+    //
+    // Found by T-176's review; three independent readers failed to refute it.
+    for (const [id, was] of before) {
+      const now = after.get(id)
+      if (now && was.assetRef?.assetId !== now.assetRef?.assetId) return false
+    }
+
     for (const id of before.keys()) {
       // removeNode drops the whole subtree, so a child removed alongside its parent is
       // already gone by the time we reach it — not an error.

@@ -117,6 +117,21 @@ async function clickNode(page: Page, name: string): Promise<void> {
   await page.locator('canvas.viewport__canvas').click({ position: point })
 }
 
+/**
+ * A light's LIVE parameters, from the renderer.
+ *
+ * `setLight` writes the three object, never the document — so 「灯变亮」 and 「退出后还原」
+ * are claims about the renderer. Reading them off the document is vacuous (T-176 审查所得:
+ * the old assertion passed whether or not 预览 was ever pressed).
+ */
+const renderedLight = (page: Page, nodeId: string) =>
+  page.evaluate((id: string) => {
+    const probe = (globalThis as Record<string, unknown>)['__w3DevLightOf'] as
+      | ((n: string) => { intensity: number; color: string } | null)
+      | undefined
+    return probe?.(id) ?? null
+  }, nodeId)
+
 /** The document, straight out of the store, for assertions the DOM cannot make. */
 const doc = (page: Page) =>
   page.evaluate(() => {
@@ -399,14 +414,16 @@ test('黄金路径 II · 12 步', async ({ page, context }) => {
   // 自信满满的 flaky 测试（进化规划 §2 原话）。
   expect(await isMediaPlaying(page, mediaId), '规则应当把音频播起来').toBe(true)
 
+  // 灯：断言**渲染器手上的值**。setLight 写的是 three 对象、不是文档，所以读文档的断言是空的
+  // ——它在用户根本没点过「预览」时同样成立（T-176 审查抓到的就是这一条）。
+  expect((await renderedLight(page, lightId))?.intensity, '规则应当把灯调到 6').toBe(6)
+
   await page.getByRole('button', { name: '编辑', exact: true }).click()
   await page.waitForTimeout(SETTLE * 2)
 
   // B13 扩展到灯与媒体：退出预览，音频停、灯回到文档里的值。
   expect(await isMediaPlaying(page, mediaId), '退出预览必须静音').toBe(false)
-
-  const restored = (await doc(page)) as { nodes: { id: string; light: { intensity: number } | null }[] }
-  expect(restored.nodes.find((n) => n.id === lightId)!.light!.intensity, '灯要回到文档里的强度').toBe(2)
+  expect((await renderedLight(page, lightId))?.intensity, '退出预览，渲染器里的灯要回到 2').toBe(2)
 
   /* ⑫ 发布 → Player 打开 → 断网刷新仍可用 ---------------------------------- */
   await page.getByRole('button', { name: '发布' }).click()

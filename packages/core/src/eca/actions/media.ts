@@ -70,7 +70,13 @@ const playMedia = defineAction<z.infer<typeof PlayMediaParams>>({
       { key: 'volume', type: 'number', label: '音量', min: 0, max: 1, step: 0.05 },
     ],
   },
-  refs: (p) => [{ kind: 'media', id: p.mediaId }],
+  // `expectType: 'audio'` is what makes I14's third clause real. `playMedia` accepts audio
+  // only (进化规划 §1.3 灰区裁决：视频进 ECA 动作 —— 不做), and the picker cannot enforce it
+  // because `refKind: 'media'` lists every media record. Without this the check had no
+  // producer at all: a video clip selected here passed integrity, passed the publish gate,
+  // and failed at play time with 「浏览器不允许自动播放」 — a diagnosis with nothing to do
+  // with the cause.
+  refs: (p) => [{ kind: 'media', id: p.mediaId, expectType: 'audio' }],
   describe: (p, doc) => {
     const parts: string[] = []
     if (p.loop) parts.push('循环')
@@ -114,6 +120,5 @@ function mediaName(doc: { media: readonly { id: string; name: string }[] }, medi
   return doc.media.find((m) => m.id === mediaId)?.name ?? mediaId
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- same shape as every other
-// action list: the registry is heterogeneous by design (ECA_SPEC §10).
+// The registry is heterogeneous by design (ECA_SPEC §10); this matches every other list.
 export const MEDIA_ACTIONS: ActionDefinition<any>[] = [playMedia, stopMedia]

@@ -78,6 +78,20 @@ export function referencedHashes(document: SceneDocument): Set<BlobHash> {
   }
   for (const media of document.media) used.add(media.assetId)
 
+  // v0.5 · textures and the environment map (T-176 审查所得).
+  //
+  // These two were missing, and the symptom is as bad as it gets: the package builds, the
+  // player opens it, and the scene renders UNTEXTURED with no environment — every v0.5
+  // headline feature silently absent from anything ever published. Nothing caught it
+  // because a texture is not referenced the way a model is: no node points at it, only a
+  // material slot does, and `meta.environment` is not a collection anybody was walking.
+  for (const material of document.materials) {
+    for (const assetId of Object.values(material.params.maps)) {
+      if (typeof assetId === 'string') used.add(assetId)
+    }
+  }
+  if (document.meta.environment.hdriAssetId !== null) used.add(document.meta.environment.hdriAssetId)
+
   const out = new Set<BlobHash>()
   for (const asset of document.assets) {
     if (used.has(asset.id) && isBlobHash(asset.hash)) out.add(asset.hash)

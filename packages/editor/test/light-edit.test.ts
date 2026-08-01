@@ -147,6 +147,32 @@ describe('editing one', () => {
     expect('color' in light && light.color).toBe('#ff8800')
   })
 
+  it('CLAMPS the carried intensity to the new kind’s ceiling (T-176 审查所得)', () => {
+    // Ambient and hemisphere cap at 10; the others cap at 20 (§4.1.3). Carrying 15 across
+    // raw produced a document that SAVES, then fails `validate` on reload — and the editor
+    // falls back to the sample scene, so the user's project appears to have vanished.
+    // Every step of that is silent.
+    const doc = edit((draft) => {
+      const node = addLight(draft, templateFor('spot'), { ctx: ctx() })
+      setLightParams(draft, node.id, { intensity: 15 })
+    })
+    const id = lightId(doc)
+    const after = edit((draft) => setLightKind(draft, id, 'ambient'), doc)
+
+    expect(after.nodes.find((n) => n.id === id)!.light!.intensity).toBe(10)
+    expect(validate(after).ok, '换类型之后文档必须还打得开').toBe(true)
+  })
+
+  it('does not clamp when the new kind allows the value', () => {
+    const doc = edit((draft) => {
+      const node = addLight(draft, templateFor('spot'), { ctx: ctx() })
+      setLightParams(draft, node.id, { intensity: 15 })
+    })
+    const id = lightId(doc)
+    const after = edit((draft) => setLightKind(draft, id, 'point'), doc)
+    expect(after.nodes.find((n) => n.id === id)!.light!.intensity, 'point 上限也是 20').toBe(15)
+  })
+
   it('switching to hemisphere does not smuggle a `color` field in', () => {
     // Hemisphere has skyColor/groundColor and NO `color`. Carrying the colour across
     // regardless would produce a document zod rejects.

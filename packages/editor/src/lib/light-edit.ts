@@ -127,6 +127,26 @@ const findLight = (draft: SceneDocument, nodeId: string): Node | undefined => {
 }
 
 /**
+ * The fields any light kind can carry. NOT `Record<string, unknown>`.
+ *
+ * `LightSchema` is `.strict()`, so one key from another variant makes a document that saves
+ * and then refuses to open. A loose patch type puts the only thing standing between the
+ * panel and that outcome in the caller's care — and the same class of bug (a wider object
+ * spread into a strict field) is what made every project with an imported image
+ * unpublishable until golden path II caught it. Here it is the type's job instead.
+ */
+export interface LightParamPatch {
+  readonly color?: string
+  readonly skyColor?: string
+  readonly groundColor?: string
+  readonly intensity?: number
+  readonly range?: number
+  readonly decay?: number
+  readonly angleDeg?: number
+  readonly penumbra?: number
+}
+
+/**
  * Writes one or more light parameters.
  *
  * Takes a partial and merges, because every control in the panel edits one field of a
@@ -136,7 +156,7 @@ const findLight = (draft: SceneDocument, nodeId: string): Node | undefined => {
  * `kind` is NOT editable here: changing it changes which fields exist, so it goes through
  * `setLightKind`, which rebuilds from that kind's defaults.
  */
-export function setLightParams(draft: SceneDocument, nodeId: string, patch: Record<string, unknown>): void {
+export function setLightParams(draft: SceneDocument, nodeId: string, patch: LightParamPatch): void {
   const node = findLight(draft, nodeId)
   if (!node || node.light === null) return
   node.light = { ...node.light, ...patch } as Light
@@ -157,15 +177,22 @@ export function setLightKind(draft: SceneDocument, nodeId: string, kind: LightKi
   const previous = node.light
   const next = defaultLight(kind)
 
-  const intensity = previous.intensity
   const colour = 'color' in previous ? previous.color : undefined
 
   node.light = {
     ...next,
-    intensity,
+    // CLAMPED to the target kind's range, not carried across raw. Ambient and hemisphere
+    // cap at 10 while the others cap at 20 (§4.1.3), so a spotlight at 15 turned into an
+    // ambient light produced `intensity: 15` — a document that saves, fails `validate` on
+    // reload, and sends the user back to the SAMPLE SCENE with their project apparently
+    // gone. Found by T-176's review; the failure is silent at every step until that point.
+    intensity: Math.min(previous.intensity, maxIntensity(kind)),
     ...(colour !== undefined && 'color' in next ? { color: colour } : {}),
   } as Light
 }
+
+/** Per-kind intensity ceiling, transcribed from `LightSchema` (§4.1.3). */
+const maxIntensity = (kind: LightKind): number => (kind === 'ambient' || kind === 'hemisphere' ? 10 : 20)
 
 /** Writes a shadow setting. A no-op for the kinds that cannot cast one. */
 export function setLightShadow(

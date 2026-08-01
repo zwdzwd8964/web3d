@@ -479,14 +479,28 @@ function applyUv(target: Material & Record<string, unknown>, def: MaterialDef): 
       texture.rotation = (uv.rotationDeg * Math.PI) / 180
     }
 
-    // Tiling below 1× is a crop; at or above it the texture must wrap or the surface shows
-    // one copy and stretched edge pixels for the rest.
-    const wrap = texture.repeat.x > 1 || texture.repeat.y > 1 ? RepeatWrapping : ClampToEdgeWrapping
-    texture.wrapS = wrap
-    texture.wrapT = wrap
     // Rotation is around the uv origin by default, which spins the texture off the surface.
     // The centre is what every authoring tool means by "rotate the texture".
     texture.center.set(0.5, 0.5)
+
+    // Tiling below 1× is a crop; at or above it the texture must wrap or the surface shows
+    // one copy and stretched edge pixels for the rest.
+    const wrap = texture.repeat.x > 1 || texture.repeat.y > 1 ? RepeatWrapping : ClampToEdgeWrapping
+    if (texture.wrapS === wrap && texture.wrapT === wrap) return
+
+    texture.wrapS = wrap
+    texture.wrapT = wrap
+    // `needsUpdate` ONLY here, and this is the whole point of the guard above.
+    //
+    // repeat / offset / rotation / center are UNIFORMS — three recomputes the uv matrix
+    // every frame anyway (`matrixAutoUpdate`), and touching them costs nothing. The wrap
+    // mode is a sampler parameter, which does need a re-bind.
+    //
+    // Setting it unconditionally re-uploaded the whole image instead: dragging the
+    // roughness slider for one second on a material with six 2048² maps meant ~60 × 100 MB
+    // of texImage2D plus mipmap rebuilds, and the frame rate fell to single digits. And
+    // because the cache shares one Texture per asset, the re-upload hit every material
+    // using it. Found by T-176's review.
     texture.needsUpdate = true
   }
 }

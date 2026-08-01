@@ -112,12 +112,19 @@ export function MaterialPanel() {
   }
 
   /** One uv control. Dragging previews; releasing commits — D2, one drag one undo entry. */
-  const uvField = (label: string, value: number, write: (draft: SceneDocument, v: number) => void, step: number) => (
+  const uvField = (
+    label: string,
+    value: number,
+    write: (draft: SceneDocument, v: number) => void,
+    step: number,
+    range?: { min: number; max: number },
+  ) => (
     <NumberField
       key={label}
       label={label}
       value={value}
       step={step}
+      {...(range ?? {})}
       onCommit={(v) => commit(`调整 ${label}`, (draft) => write(draft, v))}
       onPreviewStart={previewStart}
       onPreview={(v) => preview((draft) => write(draft, v))}
@@ -357,7 +364,14 @@ export function MaterialPanel() {
                 {uvField('平铺 V', uv.repeat[1], (draft, v) => setUv(draft, material.id, { repeat: [uv.repeat[0], v] }), 0.1)}
                 {uvField('偏移 U', uv.offset[0], (draft, v) => setUv(draft, material.id, { offset: [v, uv.offset[1]] }), 0.01)}
                 {uvField('偏移 V', uv.offset[1], (draft, v) => setUv(draft, material.id, { offset: [uv.offset[0], v] }), 0.01)}
-                {uvField('旋转°', uv.rotationDeg, (draft, v) => setUv(draft, material.id, { rotationDeg: v }), 1)}
+                {/* The range is NOT cosmetic: `rotationDeg` is `min(-360).max(360)`, and a
+                    control without bounds writes a document that saves and then refuses to
+                    open — the editor falls back to the sample scene and the user's project
+                    appears to have vanished (T-176 审查所得，与灯光强度同一种坏法). */}
+                {uvField('旋转°', uv.rotationDeg, (draft, v) => setUv(draft, material.id, { rotationDeg: v }), 1, {
+                  min: -360,
+                  max: 360,
+                })}
               </fieldset>
             </>
           )}

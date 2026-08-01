@@ -11,7 +11,7 @@ import { acceptsDrag, endDrag, getDrag } from './drag.js'
 import { DropController } from './drop-controller.js'
 import { boundsOfPrimitive, resolveDropPoint, restOnPoint } from './place.js'
 import { SnapToolbar } from './SnapToolbar.js'
-import { ANGLE_STEP_DEG, getSnap, onSnapChange, snapPosition } from './snap.js'
+import { ANGLE_STEP_DEG, getSnap, onSnapChange } from './snap.js'
 import { fulfilPick, isPicking } from './pick-request.js'
 import { patchesSettled } from './runtime-bridge.js'
 import { setActiveRuntime } from './runtime-registry.js'
@@ -40,7 +40,9 @@ export function Viewport() {
   const previewStore = usePreviewStore()
   const previewActive = usePreview((s) => s.active)
   const controllerRef = useRef<PreviewController | null>(null)
-  const { commit, previewStart, preview, previewCommit, previewAbort, toggleSelection, clearSelection, select } =
+  // `commit` is deliberately absent: since T-146 every drop goes through `DropController`,
+  // which uses the preview channel and collapses the whole gesture into one entry.
+  const { previewStart, preview, previewCommit, previewAbort, toggleSelection, clearSelection, select } =
     useDocumentActions()
   const selection = useDocumentSelector((s) => s.selection)
 

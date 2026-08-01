@@ -439,6 +439,46 @@ describe('texture slots and the uv block (T-151)', () => {
     expect(aoMap.channel, '通道由运行时决定，不继承贴图从哪来').toBe(0)
   })
 
+  it('does NOT re-upload the texture when only the uv numbers move (T-176 审查所得)', () => {
+    // repeat / offset / rotation are uniforms; three recomputes the uv matrix every frame
+    // anyway. Marking the texture dirty for them re-uploaded the whole image: dragging a
+    // slider for a second on a material with six 2048² maps was ~60 × 100 MB of texImage2D,
+    // and because the cache shares one Texture per asset it hit every material using it.
+    const map = new Texture()
+    const material = new MeshStandardMaterial()
+    const textures = source({ ast_00000001: map })
+    const withUv = (repeat: [number, number]) =>
+      def({ maps: { map: 'ast_00000001' }, uv: { repeat, offset: [0, 0], rotationDeg: 0 } })
+
+    applyParams(material, withUv([2, 2]), textures)
+    const settled = map.version
+
+    // Same wrap mode, different numbers — sixty of these is one slider drag.
+    for (const r of [[2.5, 2.5], [3, 3], [4, 4]] as [number, number][]) {
+      applyParams(material, withUv(r), textures)
+    }
+
+    expect(map.version, '只动 uv 数值不该触发重传').toBe(settled)
+    expect(map.repeat.x, '但值本身当然要生效').toBe(4)
+  })
+
+  it('DOES re-upload when the wrap mode actually changes', () => {
+    // The wrap mode is a sampler parameter, so this one genuinely needs the re-bind.
+    const map = new Texture()
+    const material = new MeshStandardMaterial()
+    const textures = source({ ast_00000001: map })
+    const withUv = (repeat: [number, number]) =>
+      def({ maps: { map: 'ast_00000001' }, uv: { repeat, offset: [0, 0], rotationDeg: 0 } })
+
+    applyParams(material, withUv([1, 1]), textures)
+    const clamped = map.version
+
+    applyParams(material, withUv([4, 4]), textures)
+
+    expect(map.version, '从 clamp 换成 repeat 必须重新绑定').toBeGreaterThan(clamped)
+    expect(map.wrapS).toBe(RepeatWrapping)
+  })
+
   it('updating uv does not replace the material instance (增量生效)', () => {
     const map = new Texture()
     const material = new MeshStandardMaterial()

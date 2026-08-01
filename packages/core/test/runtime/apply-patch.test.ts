@@ -461,3 +461,36 @@ describe('removing a material does not fall back (T-146)', () => {
     expect(materialOf(IDS.cover), '材质还在文档里，节点就不该被还原').toBe(overridden)
   })
 })
+
+describe('a re-uploaded asset forces a rebuild (T-176 审查所得)', () => {
+  it('falls back when a node keeps its id but points at a different asset', () => {
+    // §5.3's remap ladder keeps every node id and replaces `doc.nodes` wholesale, so this
+    // arrives as ONE `/nodes` patch with identical id sets on both sides. Reconciled
+    // node-by-node it all "succeeds", the batch counts as handled, and the viewport keeps
+    // drawing the old model while the tree and the 「已迁移 N 项」 dialog show the new one.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    const next = {
+      ...prev,
+      nodes: prev.nodes.map((n) => (n.assetRef ? { ...n, assetRef: { ...n.assetRef, assetId: 'ast_11112222' } } : n)),
+    }
+
+    const result = applier.apply([{ op: 'replace', path: ['nodes'], value: next.nodes }], next, prev)
+
+    expect(result.rebuilt, '换了资产就必须重建，这是唯一知道怎么重新长出几何的路径').toBe(true)
+    expect(applier.fullRebuildCount, '而且要如实报警，不是悄悄换').toBe(1)
+  })
+
+  it('does NOT fall back when the asset is the same', () => {
+    // The guard has to be narrow, or every ordinary wholesale edit (a delete, an import)
+    // starts rebuilding and the counter stops meaning anything.
+    const prev = createGoldenPathDocument()
+    graph.build(prev)
+    const next = { ...prev, nodes: prev.nodes.map((n) => ({ ...n, name: `${n.name} ` })) }
+
+    const result = applier.apply([{ op: 'replace', path: ['nodes'], value: next.nodes }], next, prev)
+
+    expect(result.rebuilt).toBe(false)
+    expect(applier.fullRebuildCount).toBe(0)
+  })
+})

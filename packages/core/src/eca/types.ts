@@ -173,7 +173,17 @@ export interface ActionDefinition<P = unknown> {
   readonly schema: ZodType<P>
   readonly handler: ActionHandler<P>
   readonly ui: ActionUi
-  readonly refs: (params: P) => ReadonlyArray<{ kind: RefKind; id: string }>
+  /**
+   * What this action's parameters point at, for the reverse index and integrity checking.
+   *
+   * `expectType` narrows the reference beyond its kind — 「这必须是一条 audio 媒体」 rather
+   * than merely 「这必须是一条媒体」. Integrity check I14's third clause is enforced through
+   * it (`requireType` in `integrity.ts`), and until T-176's review the field had no way to
+   * be produced: the return type did not admit it, so the only code that ever set one was a
+   * hand-written resolver inside a schema test. The gray-zone ruling 「视频进 ECA 动作 ——
+   * 不做，I14 挡住」 therefore rested on a gate that did not exist.
+   */
+  readonly refs: (params: P) => ReadonlyArray<{ kind: RefKind; id: string; expectType?: string }>
   readonly describe: (params: P, doc: SceneDocument) => string
 }
 
