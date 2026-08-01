@@ -97,9 +97,17 @@ function parseItem(raw: unknown): LibraryItem | null {
 }
 
 export interface LoadLibraryOptions {
+  /**
+   * Where the app is served from — `document.baseURI` in the browser.
+   *
+   * Required rather than defaulted. A fallback constant would be an absolute URL literal in
+   * the source, which lands in the bundle and is exactly what the C6 guard exists to catch:
+   * `http://localhost/` in build output is indistinguishable, to a scanner and to a
+   * reviewer, from a real external dependency.
+   */
+  readonly base: string
   /** Injected in tests. Production passes the browser's own `fetch`. */
   readonly fetch?: typeof globalThis.fetch
-  readonly base?: string
 }
 
 /**
@@ -109,9 +117,9 @@ export interface LoadLibraryOptions {
  * that fails to open — the library is an accelerator, and losing it must not cost the user
  * the project they had open.
  */
-export async function loadLibrary(options: LoadLibraryOptions = {}): Promise<Library> {
+export async function loadLibrary(options: LoadLibraryOptions): Promise<Library> {
   const doFetch = options.fetch ?? globalThis.fetch
-  const base = options.base ?? (typeof document === 'undefined' ? 'http://localhost/' : document.baseURI)
+  const { base } = options
   if (!doFetch) return { items: [], error: '当前环境不支持加载内置库' }
 
   let raw: unknown
@@ -211,7 +219,8 @@ export interface ImportLibraryItemOptions {
   readonly doc: SceneDocument
   readonly storage: StorageProvider
   readonly loader: AssetLoader
-  readonly base?: string
+  /** Where the app is served from. Required — see `LoadLibraryOptions.base`. */
+  readonly base: string
   readonly fetch?: typeof globalThis.fetch
   readonly newId?: IdFactory
   readonly now?: () => string
@@ -232,9 +241,7 @@ export interface ImportLibraryItemOptions {
 export async function importLibraryItem(options: ImportLibraryItemOptions): Promise<ImportResult> {
   const { item, doc, storage, loader } = options
   const doFetch = options.fetch ?? globalThis.fetch
-  const base = options.base ?? (typeof document === 'undefined' ? 'http://localhost/' : document.baseURI)
-
-  const response = await doFetch(libraryUrl(item.file, base))
+  const response = await doFetch(libraryUrl(item.file, options.base))
   if (!response.ok) throw new Error(`内置库文件读取失败（HTTP ${response.status}）：${item.file}`)
   const bytes = await response.arrayBuffer()
 

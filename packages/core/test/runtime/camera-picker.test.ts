@@ -198,6 +198,26 @@ describe('picking (T-035)', () => {
     expect(hit!.point).toHaveLength(3)
   })
 
+  it('ray-casts against where objects ARE, not where they were last rendered', () => {
+    // `Raycaster` reads `matrixWorld` and never refreshes it. Until T-142 the only thing
+    // that did was `renderer.render`, so a pick between a document change and the next
+    // frame — including the first click after a scene loads — tested stale positions.
+    // Found by a placement test: a box sitting at y = 0.1 was hit as though at the origin.
+    //
+    // The setup has to START from up-to-date matrices, or it proves nothing: an object
+    // whose matrixWorld was never computed is at the identity, which is the origin, which
+    // is where the ray is looking anyway.
+    graph.root.updateMatrixWorld(true)
+    expect(picker.pick(50, 50, 100, 100, camera.camera, doc), '前提：正中间本来命中得到东西').not.toBeNull()
+
+    for (const node of doc.nodes) {
+      graph.setTransform(node.id, { ...node, transform: { ...node.transform, p: [500, 0, 0] } })
+    }
+
+    // No render in between. Everything has moved 500 units away; nothing may be hit.
+    expect(picker.pick(50, 50, 100, 100, camera.camera, doc)).toBeNull()
+  })
+
   it('returns null when the ray misses everything', () => {
     expect(picker.pick(0, 0, 100, 100, camera.camera, doc)).toBeNull()
   })

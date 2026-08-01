@@ -24,6 +24,9 @@ import { ProjectSession } from '../src/project/session.js'
  * items a user actually sees.
  */
 
+/** Any absolute base works; the tests only care that urls resolve under it. */
+const BASE = 'http://localhost/'
+
 const REPO_MANIFEST = new URL('../public/library/manifest.json', import.meta.url)
 
 const manifestJson = () => JSON.parse(readFileSync(REPO_MANIFEST, 'utf8')) as Record<string, unknown>
@@ -54,7 +57,7 @@ beforeEach(() => {
 
 describe('loadLibrary', () => {
   it('loads the manifest this repository actually ships', async () => {
-    const library = await loadLibrary({ fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifestJson()) }) })
+    const library = await loadLibrary({ base: BASE, fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifestJson()) }) })
     expect(library.error).toBeNull()
     expect(library.items.length).toBeGreaterThan(0)
     expect(itemsOf(library, 'model').length).toBeGreaterThan(0)
@@ -68,7 +71,7 @@ describe('loadLibrary', () => {
     const manifest = manifestJson()
     const items = manifest.items as Record<string, unknown>[]
     delete items[0]!.license
-    const library = await loadLibrary({ fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
+    const library = await loadLibrary({ base: BASE, fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
     expect(library.items).toHaveLength(items.length - 1)
     expect(library.error).toContain('1 项')
   })
@@ -76,7 +79,7 @@ describe('loadLibrary', () => {
   it('drops an item whose path is a URL (C6)', async () => {
     const manifest = manifestJson()
     ;(manifest.items as Record<string, unknown>[])[1]!.file = 'https://cdn.example.com/a.png'
-    const library = await loadLibrary({ fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
+    const library = await loadLibrary({ base: BASE, fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
     expect(library.items.map((i) => i.file).some((f) => f.startsWith('http'))).toBe(false)
     expect(library.error).not.toBeNull()
   })
@@ -84,12 +87,12 @@ describe('loadLibrary', () => {
   it('drops an item whose path escapes the library root', async () => {
     const manifest = manifestJson()
     ;(manifest.items as Record<string, unknown>[])[1]!.file = '../../../etc/passwd'
-    const library = await loadLibrary({ fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
+    const library = await loadLibrary({ base: BASE, fetch: fakeFetch({ 'manifest.json': JSON.stringify(manifest) }) })
     expect(library.items.some((i) => i.file.includes('..'))).toBe(false)
   })
 
   it('refuses a manifest version it does not understand', async () => {
-    const library = await loadLibrary({ fetch: fakeFetch({ 'manifest.json': JSON.stringify({ version: 99, items: [] }) }) })
+    const library = await loadLibrary({ base: BASE, fetch: fakeFetch({ 'manifest.json': JSON.stringify({ version: 99, items: [] }) }) })
     expect(library.items).toEqual([])
     expect(library.error).toContain('99')
   })
@@ -97,11 +100,11 @@ describe('loadLibrary', () => {
   it('reports a missing library instead of failing to open the editor', async () => {
     // The library is an accelerator. Losing it must not cost the user the project they had
     // open, so every failure path returns a message and an empty list.
-    expect(await loadLibrary({ fetch: fakeFetch({}) })).toEqual({ items: [], error: expect.stringContaining('404') })
+    expect(await loadLibrary({ base: BASE, fetch: fakeFetch({}) })).toEqual({ items: [], error: expect.stringContaining('404') })
     const throwing = (async () => {
       throw new Error('offline')
     }) as unknown as typeof globalThis.fetch
-    expect((await loadLibrary({ fetch: throwing })).error).toContain('offline')
+    expect((await loadLibrary({ base: BASE, fetch: throwing })).error).toContain('offline')
   })
 
   it('builds urls under the app’s own origin, never anywhere else', () => {
@@ -189,7 +192,7 @@ describe('importLibraryItem', () => {
       doc,
       storage,
       loader: session.loader,
-      base: 'http://localhost/',
+      base: BASE,
       fetch: fakeFetch({ 'models/display-stand.glb': bytesOf(glb()) }),
     })
 
@@ -226,7 +229,7 @@ describe('importLibraryItem', () => {
 
   it('reports a missing library file rather than importing nothing', async () => {
     await expect(
-      importLibraryItem({ item, doc: createGoldenPathDocument(), storage, loader: session.loader, base: 'http://localhost/', fetch: fakeFetch({}) }),
+      importLibraryItem({ item, doc: createGoldenPathDocument(), storage, loader: session.loader, base: BASE, fetch: fakeFetch({}) }),
     ).rejects.toThrow(/内置库文件读取失败/)
   })
 })

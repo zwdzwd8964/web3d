@@ -130,3 +130,28 @@ export const primitiveFactory: PrimitiveFactory = {
 
 /** Exposed for tests and for the benchmark page: what the document does NOT store. */
 export const primitiveSegments = SEGMENTS
+
+/** An axis-aligned box, as plain numbers — the editor cannot speak three (C3). */
+export interface Bounds {
+  readonly min: readonly [number, number, number]
+  readonly max: readonly [number, number, number]
+}
+
+/**
+ * The local bounding box a primitive will have once it is built (T-142).
+ *
+ * MEASURED from the real geometry rather than re-derived from the parameters. A second
+ * implementation of "how big is a capsule" would be right on the day it was written and
+ * wrong the first time the geometry changed — and the symptom (objects dropped slightly
+ * into the floor) is one nobody traces back to a duplicated formula.
+ *
+ * Costs one throwaway geometry per call, which is per drop, not per frame.
+ */
+export function primitiveBounds(primitive: Primitive): Bounds {
+  const geometry = buildGeometry(primitive)
+  geometry.computeBoundingBox()
+  const box = geometry.boundingBox
+  geometry.dispose()
+  if (!box) return { min: [0, 0, 0], max: [0, 0, 0] }
+  return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] }
+}

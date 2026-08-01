@@ -6,6 +6,8 @@ import { usePreview, usePreviewStore } from '../preview/PreviewContext.jsx'
 import { PreviewController } from '../preview/controller.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from '../store/StoreContext.js'
+import { PRIMITIVE_TEMPLATES, addPrimitive } from '../lib/library.js'
+import { placePrimitiveAt } from './place.js'
 import { fulfilPick, isPicking } from './pick-request.js'
 import { setActiveRuntime } from './runtime-registry.js'
 
@@ -33,7 +35,7 @@ export function Viewport() {
   const previewStore = usePreviewStore()
   const previewActive = usePreview((s) => s.active)
   const controllerRef = useRef<PreviewController | null>(null)
-  const { previewStart, preview, previewCommit, toggleSelection, clearSelection } = useDocumentActions()
+  const { commit, previewStart, preview, previewCommit, toggleSelection, clearSelection } = useDocumentActions()
   const selection = useDocumentSelector((s) => s.selection)
 
   const [mode, setMode] = useState<GizmoMode>('translate')
@@ -308,8 +310,58 @@ export function Viewport() {
     }
   }, [store, toggleSelection, clearSelection, ready])
 
+  /**
+   * T-142 · D18 · a drop from the resource library.
+   *
+   * One `commit` for the whole placement — the node, its material record, and the position
+   * the drop resolved to. Ctrl+Z takes all of it away, which is what "一次放置 = 一条撤销"
+   * means and what the E2E asserts.
+   *
+   * The document is read from the store rather than from this render's closure: a library
+   * model import is async, and committing against a stale document would resurrect whatever
+   * the user changed while it ran.
+   */
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const runtime = runtimeRef.current
+    const canvas = canvasRef.current
+    if (!runtime || !canvas) return
+
+    const kind = event.dataTransfer.getData('application/x-w3-primitive')
+    if (!kind) return
+    event.preventDefault()
+
+    const template = PRIMITIVE_TEMPLATES.find((t) => t.kind === kind)
+    if (!template) return
+
+    const rect = canvas.getBoundingClientRect()
+    const doc = store.getState().doc
+    const { position } = placePrimitiveAt(runtime, doc, template.primitive, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    })
+
+    let created: string | null = null
+    commit(`放置 ${template.label}`, (draft) => {
+      created = addPrimitive(draft, template, { position }).id
+    })
+    if (created) toggleSelection(created, false)
+  }
+
   return (
-    <div className="viewport" ref={hostRef}>
+    <div
+      className="viewport"
+      ref={hostRef}
+      onDragOver={(event) => {
+        // Only claim the drop when it is ours; letting the browser handle the rest keeps a
+        // file dragged onto the viewport from being swallowed silently.
+        if (!event.dataTransfer.types.includes('application/x-w3-primitive')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDrop={onDrop}
+    >
       {/* The canvas is inserted before this overlay by the mount effect. */}
       <div className="viewport__overlay" ref={overlayRef} />
       <div className="viewport__tools">

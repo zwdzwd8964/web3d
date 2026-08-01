@@ -54,7 +54,7 @@ export function LibraryPanel() {
   // request per click for a file that cannot have changed.
   useEffect(() => {
     let cancelled = false
-    void loadLibrary().then((loaded) => {
+    void loadLibrary({ base: document.baseURI }).then((loaded) => {
       if (!cancelled) setLibrary(loaded)
     })
     return () => {
@@ -62,7 +62,8 @@ export function LibraryPanel() {
     }
   }, [])
 
-  const base = typeof document === 'undefined' ? 'http://localhost/' : document.baseURI
+  // The app's own origin, from the document itself — never a constant (C6).
+  const base = document.baseURI
   const models = useMemo(() => itemsOf(library, 'model'), [library])
 
   const createPrimitive = (template: PrimitiveTemplate) => {

@@ -51,9 +51,55 @@ export class Picker {
     this.auxRoot = root
   }
 
-  /** Both roots, nearest-first hits merged by the raycaster itself. */
+  /**
+   * Both roots, with their world matrices brought up to date.
+   *
+   * `Raycaster` reads `matrixWorld` and never refreshes it — three's own documentation puts
+   * that on the caller. Until now the only thing refreshing it was `renderer.render`, so a
+   * pick that happened between a document change and the next frame ray-cast against where
+   * objects USED to be. Rare in the editor (it renders continuously) and not rare at all
+   * for the first click after a scene loads, which is the one this cost T-142 an hour on:
+   * a box at y = 0.1 was hit as though it were at the origin.
+   *
+   * Cheap when nothing moved — three skips subtrees whose `matrixWorldNeedsUpdate` is clear.
+   */
   private roots(): Object3D[] {
-    return this.auxRoot ? [this.graph.root, this.auxRoot] : [this.graph.root]
+    this.graph.root.updateMatrixWorld(true)
+    if (!this.auxRoot) return [this.graph.root]
+    this.auxRoot.updateMatrixWorld(true)
+    return [this.graph.root, this.auxRoot]
+  }
+
+  /**
+   * v0.5 · where the pointer ray meets a horizontal plane (T-142 · D18).
+   *
+   * The fallback half of drop placement: with nothing under the cursor, an object lands on
+   * the ground rather than at the world origin or at some distance the code picked. Lives
+   * here because this class already owns the camera-to-ray conversion, and because the
+   * editor is not allowed to `import 'three'` (C3) — a ray is a rendering concept.
+   *
+   * Returns null when the ray is parallel to the plane or points away from it. That is a
+   * real case (the camera looking at the horizon), and answering it with a point a
+   * kilometre away would put the object somewhere the user cannot find.
+   */
+  pickPlane(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    camera: Camera,
+    planeY = 0,
+  ): [number, number, number] | null {
+    if (width <= 0 || height <= 0) return null
+    this.pointer.set((x / width) * 2 - 1, -(y / height) * 2 + 1)
+    this.raycaster.setFromCamera(this.pointer, camera)
+
+    const origin = this.raycaster.ray.origin
+    const direction = this.raycaster.ray.direction
+    if (Math.abs(direction.y) < 1e-6) return null
+    const distance = (planeY - origin.y) / direction.y
+    if (distance <= 0) return null
+    return [origin.x + direction.x * distance, planeY, origin.z + direction.z * distance]
   }
 
   /**
