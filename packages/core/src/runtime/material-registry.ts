@@ -1,4 +1,5 @@
 import type { Material as MaterialDef, MaterialMaps, SceneDocument } from '@w3/schema'
+import { MATERIAL_BASES } from '@w3/schema'
 import {
   BackSide,
   ClampToEdgeWrapping,
@@ -6,6 +7,8 @@ import {
   DoubleSide,
   FrontSide,
   LinearSRGBColorSpace,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
   RepeatWrapping,
   SRGBColorSpace,
 } from 'three'
@@ -138,9 +141,31 @@ export class MaterialRegistry {
     const def = defs.get(materialId)
     if (!def) return false
 
-    const target = this.materialFor(nodeId, mesh, graph)
+    const target = this.rebaseIfNeeded(nodeId, this.ownedFor(nodeId, mesh, graph), def)
     applyParams(target, def, this.textures)
     return true
+  }
+
+  /**
+   * T-153 · swaps the clone's CLASS when `base` changed, keeping the shared parameters.
+   *
+   * A `MeshStandardMaterial` silently accepts `transmission = 0.9` and renders no glass —
+   * the property lands on the object and the shader never reads it, so changing `base` has
+   * to build a different class.
+   *
+   * It takes an `OwnedClone` rather than a Material on purpose: the only instance the
+   * registry may ever replace is a clone it owns. Writing a source material would reach
+   * into the asset cache, which can back other scenes (ADR-0011) — and expressing that as a
+   * runtime `if` produced a branch no test could reach, which is its own kind of lie. Here
+   * it is the parameter type.
+   */
+  private rebaseIfNeeded(nodeId: string, owned: OwnedClone, def: MaterialDef): Material {
+    const next = rebuildForBase(owned.material, def.base)
+    if (next === owned.material) return owned.material
+
+    owned.mesh.material = next
+    this.owned.set(nodeId, { material: next, clonedFrom: owned.clonedFrom, mesh: owned.mesh })
+    return next
   }
 
   /** Re-applies a definition whose params the user just edited. */
@@ -203,10 +228,15 @@ export class MaterialRegistry {
    * through this same path). See ADR-0011.
    */
   private materialFor(nodeId: string, mesh: Mesh, graph: SceneGraph): Material {
+    return this.ownedFor(nodeId, mesh, graph).material
+  }
+
+  /** As `materialFor`, but hands back the whole record — see `rebaseIfNeeded`. */
+  private ownedFor(nodeId: string, mesh: Mesh, graph: SceneGraph): OwnedClone {
     void graph
     const existing = this.owned.get(nodeId)
     // The mesh check is not belt and braces: see OwnedClone.mesh.
-    if (existing && existing.mesh === mesh) return existing.material
+    if (existing && existing.mesh === mesh) return existing
 
     const current = mesh.material
     if (Array.isArray(current)) {
@@ -218,8 +248,9 @@ export class MaterialRegistry {
     const clone = current.clone()
     clone.name = `${current.name || 'material'} (${nodeId})`
     mesh.material = clone
-    this.owned.set(nodeId, { material: clone, clonedFrom: current, mesh })
-    return clone
+    const entry: OwnedClone = { material: clone, clonedFrom: current, mesh }
+    this.owned.set(nodeId, entry)
+    return entry
   }
 
   private restore(nodeId: string, mesh: Mesh): void {
@@ -274,6 +305,8 @@ export function applyParams(material: Material, def: MaterialDef, textures: Text
   if (p.emissiveIntensity !== undefined) target.emissiveIntensity = p.emissiveIntensity
   if (p.side !== undefined) material.side = SIDES[p.side]
 
+  applyPhysical(target, def)
+
   for (const slot of Object.keys(TEXTURE_SLOT_COLOR_SPACE) as TextureSlot[]) {
     const assetId = p.maps[slot]
 
@@ -308,6 +341,111 @@ export function applyParams(material: Material, def: MaterialDef, textures: Text
   applyUv(target, def)
 
   material.needsUpdate = true
+}
+
+/**
+ * T-153 · the physical-only parameters (glass, coated paint).
+ *
+ * Written only onto a material that understands them. Setting `transmission` on a
+ * `MeshStandardMaterial` is not an error in JavaScript — the property simply lands on the
+ * object and the renderer never reads it — so without this guard the panel would show a
+ * glass slider that does exactly nothing, which is worse than not showing it. Integrity
+ * check I15 is the other half: it tells the USER the parameter is being ignored.
+ *
+ * `transmission > 0` forces `transparent`. three's transmission path composites through
+ * the transmission render target, and an opaque material never reaches it: the glass
+ * renders as a solid lump, which reads as "transmission is broken" rather than as a
+ * missing checkbox. The document is NOT rewritten for this — the runtime decides how to
+ * draw what the document says, exactly as it does for texture colour space (D3).
+ */
+function applyPhysical(target: Material & Record<string, unknown>, def: MaterialDef): void {
+  if (!isPhysical(target)) return
+  const p = def.params
+
+  if (p.transmission !== undefined) target.transmission = p.transmission
+  if (p.ior !== undefined) target.ior = p.ior
+  if (p.thickness !== undefined) target.thickness = p.thickness
+  if (p.clearcoat !== undefined) target.clearcoat = p.clearcoat
+  if (p.clearcoatRoughness !== undefined) target.clearcoatRoughness = p.clearcoatRoughness
+
+  const transmission = typeof target.transmission === 'number' ? target.transmission : 0
+  if (transmission > 0) (target as unknown as Material).transparent = true
+}
+
+const isPhysical = (material: unknown): material is MeshPhysicalMaterial =>
+  (material as { isMeshPhysicalMaterial?: boolean }).isMeshPhysicalMaterial === true
+
+/**
+ * The three class a document `base` names, for the two bases v0.5 can build.
+ *
+ * `basic` and `lambert` are in the schema (they are what an unlit label or a cheap
+ * background needs) but nothing creates them yet, so a document asking for one keeps the
+ * class the asset gave it rather than being silently downgraded. That is a REGISTERED gap,
+ * not a silent one: `canRebuildBase` says out loud which bases this build can honour.
+ */
+export const REBUILDABLE_BASES = ['standard', 'physical'] as const satisfies readonly (typeof MATERIAL_BASES)[number][]
+
+export const canRebuildBase = (base: string): base is (typeof REBUILDABLE_BASES)[number] =>
+  (REBUILDABLE_BASES as readonly string[]).includes(base)
+
+/**
+ * Parameters both classes share, migrated when `base` changes.
+ *
+ * Spelled out rather than done with `copy()`. `MeshPhysicalMaterial.copy(standardMaterial)`
+ * reads `source.clearcoat`, `source.ior` and friends, which do not exist on a standard
+ * material — the result is a material full of `undefined` and `NaN`, and three's shader
+ * compiler reports it far away from the cause. This card's acceptance is literally
+ * 「玻璃参数组合渲染路径无 NaN」.
+ */
+const SHARED_MATERIAL_FIELDS = [
+  'name',
+  'roughness',
+  'metalness',
+  'opacity',
+  'transparent',
+  'emissiveIntensity',
+  'side',
+  'visible',
+  'depthTest',
+  'depthWrite',
+  'alphaTest',
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+] as const
+
+/**
+ * Rebuilds a material as the class `base` names, carrying the shared parameters across.
+ *
+ * Returns the SAME instance when the class already matches — the caller must be able to
+ * treat "no change" as free, because this runs on every apply.
+ */
+export function rebuildForBase(material: Material, base: string): Material {
+  if (!canRebuildBase(base)) return material
+  const wantsPhysical = base === 'physical'
+  if (isPhysical(material) === wantsPhysical) return material
+
+  const next = wantsPhysical ? new MeshPhysicalMaterial() : new MeshStandardMaterial()
+  const from = material as unknown as Record<string, unknown>
+  const to = next as unknown as Record<string, unknown>
+
+  for (const field of SHARED_MATERIAL_FIELDS) {
+    const value = from[field]
+    if (value === undefined) continue
+    to[field] = value
+  }
+  // Colours are objects: assigning the reference would tie the two materials together, so
+  // the next colour edit on one would silently change the other.
+  if (from['color'] instanceof Color && to['color'] instanceof Color) (to['color'] as Color).copy(from['color'])
+  if (from['emissive'] instanceof Color && to['emissive'] instanceof Color) {
+    ;(to['emissive'] as Color).copy(from['emissive'])
+  }
+
+  material.dispose()
+  return next
 }
 
 /**

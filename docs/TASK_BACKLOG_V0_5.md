@@ -411,12 +411,24 @@
   three 不是我的代码（注释里"three 默认读第二套 uv"也是错的，已改）。改成"贴图带着 channel=1 进来
   也要被拉回 0"才转红。
 
-### [ ] T-153 · physical 参数与 base 升级（core）
-- **依赖** T-151 · **预估** 0.5d · **实际** ___
+### [x] T-153 · physical 参数与 base 升级（core）
+- **依赖** T-151 · **预估** 0.5d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/material-registry.ts`（physical 段）, `packages/core/test/runtime/material-registry.test.ts`（增）
 - **做** `MeshPhysicalMaterial` 参数应用（transmission / ior / thickness / clearcoat / clearcoatRoughness）；`base` 在 standard ↔ physical 间切换时重建材质实例并迁移共有参数；`transmission > 0` 时的透明处理规则固化并写测试。
 - **验收** 玻璃参数组合渲染路径无 NaN / console 警告；base 切换往返参数不丢
-- **自测** `pnpm -F @w3/core test material-registry`
+- **自测** `pnpm -F @w3/core test material-registry`（42）
+- **实际情况**：换类**不能用 three 的 `copy()`**——`MeshPhysicalMaterial.copy(标准材质)` 会去读
+  源材质上根本不存在的 `clearcoat` / `ior`，结果是一堆 `undefined` 和 `NaN`，而报错出现在着色器
+  编译时、离原因十万八千里。卡片验收那句「无 NaN」说的就是这个，所以迁移字段是**逐条列出来的**
+  （变异 J7 把它换回 `copy()`，四条测试同时转红）。
+  physical 参数只写进真的 physical 材质：JS 会欣然接受 `standard.transmission = 0.9`，属性挂上去、
+  渲染器永远不读——面板上就会出现一个什么都不做的玻璃滑块，比不显示更糟。I15 负责告诉用户为什么。
+  `transmission > 0` 强制 `transparent`：three 的透射走单独的渲染目标，不透明材质根本进不去，
+  玻璃会渲染成一坨实心的。**文档不改写**，运行时决定怎么画文档说的东西（同 D3 的色彩空间）。
+  两条变异存活并因此补/改了东西：J5「迁移字段全删」全绿，因为每条测试都在 def 里写死了 roughness，
+  而迁移只对 def **没写**的字段（§6.1 的"继承源材质"）可见——补了一条从源材质 0.8 继承过来的；
+  J6「去掉『只替换自己拥有的克隆』守卫」也全绿，因为那个分支在 `materialFor` 的契约下**根本不可达**，
+  于是把它从运行时 `if` 改成参数类型（`rebaseIfNeeded` 收 `OwnedClone`），不可达的防御代码也是一种谎。
 
 ### [ ] T-152 · 材质面板 v2（贴图 / UV / physical）
 - **依赖** T-151, T-153 · **预估** 0.8d · **实际** ___

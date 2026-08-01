@@ -4,6 +4,7 @@ import {
   ClampToEdgeWrapping,
   Color,
   LinearSRGBColorSpace,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   RepeatWrapping,
   SRGBColorSpace,
@@ -11,7 +12,14 @@ import {
 } from 'three'
 import type { Mesh } from 'three'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MaterialRegistry, TEXTURE_SLOT_COLOR_SPACE, applyParams, countUsers } from '../../src/runtime/material-registry.js'
+import {
+  MaterialRegistry,
+  TEXTURE_SLOT_COLOR_SPACE,
+  applyParams,
+  canRebuildBase,
+  countUsers,
+  rebuildForBase,
+} from '../../src/runtime/material-registry.js'
 import { SceneGraph } from '../../src/runtime/scene-graph.js'
 import { IDS } from '../helpers.js'
 import { createPumpAsset, docWithBothOverridden } from './fixtures.js'
@@ -467,5 +475,205 @@ describe('铁律 9 with textures (T-151 验收)', () => {
     expect(materialOf(IDS.cover).map, '挂图的那个要有图').toBe(map)
     expect(materialOf(IDS.body).map, '旁边那个必须还是光的').toBeNull()
     expect(materialOf(IDS.body), '而且不能再是同一个实例了').not.toBe(materialOf(IDS.cover))
+  })
+})
+
+describe('physical parameters (T-153)', () => {
+  const def = (base: MaterialDef['base'], params: Partial<MaterialDef['params']> = {}): MaterialDef =>
+    ({ id: 'mat_00000001', name: '玻璃', base, preset: 'custom', params: { maps: {}, ...params } }) as MaterialDef
+
+  const noTextures = { get: () => undefined }
+
+  it('writes the glass parameters onto a physical material', () => {
+    const material = new MeshPhysicalMaterial()
+    applyParams(
+      material,
+      def('physical', { transmission: 0.9, ior: 1.5, thickness: 0.02, clearcoat: 1, clearcoatRoughness: 0.1 }),
+      noTextures,
+    )
+
+    expect(material.transmission).toBe(0.9)
+    expect(material.ior).toBe(1.5)
+    expect(material.thickness).toBe(0.02)
+    expect(material.clearcoat).toBe(1)
+    expect(material.clearcoatRoughness).toBe(0.1)
+  })
+
+  it('does NOT write them onto a standard material', () => {
+    // JavaScript would happily accept `standard.transmission = 0.9`: the property lands on
+    // the object and the renderer never reads it. The panel would then show a glass slider
+    // that does nothing, which is worse than not showing one. I15 tells the user why.
+    const material = new MeshStandardMaterial()
+    applyParams(material, def('standard', { transmission: 0.9, ior: 1.5 }), noTextures)
+
+    expect((material as unknown as Record<string, unknown>)['transmission']).toBeUndefined()
+    expect((material as unknown as Record<string, unknown>)['ior']).toBeUndefined()
+  })
+
+  it('transmission above zero forces transparent', () => {
+    // three composites transmission through a separate render target that an opaque
+    // material never reaches: the glass renders as a solid lump, which reads as
+    // "transmission is broken" rather than as a missing checkbox.
+    const material = new MeshPhysicalMaterial()
+    applyParams(material, def('physical', { transmission: 0.5 }), noTextures)
+    expect(material.transparent).toBe(true)
+  })
+
+  it('leaves an opaque physical material opaque', () => {
+    const material = new MeshPhysicalMaterial()
+    applyParams(material, def('physical', { transmission: 0, roughness: 0.2 }), noTextures)
+    expect(material.transparent).toBe(false)
+  })
+
+  it('produces no NaN anywhere in the glass parameter set (卡片验收)', () => {
+    const material = new MeshPhysicalMaterial()
+    applyParams(
+      material,
+      def('physical', {
+        color: '#ffffff',
+        roughness: 0.05,
+        metalness: 0,
+        opacity: 1,
+        transmission: 1,
+        ior: 1.52,
+        thickness: 0.01,
+        clearcoat: 1,
+        clearcoatRoughness: 0,
+      }),
+      noTextures,
+    )
+
+    const checked = [
+      'roughness',
+      'metalness',
+      'opacity',
+      'transmission',
+      'ior',
+      'thickness',
+      'clearcoat',
+      'clearcoatRoughness',
+    ]
+    for (const key of checked) {
+      const value = (material as unknown as Record<string, number>)[key]!
+      expect(Number.isFinite(value), key + ' 变成了 ' + String(value)).toBe(true)
+    }
+  })
+})
+
+describe('switching base rebuilds the instance (T-153)', () => {
+  const defs = (base: MaterialDef['base'], params: Partial<MaterialDef['params']> = {}) =>
+    defsOf([
+      { id: 'mat_c4d6f8h1', name: 'x', base, preset: 'custom', params: { maps: {}, ...params } } as MaterialDef,
+    ])
+
+  it('standard to physical, carrying the shared parameters across', () => {
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', { roughness: 0.4, metalness: 0.9 }), graph)
+    expect(materialOf(IDS.cover).type).toBe('MeshStandardMaterial')
+
+    registry.applyToNode(
+      IDS.cover,
+      'mat_c4d6f8h1',
+      defs('physical', { roughness: 0.4, metalness: 0.9, transmission: 1 }),
+      graph,
+    )
+
+    const upgraded = materialOf(IDS.cover)
+    expect(upgraded.type).toBe('MeshPhysicalMaterial')
+    expect(upgraded.roughness, '共有参数不能在换类的时候丢').toBe(0.4)
+    expect(upgraded.metalness).toBe(0.9)
+    expect((upgraded as MeshPhysicalMaterial).transmission).toBe(1)
+  })
+
+  it('carries INHERITED parameters across, not just the ones the def sets', () => {
+    // The migration is only observable for fields the def leaves out. SCHEMA_SPEC §6.1: a
+    // missing field means "inherit from the source material" — so a base change on a
+    // material that only sets `transmission` must keep the asset's roughness 0.8 rather
+    // than snapping to three's default of 1. Every other test here specifies roughness,
+    // which is why deleting the whole migration loop left them all green (变异 J5 存活).
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    expect(pump.sharedMaterial.roughness, '前提：源材质有个显眼的值').toBe(0.8)
+
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard'), graph)
+    expect(materialOf(IDS.cover).roughness).toBe(0.8)
+
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('physical', { transmission: 1 }), graph)
+
+    const upgraded = materialOf(IDS.cover)
+    expect(upgraded.type).toBe('MeshPhysicalMaterial')
+    expect(upgraded.roughness, '换成玻璃不该把粗糙度重置成 three 的默认值').toBe(0.8)
+    expect(upgraded.metalness).toBe(0.2)
+    expect('#' + upgraded.color.getHexString()).toBe('#8a959e')
+  })
+
+  it('round-trips without losing parameters (卡片验收)', () => {
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    const params = { color: '#ff8800', roughness: 0.33, metalness: 0.66, opacity: 0.5, transparent: true }
+
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', params), graph)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('physical', params), graph)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', params), graph)
+
+    const back = materialOf(IDS.cover)
+    expect(back.type).toBe('MeshStandardMaterial')
+    expect(back.roughness).toBe(0.33)
+    expect(back.metalness).toBe(0.66)
+    expect(back.opacity).toBe(0.5)
+    expect('#' + back.color.getHexString()).toBe('#ff8800')
+  })
+
+  it('does not share the Color OBJECT with the material it replaced', () => {
+    // Assigning the reference would tie the two together, so the next colour edit on one
+    // would silently change the other — and one of them may still be on screen.
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', { color: '#123456' }), graph)
+    const before = materialOf(IDS.cover).color
+
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('physical', { color: '#123456' }), graph)
+    const after = materialOf(IDS.cover).color
+
+    expect(after).not.toBe(before)
+    expect('#' + after.getHexString()).toBe('#123456')
+  })
+
+  it('carries the texture slots across a base change', () => {
+    // Losing them would look like "changing to glass deleted my textures".
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    const map = new Texture()
+    registry.setTextureSource({ get: (id: string) => (id === 'ast_tex00001' ? map : undefined) })
+
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', { maps: { map: 'ast_tex00001' } }), graph)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('physical', { maps: { map: 'ast_tex00001' } }), graph)
+
+    expect(materialOf(IDS.cover).map).toBe(map)
+  })
+
+  it('is a no-op when the class already matches', () => {
+    // This runs on every apply, so "no change" has to be free — and must not churn the
+    // instance the gizmo and the highlight layer are holding.
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', { roughness: 0.4 }), graph)
+    const first = materialOf(IDS.cover)
+    registry.applyToNode(IDS.cover, 'mat_c4d6f8h1', defs('standard', { roughness: 0.5 }), graph)
+
+    expect(materialOf(IDS.cover)).toBe(first)
+  })
+
+  it('leaves a base this build cannot construct alone, rather than downgrading it', () => {
+    // `basic` and `lambert` are in the schema but nothing builds them yet. Silently turning
+    // one into a standard material would be a rendering change nobody asked for.
+    expect(canRebuildBase('standard')).toBe(true)
+    expect(canRebuildBase('physical')).toBe(true)
+    expect(canRebuildBase('basic')).toBe(false)
+    expect(canRebuildBase('lambert')).toBe(false)
+
+    const material = new MeshStandardMaterial()
+    expect(rebuildForBase(material, 'basic')).toBe(material)
   })
 })
