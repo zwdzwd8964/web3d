@@ -1189,3 +1189,36 @@ code {
 .media-list__player video {
   max-width: 100%;
 }
+
+/* T-137 · light icons in the library grid. A light has no mesh, so the tile draws its
+   character rather than a preview: a filled disc for the omnidirectional kinds, a cone
+   for the ones that aim somewhere. */
+.library-grid__shape--light {
+  position: relative;
+  border: none;
+  background: #12161a;
+}
+.library-grid__shape--light::after {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  background: #ffb020;
+}
+.library-grid__shape--light[data-light='ambient']::after {
+  border-radius: 50%;
+  opacity: 0.55;
+}
+.library-grid__shape--light[data-light='hemisphere']::after {
+  border-radius: 50% 50% 0 0;
+}
+.library-grid__shape--light[data-light='point']::after {
+  border-radius: 50%;
+  inset: 18px;
+}
+.library-grid__shape--light[data-light='directional']::after {
+  inset: 16px 12px;
+  clip-path: polygon(0 0, 100% 0, 70% 100%, 30% 100%);
+}
+.library-grid__shape--light[data-light='spot']::after {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}

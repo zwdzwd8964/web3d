@@ -15,6 +15,8 @@ import {
 import type { Library, LibraryCategory, LibraryItem, PrimitiveTemplate } from '../lib/library.js'
 import { LIBRARY_MIME, PRIMITIVE_MIME, beginDrag, endDrag } from '../viewport/drag.js'
 import { applyHdri, assignToBaseColour, clearHdri } from '../lib/environment-edit.js'
+import { LIGHT_TEMPLATES, addLight } from '../lib/light-edit.js'
+import type { LightTemplate } from '../lib/light-edit.js'
 import { boundsOfPrimitive, restOnPoint, viewCentre } from '../viewport/place.js'
 import { getActiveRuntime } from '../viewport/runtime-registry.js'
 
@@ -76,6 +78,24 @@ export function LibraryPanel() {
   // The app's own origin, from the document itself — never a constant (C6).
   const base = document.baseURI
   const models = useMemo(() => itemsOf(library, 'model'), [library])
+
+  /**
+   * Creates a light at the middle of the view, like a primitive.
+   *
+   * `addLight` places it ABOVE that point (see its `offset`): a spotlight created at the
+   * ground would be inside whatever it was meant to light, which looks exactly like a
+   * light that does not work.
+   */
+  const createLight = (template: LightTemplate) => {
+    let created: string | null = null
+    const ground = viewCentreOnGround()
+    commit(`新建 ${template.label}`, (draft) => {
+      created = addLight(draft, template, {
+        position: [ground[0] + template.offset[0], ground[1] + template.offset[1], ground[2] + template.offset[2]],
+      }).id
+    })
+    if (created) select([created])
+  }
 
   const createPrimitive = (template: PrimitiveTemplate) => {
     let created: string | null = null
@@ -185,6 +205,23 @@ export function LibraryPanel() {
       {tab === 'model' && (
         <>
           <p className="panel__note">双击放到场景中心，或拖到视口里放置</p>
+          {/* T-137 · lights are nodes (D12), so they are created here alongside the
+              primitives rather than in a panel of their own. Double-click only: a light has
+              no bounding box to rest on a surface, so the drop rules (D18) have nothing to
+              say about it and a drag would promise a placement precision it cannot deliver. */}
+          <ul className="library-grid">
+            {LIGHT_TEMPLATES.map((template) => (
+              <li
+                key={template.kind}
+                className="library-grid__item"
+                onDoubleClick={() => createLight(template)}
+                title={`双击新建${template.label}`}
+              >
+                <span className="library-grid__shape library-grid__shape--light" aria-hidden="true" data-light={template.kind} />
+                <span className="library-grid__name">{template.label}</span>
+              </li>
+            ))}
+          </ul>
           <ul className="library-grid">
             {PRIMITIVE_TEMPLATES.map((template) => (
               <li
