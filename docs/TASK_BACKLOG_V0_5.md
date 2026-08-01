@@ -183,12 +183,16 @@
   把 `background.color` 刷到 HDRI 背景上，症状（改个项目名字，HDRI 背景变回灰）看起来
   和背景色八竿子打不着。
 
-### [ ] T-134 · 默认灯架条件退场 + 老文档观感回归
-- **依赖** T-133 · **预估** 0.5d · **实际** ___
+### [x] T-134 · 默认灯架条件退场 + 老文档观感回归
+- **依赖** T-133 · **预估** 0.5d · **实际** 0.4h
 - **独占** `packages/core/src/runtime/scene-runtime.ts`（installLighting 段）, `packages/core/test/runtime/default-rig.test.ts`
 - **做** D14：文档无灯节点且 `environment.hdriAssetId` 为空 → 挂 v0 默认三灯 rig（不进文档、不可拾取）；出现任一灯或环境 → rig 整体退场；删光复原。加载 v1 fixture 断言 rig 存在且**三灯参数与 v0 逐项相等**（G0.5-6 的落点）。
 - **验收** 增删最后一盏灯往返，rig 出场/退场正确；老文档观感回归绿
 - **自测** `pnpm -F @w3/core test default-rig`
+- **实际情况**：G0.5-6 那条测试里，v0 三灯的参数是**手抄的字面值**，不是从实现里读回来的。
+  从实现读等于写 `rig.intensity === rig.intensity`，一条永远不会红的断言——而这正是一条
+  晋级门槛该有的样子的反面。判据 `needsDefaultLightRig` 在 schema（T-122），编辑器与运行时
+  不可能对"该不该挂默认灯"产生分歧。
 
 ### [ ] T-135 · `setLight` 动作
 - **依赖** T-131, T-134 · **预估** 0.5d · **实际** ___

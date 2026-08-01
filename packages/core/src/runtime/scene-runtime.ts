@@ -1,4 +1,5 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
+import { needsDefaultLightRig } from '@w3/schema'
 import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
@@ -79,6 +80,8 @@ export class SceneRuntime implements RuntimeContext {
   private height = 1
   /** Whether any light in the document currently asks for shadows (T-132). */
   private shadowsOn = false
+  /** v0's rig, attached only while the document has no lighting of its own (T-134 · D14). */
+  private defaultRig: Object3D[] = []
 
   constructor(document: SceneDocument, options: SceneRuntimeOptions) {
     this.document = document
@@ -132,6 +135,7 @@ export class SceneRuntime implements RuntimeContext {
 
     this.scene.add(this.graph.root)
     this.installLighting()
+    this.syncDefaultRig(document)
     this.applyBackground(document)
     this.syncShadows(document, true)
 
@@ -141,20 +145,68 @@ export class SceneRuntime implements RuntimeContext {
   /* --- lifecycle ---------------------------------------------------------- */
 
   private installLighting(): void {
-    // A three-light rig, not IBL: an HDR environment would need an asset pipeline of its
-    // own and pushes the player well past its size budget.
-    const ambient = new AmbientLight(0xffffff, 0.6)
-    const key = new DirectionalLight(0xfff6e4, 2.1)
-    key.position.set(4, 6, 3)
-    const fill = new DirectionalLight(0x7fa8c4, 0.55)
-    fill.position.set(-5, 2.4, -3.6)
-    this.scene.add(ambient, key, fill)
-
     if (this.options.mode === 'edit') {
       const grid = new GridHelper(24, 48, 0x242b31, 0x1c2226)
       grid.name = 'w3:grid'
       this.scene.add(grid)
     }
+  }
+
+  /* --- the default light rig (T-134 · D14) --------------------------------- */
+
+  /**
+   * v0's three-light rig, built once and attached only while the document has no lighting
+   * of its own.
+   *
+   * D14 · this is a DISPLAY DEFAULT, the same kind of thing as the default background
+   * colour — not scene content. It is not in the document, it is not in the hierarchy tree,
+   * and the 1 → 2 migration deliberately does not write it in: an upgrade that made every
+   * existing project sprout three nodes the user never created, cannot explain, and turns
+   * the scene black by deleting is not an upgrade.
+   *
+   * The exact parameters are v0's, verbatim. Gate G0.5-6 asserts them one by one, because
+   * "the old projects still look right" is a claim about numbers, not a feeling.
+   *
+   * Attached to `scene`, never to `graph.root`: the picker ray-casts the document graph, so
+   * a rig outside it cannot be selected or highlighted, and no code has to remember to
+   * exclude it.
+   */
+  private buildDefaultRig(): Object3D[] {
+    const ambient = new AmbientLight(0xffffff, 0.6)
+    ambient.name = 'w3:default-ambient'
+    const key = new DirectionalLight(0xfff6e4, 2.1)
+    key.position.set(4, 6, 3)
+    key.name = 'w3:default-key'
+    const fill = new DirectionalLight(0x7fa8c4, 0.55)
+    fill.position.set(-5, 2.4, -3.6)
+    fill.name = 'w3:default-fill'
+    return [ambient, key, fill]
+  }
+
+  /**
+   * Attaches or detaches the rig to match the document.
+   *
+   * Called wherever the answer could have changed — construction, rebuild, and every patch
+   * batch. Adding the first light must make the rig leave in the same frame, or the user's
+   * new light lands on top of three invisible ones and every intensity they pick is wrong.
+   */
+  private syncDefaultRig(doc: SceneDocument): void {
+    const wanted = needsDefaultLightRig(doc)
+    if (wanted === this.defaultRig.length > 0) return
+    if (wanted) {
+      this.defaultRig = this.buildDefaultRig()
+      this.scene.add(...this.defaultRig)
+      return
+    }
+    for (const light of this.defaultRig) this.scene.remove(light)
+    // Nothing to dispose: an AmbientLight and two DirectionalLights own no GPU resources
+    // until they cast a shadow, and the rig never does.
+    this.defaultRig = []
+  }
+
+  /** The rig's lights while it is attached; empty when the document lights itself. */
+  get defaultLightRig(): readonly Object3D[] {
+    return this.defaultRig
   }
 
   /* --- shadows (T-132) ---------------------------------------------------- */
@@ -290,6 +342,7 @@ export class SceneRuntime implements RuntimeContext {
     this.graph.build(doc)
     this.materials.applyAll(doc, this.graph)
     this.applyBackground(doc)
+    this.syncDefaultRig(doc)
     // After the graph is rebuilt every Object3D is new and carries three's defaults, so
     // the flags have to be written again even if the on/off state did not move.
     this.syncShadows(doc, true)
@@ -300,6 +353,10 @@ export class SceneRuntime implements RuntimeContext {
   applyPatch(patches: readonly DocumentPatch[], next: SceneDocument, prev: SceneDocument): void {
     this.document = next
     this.patches.apply(patches, next, prev)
+    // Both are a scan over nodes per batch, which is cheap, and both have to happen here
+    // rather than in a patch consumer: adding the first light changes a scene-level fact
+    // (does the rig stand down) that no per-path handler is responsible for.
+    this.syncDefaultRig(next)
     // Cheap enough to run per batch (a scan for one boolean) and the only way a light's
     // `shadow.enabled` reaches the renderer: that patch is dispatched to the scene graph,
     // which knows about the light but nothing about the render pipeline. Re-applying the
