@@ -1,3 +1,4 @@
+import type { AssetResolver } from '@w3/core'
 import { SceneRuntime, createPlaybackSession, registerBuiltinActions } from '@w3/core'
 import type { ExecResult, HotspotRenderer, LogLevel, PlaybackSession } from '@w3/core'
 import { createPackageResolver } from '@w3/storage'
@@ -21,6 +22,11 @@ export interface PlayerSessionOptions {
   readonly pkg: UnpackedPackage
   readonly canvas?: HTMLCanvasElement
   readonly hotspotRenderer?: HotspotRenderer
+  /**
+   * T-162 · injected so the hotspot layer and the runtime read assets through ONE resolver.
+   * Absent means the session builds its own from the package.
+   */
+  readonly resolver?: AssetResolver
   /** Injected by parity so both sides share one fake clock. */
   readonly now?: () => number
   readonly onResult?: (result: ExecResult) => void
@@ -43,7 +49,7 @@ export function createPlayerSession(options: PlayerSessionOptions): PlayerSessio
 
   const runtime = new SceneRuntime(pkg.document, {
     // Assets come out of the zip they arrived in — no request of any kind (C6).
-    resolver: createPackageResolver(pkg),
+    resolver: options.resolver ?? createPackageResolver(pkg),
     // ECA_SPEC §7 · play. No grid, no gizmo, no selection.
     mode: 'play',
     ...(options.canvas ? { canvas: options.canvas } : {}),

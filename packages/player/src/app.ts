@@ -1,3 +1,4 @@
+import { createPackageResolver } from '@w3/storage'
 import type { SceneDocument } from '@w3/schema'
 import { DomHotspotRenderer, detectCapability, renderCapabilityNotice } from '@w3/core'
 import type { PlaybackSession, SceneRuntime } from '@w3/core'
@@ -63,11 +64,17 @@ export class Player {
 
     // Everything behavioural comes from here, and the parity suite drives this exact
     // function — so a divergence between player and editor cannot hide in this file.
+    // T-162 · the SAME resolver the runtime reads assets through, so a hotspot's image comes
+    // out of the package it arrived in rather than a second path that could drift (C3, C6).
+    const resolver = createPackageResolver(pkg)
     const { runtime, session } = createPlayerSession({
       pkg,
       canvas,
+      resolver,
       hotspotRenderer: new DomHotspotRenderer({
         container: overlay,
+        resolveMedia: (url) => resolver.resolve(url),
+        onWarn: (message) => this.options.onLog?.('warn', message),
         onActivate: (hotspotId) => this.session?.hotspotClick(hotspotId),
       }),
       onLog: (level, message) => this.options.onLog?.(level, message),

@@ -93,6 +93,10 @@ export function Viewport() {
       mode: 'edit',
       hotspotRenderer: new DomHotspotRenderer({
         container: overlay,
+        // T-162 · the SAME resolver the runtime uses, so a hotspot's image comes out of the
+        // project's own storage rather than a second path that could drift (C3).
+        resolveMedia: (url) => session.resolver.resolve(url),
+        onWarn: (message) => console.warn(`[hotspot] ${message}`),
         // Edit mode selects; it does not fire rules (ECA_SPEC §7). Clicking a marker
         // selects the node it is anchored to, which is what you want when placing them.
         // C3 · in preview a hotspot click is an ECA event, exactly as in the player.

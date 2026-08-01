@@ -132,6 +132,32 @@ export function HotspotPanel() {
                       onChange={(e) => update(hotspot.id, '改热点正文', (h) => void (h.content.text = e.target.value))}
                     />
                   </label>
+                  <label className="fields__row fields__row--wide">
+                    <span className="fields__label">媒体</span>
+                    {/* T-162 · a `ref` field pointing at a media record. The panel renders
+                        it (image auto-fit, video with native controls), and the PLAYER gets
+                        it for free — same core renderer, C3. */}
+                    <select
+                      className="field"
+                      value={hotspot.content.mediaId ?? ''}
+                      onChange={(e) =>
+                        update(hotspot.id, '改热点媒体', (h) => {
+                          // Deleted rather than set to undefined: `content` is a strict
+                          // object, and an explicit undefined survives a JSON round-trip as
+                          // a key with no value that then fails validation on reload.
+                          if (e.target.value === '') delete h.content.mediaId
+                          else h.content.mediaId = e.target.value
+                        })
+                      }
+                    >
+                      <option value="">（无）</option>
+                      {doc.media.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="fields__row">
                     <span className="fields__label">遮挡判定</span>
                     {/* D7 · when on, a marker behind geometry dims. Off means it always

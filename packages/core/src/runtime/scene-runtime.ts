@@ -783,21 +783,21 @@ export class SceneRuntime implements RuntimeContext {
     const hotspot = this.document.hotspots.find((h) => h.id === hotspotId)
     if (!hotspot) return
     this.openPanels.add(hotspotId)
-    setPanel(this.hotspotRenderer, hotspot, true)
+    setPanel(this.hotspotRenderer, hotspot, true, this.document)
   }
 
   closePanel(hotspotId: string | 'all'): void {
     if (hotspotId === 'all') {
       for (const id of this.openPanels) {
         const hotspot = this.document.hotspots.find((h) => h.id === id)
-        if (hotspot) setPanel(this.hotspotRenderer, hotspot, false)
+        if (hotspot) setPanel(this.hotspotRenderer, hotspot, false, this.document)
       }
       this.openPanels.clear()
       return
     }
     this.openPanels.delete(hotspotId)
     const hotspot = this.document.hotspots.find((h) => h.id === hotspotId)
-    if (hotspot) setPanel(this.hotspotRenderer, hotspot, false)
+    if (hotspot) setPanel(this.hotspotRenderer, hotspot, false, this.document)
   }
 
   isPanelOpen(hotspotId: string): boolean {
@@ -859,9 +859,13 @@ export class SceneRuntime implements RuntimeContext {
   }
 }
 
-function setPanel(renderer: HotspotRenderer, hotspot: { id: string }, open: boolean): void {
-  const withPanels = renderer as HotspotRenderer & { setPanelOpen?: (h: unknown, open: boolean) => void }
-  withPanels.setPanelOpen?.(hotspot, open)
+function setPanel(renderer: HotspotRenderer, hotspot: { id: string }, open: boolean, doc?: SceneDocument): void {
+  const withPanels = renderer as HotspotRenderer & {
+    setPanelOpen?: (h: unknown, open: boolean, doc?: SceneDocument) => void
+  }
+  // The document goes through so the panel can find its media record (T-162). Optional
+  // because `NullHotspotRenderer` and the v0 tests neither have nor need one.
+  withPanels.setPanelOpen?.(hotspot, open, doc)
 }
 
 /**

@@ -518,12 +518,22 @@
   删除只删**记录**不删字节：字节是内容寻址且共享的，另一条记录可能指着同一个文件，而回收孤儿 blob
   是发布时的决定，不该由一个列表行悄悄做。
 
-### [ ] T-162 · 热点媒体内容
-- **依赖** T-160 · **预估** 0.8d · **实际** ___
+### [x] T-162 · 热点媒体内容
+- **依赖** T-160 · **预估** 0.8d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/hotspot-layer.ts`, `packages/editor/src/panels/HotspotPanel.tsx`, `packages/core/test/runtime/hotspot.test.ts`（增）
 - **做** 热点面板渲染 `content.mediaId`：image 自适应展示、video 原生 controls；字节经 `AssetResolver` → Blob URL，面板关闭 / 文档卸载时 revoke（生命周期计数管理）；编辑器 HotspotPanel 增媒体选择（`ref` 字段，refKind `'media'`）。**播放器零改动自动获得**（同一 core 渲染层，C3）。
 - **验收** 编辑预览与 Player 面板渲染一致；revoke 计数归零无泄漏
-- **自测** `pnpm -F @w3/core test hotspot`
+- **自测** `pnpm -F @w3/core test hotspot`（24）+ `pnpm -F @w3/core test hotspot-media`（9）
+- **实际情况**：`liveObjectUrls` 是**公开的**，就为了让测试断言它归零。这个泄漏是贵的那种——
+  一个 object URL 会把整个文件钉在内存里直到标签页关闭，看十二个视频热点走完一台机器的人，
+  手上就攥着十二个视频。
+  最刁的一条是**面板在字节到达之前就被关掉**：URL 造出来的时候已经没人负责 revoke 它了，
+  所以 attach 必须能看见"面板还是不是原来那个"（变异 P3 就是拆掉这个判断）。
+  读文件失败**不能让面板倒掉**（文字还是值得显示的），但也**不能无声无息**——图片永远不出现、
+  控制台里什么都没有，是一份没有任何信息的故障报告。这条是变异 P4 第一次存活逼出来的：
+  原来的 `catch {}` 什么都不做，测试也就什么都断言不到。
+  `resolveMedia` 是注入的：这个类是编辑器预览和播放器**共用**的那一个（C3），谁也不许伸手进
+  对方的存储。播放器那边顺手把 resolver 提到 `createPlayerSession` 外面，两边读的是同一个。
 
 ### [ ] T-163 · `playMedia` / `stopMedia` 动作与 MediaBus
 - **依赖** T-135, T-160 · **预估** 1d · **实际** ___

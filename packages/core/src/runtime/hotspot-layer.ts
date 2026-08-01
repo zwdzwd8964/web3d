@@ -151,6 +151,23 @@ export class HotspotProjector {
 export interface DomHotspotRendererOptions {
   /** The positioned element markers are appended to. Must overlay the canvas. */
   readonly container: HTMLElement
+  /**
+   * T-162 · resolves a media asset's bytes, so a panel can show an image or play a video.
+   *
+   * Injected rather than reached for, because this class is the one place the editor's
+   * preview and the player SHARE (C3) and neither may reach into the other's storage. Absent
+   * means this renderer shows text only — which is what the v0 tests and the parity harness
+   * see, and it is a legitimate configuration rather than a broken one.
+   */
+  readonly resolveMedia?: (assetId: string) => Promise<ArrayBuffer>
+  /**
+   * Told when a panel's media could not be loaded.
+   *
+   * A hotspot whose image silently never appears is a bug report with no information in it.
+   * The panel still shows its text — the warning is for whoever has to explain why the
+   * picture is missing.
+   */
+  readonly onWarn?: (message: string) => void
   /** Called when a marker is clicked, so the host can dispatch `hotspotClick`. */
   readonly onActivate?: (hotspotId: string) => void
   /** Opacity applied to an occluded marker. 0 hides it entirely. */
@@ -218,11 +235,12 @@ export class DomHotspotRenderer implements HotspotRenderer {
   }
 
   /** Panel open/close is driven by the ECA actions, not by clicking the marker. */
-  setPanelOpen(hotspot: Hotspot, open: boolean): void {
+  setPanelOpen(hotspot: Hotspot, open: boolean, doc?: SceneDocument): void {
     if (!open) {
       this.panels.get(hotspot.id)?.remove()
       this.panels.delete(hotspot.id)
       this.open.delete(hotspot.id)
+      this.releaseMedia(hotspot.id)
       return
     }
     if (this.panels.has(hotspot.id)) return
@@ -240,6 +258,84 @@ export class DomHotspotRenderer implements HotspotRenderer {
     this.options.container.appendChild(panel)
     this.panels.set(hotspot.id, panel)
     this.open.add(hotspot.id)
+
+    // T-162 · the media, if this panel has any. Attached asynchronously — the panel appears
+    // immediately with its text and the media fills in, rather than the whole panel waiting
+    // on a video's first bytes.
+    // `doc` is optional so v0 callers keep compiling; without it there is no media to find.
+    if (hotspot.content.mediaId !== undefined && doc) void this.attachMedia(hotspot, panel, doc)
+  }
+
+  /**
+   * Loads a panel's media and hangs it in.
+   *
+   * **Every object URL is revoked**, and the count is public so a test can assert it reaches
+   * zero. The leak this prevents is the expensive kind: an object URL pins the entire file
+   * in memory for the life of the tab, so a viewer who opens twelve video hotspots while
+   * walking through a machine is holding twelve videos until they reload the page.
+   */
+  private async attachMedia(hotspot: Hotspot, panel: HTMLElement, doc: SceneDocument): Promise<void> {
+    const resolve = this.options.resolveMedia
+    const media = doc.media.find((m) => m.id === hotspot.content.mediaId)
+    const asset = media ? doc.assets.find((a) => a.id === media.assetId) : undefined
+    if (!resolve || !media || !asset) return
+
+    let bytes: ArrayBuffer
+    try {
+      bytes = await resolve(asset.url)
+    } catch (error) {
+      // A missing file must not take the panel down: the text is still worth showing. But
+      // it must not vanish silently either — a picture that never appears, with nothing in
+      // the console, is a bug report with no information in it.
+      this.options.onWarn?.(
+        `热点「${hotspot.content.title || hotspot.id}」的媒体读取失败：${asset.name}（${
+          error instanceof Error ? error.message : String(error)
+        }）`,
+      )
+      return
+    }
+    // Closed while the bytes were in flight. Creating the URL now would leak it, because
+    // nothing is left to revoke it.
+    if (this.panels.get(hotspot.id) !== panel) return
+
+    const url = URL.createObjectURL(new Blob([bytes]))
+    this.objectUrls.set(hotspot.id, url)
+
+    // Branch on the DOCUMENT's media type, not on `instanceof`: the constructor names are
+    // globals a headless test environment does not have, and the type is already known.
+    const isVideo = media.type === 'video'
+    const element = this.options.container.ownerDocument.createElement(isVideo ? 'video' : 'img')
+    element.className = 'w3-hotspot-media'
+    // Inline, like the marker's own layout: these classes have no stylesheet anywhere (the
+    // panel is created by core and lives in whichever host embeds it), so 「自适应展示」 has
+    // to be stated here or a 4000 px photo blows the panel off the screen.
+    element.style.display = 'block'
+    element.style.maxWidth = '100%'
+    element.style.height = 'auto'
+    if (isVideo) {
+      const video = element as HTMLVideoElement
+      // Native controls: a bespoke transport bar is a v1 feature, and the browser's own is
+      // keyboard-accessible and familiar in a way a hand-rolled one would not be.
+      video.controls = true
+      video.preload = 'metadata'
+    }
+    ;(element as HTMLImageElement).src = url
+    panel.appendChild(element)
+  }
+
+  /** Object URLs currently held, by hotspot. Asserted to reach zero (T-162 验收). */
+  private objectUrls = new Map<string, string>()
+
+  /** How many object URLs this renderer is holding. Zero after every panel is closed. */
+  get liveObjectUrls(): number {
+    return this.objectUrls.size
+  }
+
+  private releaseMedia(hotspotId: string): void {
+    const url = this.objectUrls.get(hotspotId)
+    if (url === undefined) return
+    URL.revokeObjectURL(url)
+    this.objectUrls.delete(hotspotId)
   }
 
   isPanelOpen(hotspotId: string): boolean {
@@ -250,6 +346,7 @@ export class DomHotspotRenderer implements HotspotRenderer {
     for (const panel of this.panels.values()) panel.remove()
     this.panels.clear()
     this.open.clear()
+    for (const id of [...this.objectUrls.keys()]) this.releaseMedia(id)
   }
 
   dispose(): void {
