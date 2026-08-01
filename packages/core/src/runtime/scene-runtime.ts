@@ -13,6 +13,7 @@ import type { HotspotRenderer } from './hotspot-layer.js'
 import { HotspotProjector, NullHotspotRenderer } from './hotspot-layer.js'
 import { EnvironmentController } from './environment.js'
 import { lightFactory } from './light-factory.js'
+import { LightHelperLayer } from './light-helpers.js'
 import { AssetLoader } from './loader.js'
 import { MaterialRegistry } from './material-registry.js'
 import { Picker } from './picker.js'
@@ -73,6 +74,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly patches: PatchApplier
   /** T-133 · owns scene.environment / background / tone mapping. */
   readonly environment: EnvironmentController
+  /** T-136 · edit mode only; null in play, where there is nothing to author. */
+  readonly lightHelpers: LightHelperLayer | null
 
   private renderer: WebGLRenderer | null = null
   private hotspotRenderer: HotspotRenderer
@@ -142,8 +145,16 @@ export class SceneRuntime implements RuntimeContext {
     })
 
     this.scene.add(this.graph.root)
+    // ECA_SPEC §7 · helpers belong to editing, exactly like the grid. A published scene
+    // must contain no trace of them (and the picker must not offer them to a viewer).
+    this.lightHelpers = options.mode === 'edit' ? new LightHelperLayer(this.graph) : null
+    if (this.lightHelpers) {
+      this.scene.add(this.lightHelpers.root)
+      this.picker.setAuxRoot(this.lightHelpers.root)
+    }
     this.installLighting()
     this.syncDefaultRig(document)
+    this.lightHelpers?.sync(document)
     this.applyBackground(document)
     this.syncShadows(document, true)
 
@@ -351,6 +362,7 @@ export class SceneRuntime implements RuntimeContext {
     this.materials.applyAll(doc, this.graph)
     this.applyBackground(doc)
     this.syncDefaultRig(doc)
+    this.lightHelpers?.sync(doc)
     // After the graph is rebuilt every Object3D is new and carries three's defaults, so
     // the flags have to be written again even if the on/off state did not move.
     this.syncShadows(doc, true)
@@ -365,6 +377,7 @@ export class SceneRuntime implements RuntimeContext {
     // rather than in a patch consumer: adding the first light changes a scene-level fact
     // (does the rig stand down) that no per-path handler is responsible for.
     this.syncDefaultRig(next)
+    this.lightHelpers?.sync(next)
     // Cheap enough to run per batch (a scan for one boolean) and the only way a light's
     // `shadow.enabled` reaches the renderer: that patch is dispatched to the scene graph,
     // which knows about the light but nothing about the render pipeline. Re-applying the
@@ -398,6 +411,9 @@ export class SceneRuntime implements RuntimeContext {
     this.tweens.update(now)
     this.clips.update(now)
     this.camera.update(now)
+    // After the camera and the tweens: a light being animated, or its parent being
+    // dragged, has to move its helper in the SAME frame or the cone lags the light by one.
+    this.lightHelpers?.update()
     this.hotspotRenderer.update(
       this.hotspots.update(this.document, this.camera.camera, this.width, this.height),
       this.document,
@@ -424,6 +440,7 @@ export class SceneRuntime implements RuntimeContext {
     this.camera.dispose()
     this.highlights.clearAll()
     this.materials.dispose()
+    this.lightHelpers?.dispose()
     // Before the graph: the environment holds a PMREM render target, which is VRAM nobody
     // else will ever free — scene.clear() only detaches it.
     this.environment.dispose()

@@ -211,12 +211,21 @@
   整个删掉，测试照样全绿（往错的 Object3D 上写个数字在 JS 里是静默成功的）。断言改为同时
   传颜色后才转红——已写进契约测试的注释。
 
-### [ ] T-136 · 灯光 helper 与拾取（编辑态）
-- **依赖** T-131 · **预估** 0.5d · **实际** ___
+### [x] T-136 · 灯光 helper 与拾取（编辑态）
+- **依赖** T-131 · **预估** 0.5d · **实际** 0.6h
 - **独占** `packages/core/src/runtime/light-helpers.ts`, `packages/core/src/runtime/picker.ts`, `packages/core/test/runtime/light-helpers.test.ts`
 - **做** `mode: 'edit'` 时为灯节点挂对应 helper + 不可见代理球供射线拾取（灯没有 mesh，点不中就没法选中调参）；helper 不进文档；`mode: 'play'` 下零 helper 对象；locked 灯不可拾取（沿 v0 语义）。
 - **验收** 编辑模式点选灯节点命中正确 nodeId；play 模式 helper 计数为 0
 - **自测** `pnpm -F @w3/core test light-helpers`
+- **实际情况**：helper 图层挂在 `scene` 上、**不挂在 `graph.root` 下**，代价是 picker 要多
+  认一个根（`setAuxRoot`，本卡独占里的 picker.ts 就是为这个留的）。理由：全览是
+  `Box3.setFromObject(graph.root)`，而灯今天对这个盒子毫无贡献（没有几何体）——把点击代理
+  放进文档图，会让"加一盏灯"改变整个场景的取景。代理用 `material.visible = false` 而不是
+  `object.visible = false`：两者都不画，但射线检测测的是**对象**，对象级隐藏会让灯变成
+  点不中的——那正是这层要解决的问题本身。
+  写测试时抓到一个真 bug：`update()` 之后没刷新世界矩阵，而 picker 直接读 `matrixWorld`。
+  生产里靠每帧 render 顺手刷新掩盖了，但用户在刚打开的工程上点第一下时 picker 先跑——
+  那一刻所有代理还在原点，点哪盏灯都命中同一个位置。已在层内 `updateMatrixWorld(true)`。
 
 ---
 
