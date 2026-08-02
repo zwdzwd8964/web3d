@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// Managed cloud containers ship ONE pre-installed Chromium (PLAYWRIGHT_BROWSERS_PATH)
+// that rarely matches the exact build this Playwright version pins, and downloading the
+// pinned one is blocked there. W3_CHROMIUM_PATH points launches at that binary; when it
+// is unset (local dev, CI) the bundled browser is used and nothing below changes.
+// `channel: 'chromium'` must NOT be combined with an explicit executablePath — the
+// channel lookup would override the path and fail on the missing pinned build.
+const chromiumPath = process.env.W3_CHROMIUM_PATH
+
 /**
  * G0-1 · the golden path, in a real browser.
  *
@@ -33,10 +41,16 @@ export default defineConfig({
       // The product's own answer to a blocked play is covered where it belongs, in
       // `media-bus.test.ts` (risk V3): it resolves and warns so the rule chain survives.
       args: ['--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+      ...(chromiumPath ? { executablePath: chromiumPath } : {}),
     },
   },
 
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], ...(chromiumPath ? {} : { channel: 'chromium' }) },
+    },
+  ],
 
   // Two servers: the editor publishes, the player opens what it published. Step 12 of the
   // golden path is precisely the handover between them, so both have to be up.
