@@ -770,6 +770,16 @@ export class SceneRuntime implements RuntimeContext {
     return this.media.isPlaying(id)
   }
 
+  /**
+   * D19 · resolves when the clip actually ENDS; `playMedia`'s awaited half races this
+   * against the recorded `durationS`, whichever arrives first. Not on `RuntimeContext` —
+   * the action probes for it structurally, so headless runs keep the pure fake-clock
+   * wait (ADR-0019).
+   */
+  waitMediaEnd(id: string, signal?: AbortSignal): Promise<void> {
+    return this.media.waitForEnd(id, signal)
+  }
+
   lightOf(nodeId: string): LiveLight | null {
     const node = this.document.nodes.find((n) => n.id === nodeId)
     if (!node || node.light === null) return null

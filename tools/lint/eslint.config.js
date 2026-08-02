@@ -27,10 +27,11 @@ import tseslint from 'typescript-eslint'
  */
 
 export default tseslint.config(
-  // Everything below is resolved against the repo root, not against tools/lint. Without
-  // this, ESLint 9 treats every file outside the config's own directory as ignored.
-  { basePath: '../..' },
-
+  // This config MUST be invoked from the repo root (the root `pnpm lint` script does;
+  // this package's own `lint` script delegates there). ESLint 9 sets the config array's
+  // base path to the process cwd when `--config` is given, and marks every file outside
+  // it "external" — running eslint from tools/lint silently ignores all of packages/.
+  // A per-object `basePath` cannot lift that restriction; only the cwd can.
   {
     ignores: [
       '**/dist/**',

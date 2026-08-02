@@ -34,9 +34,13 @@ function refExists(index: DocIndex, kind: RefKind, id: string): boolean {
       return index.viewpointById.has(id)
     case 'variable':
       return index.variableById.has(id)
-    default:
-      // Media has no v0 runtime; nothing to verify against.
-      return true
+    case 'media':
+      // Was a wave-through default ("media has no v0 runtime") — stale since v0.5 gave
+      // media a runtime AND the index a `mediaById` (T-122). B9 is generic over every
+      // ref kind the index can answer for; a rule pointing at a deleted recording must
+      // skip with an error like any other dangling ref, not play the durationS of
+      // nothing (T-186).
+      return index.mediaById.has(id)
   }
 }
 

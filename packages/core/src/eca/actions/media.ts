@@ -1,9 +1,23 @@
 import { MediaIdSchema } from '@w3/schema'
 import { z } from '@w3/schema'
-import type { ActionDefinition } from '../types.js'
+import type { ActionDefinition, RuntimeContext } from '../types.js'
 import { defineAction } from './define.js'
 
 /** v0.5 进化规划 §4.3 · media actions. */
+
+type MediaEndWaiter = (id: string, signal?: AbortSignal) => Promise<void>
+
+/**
+ * The real runtime's early-end hook (D19 · 先到者为准); headless deliberately lacks it.
+ *
+ * Probed structurally rather than declared on `RuntimeContext`: the context interface is
+ * frozen at 进化规划 §4.3's list, and widening it for one action's optimisation would
+ * reopen it for every next convenience (the contract harness says why). See ADR-0019.
+ */
+function mediaEndWaiterOf(ctx: RuntimeContext): MediaEndWaiter | null {
+  const candidate = (ctx as { waitMediaEnd?: unknown }).waitMediaEnd
+  return typeof candidate === 'function' ? (candidate as MediaEndWaiter).bind(ctx) : null
+}
 
 const PlayMediaParams = z.object({
   mediaId: MediaIdSchema,
@@ -55,7 +69,34 @@ const playMedia = defineAction<z.infer<typeof PlayMediaParams>>({
       return
     }
 
-    await ctx.wait(durationS * 1000, signal)
+    const waitMediaEnd = mediaEndWaiterOf(ctx)
+    if (waitMediaEnd === null || !ctx.isMediaPlaying(p.mediaId)) {
+      // Headless (D19: the fake clock advances by durationS), or a clip that never
+      // actually started (autoplay refused, no element factory): the recorded duration
+      // is all there is to wait on. The isMediaPlaying guard is load-bearing —
+      // MediaBus.waitForEnd resolves immediately for a non-playing clip, so racing it
+      // here would skip the wait entirely for exactly those clips.
+      await ctx.wait(durationS * 1000, signal)
+      return
+    }
+
+    // D19 · 先到者为准: the real 'ended' event or the recorded duration, whichever
+    // arrives first. The inner controller settles the loser so its listeners are
+    // removed; Promise.race already observes the loser's AbortError, so nothing is
+    // unhandled. The outer signal aborts both halves (铁律 10).
+    const race = new AbortController()
+    const onOuterAbort = () => race.abort()
+    signal.addEventListener('abort', onOuterAbort, { once: true })
+    if (signal.aborted) race.abort()
+    try {
+      await Promise.race([
+        ctx.wait(durationS * 1000, race.signal),
+        waitMediaEnd(p.mediaId, race.signal),
+      ])
+    } finally {
+      signal.removeEventListener('abort', onOuterAbort)
+      race.abort()
+    }
   },
   ui: {
     label: '播放媒体',

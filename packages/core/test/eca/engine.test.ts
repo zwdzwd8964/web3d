@@ -124,6 +124,58 @@ describe('B9 · a rule pointing at something the user deleted', () => {
     expect(result.status).toBe('completed')
     expect(h.ctx.errors().some((e) => e.message.includes('已不存在'))).toBe(true)
   })
+
+  it('a dangling media ref skips with an error like every other ref kind (T-186)', async () => {
+    // The guard used to wave media through ("no v0 runtime to verify against") — so a
+    // rule pointing at a deleted recording ran playMedia against nothing and, with
+    // await, sat out the durationS of a clip that no longer exists.
+    const doc = createGoldenPathDocument()
+    const pruned: SceneDocument = {
+      ...doc,
+      hotspots: [],
+      animations: [],
+      rules: [
+        makeRule({
+          when: { event: 'sceneReady' },
+          then: [
+            { action: 'playMedia', params: { mediaId: 'med_00000000', await: false } },
+            { action: 'mark', params: {} },
+          ],
+        }),
+      ],
+    }
+    const h = harness(pruned, { registry })
+    h.engine.dispatch({ event: 'sceneReady' })
+    await h.settle()
+
+    const result = h.engine.history.at(-1)!
+    expect(result.steps[0]!.status).toBe('skipped')
+    expect(result.steps[1]!.status).toBe('ok')
+    expect(h.ctx.errors().some((e) => e.message.includes('已不存在'))).toBe(true)
+  })
+
+  it("stopMedia 'all' carries no ref and never trips the guard", async () => {
+    // 'all' is deliberately not a reference (its refs() is empty): stopping everything
+    // must work in a document that has no media at all — leaving preview calls it.
+    const doc = createGoldenPathDocument()
+    const pruned: SceneDocument = {
+      ...doc,
+      hotspots: [],
+      animations: [],
+      rules: [
+        makeRule({
+          when: { event: 'sceneReady' },
+          then: [{ action: 'stopMedia', params: { mediaId: 'all' } }],
+        }),
+      ],
+    }
+    const h = harness(pruned, { registry })
+    h.engine.dispatch({ event: 'sceneReady' })
+    await h.settle()
+
+    expect(h.engine.history.at(-1)!.steps[0]!.status).toBe('ok')
+    expect(h.ctx.errors()).toEqual([])
+  })
 })
 
 describe('B10 · variable chain depth', () => {

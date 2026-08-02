@@ -100,6 +100,20 @@ describe('refOptions', () => {
   it('names entities the way the user does, not by id', () => {
     expect(refOptions(doc, 'node').map((o) => o.name)).toContain('阀盖')
   })
+
+  it('labels media by media.name, which survives a rename — not by the asset file (T-186)', () => {
+    // 铁律 3's display-side cousin: the media panel renames `media.name` (T-161); the
+    // asset's file name never changes. A dropdown labelled by the file shows the stale
+    // import-time name for exactly the records the user cared enough about to rename.
+    const withMedia = {
+      ...doc,
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio' as const, name: 'REC_0001.mp3' }],
+      media: [{ id: 'med_00000001', type: 'audio' as const, assetId: 'ast_med00001', name: '开机讲解', durationS: 2 }],
+    }
+    const names = refOptions(withMedia, 'media').map((o) => o.name)
+    expect(names).toContain('开机讲解')
+    expect(names, '重命名前的文件名不该再出现').not.toContain('REC_0001.mp3')
+  })
 })
 
 describe('T-090 · variable id validation, SCHEMA_SPEC §6.3', () => {

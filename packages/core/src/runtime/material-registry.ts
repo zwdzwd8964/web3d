@@ -72,6 +72,19 @@ interface OwnedClone {
    * material-registry.test.ts.
    */
   readonly mesh: Mesh
+  /**
+   * The definition last applied to this clone.
+   *
+   * `applyParams` writes only the params a definition SPECIFIES; the ones it omits mean
+   * "inherit the source material" (SCHEMA_SPEC §6.1). On a fresh clone not-writing equals
+   * inheriting, but a REUSED clone still carries the previous definition's values — so
+   * switching 默认材质 → 拉丝金属 left the grey behind wherever 拉丝金属 stayed silent,
+   * and switching BACK to a definition that inherits its colour never brought the
+   * source colour back (found by T-185's undo-parity extension, forward path included).
+   * When the definition changes, the inherited params are re-seeded from `clonedFrom`
+   * first; while it stays the same (slider drags, uv tweaks) the in-place merge remains.
+   */
+  lastDefId?: string
 }
 
 export interface MaterialRegistryOptions {
@@ -142,7 +155,12 @@ export class MaterialRegistry {
     if (!def) return false
 
     const target = this.rebaseIfNeeded(nodeId, this.ownedFor(nodeId, mesh, graph), def)
+    const owned = this.owned.get(nodeId)!
+    // A DIFFERENT definition inherits from the source, not from whatever the previous
+    // definition left on the clone — see OwnedClone.lastDefId.
+    if (owned.lastDefId !== def.id) resetInherited(target, owned.clonedFrom)
     applyParams(target, def, this.textures)
+    owned.lastDefId = def.id
     return true
   }
 
@@ -344,6 +362,44 @@ export function applyParams(material: Material, def: MaterialDef, textures: Text
 }
 
 /**
+ * Re-seeds every param `applyParams` may leave untouched from the clone's SOURCE, so that
+ * a param a definition omits means "the source material's value" (SCHEMA_SPEC §6.1) no
+ * matter which definition was applied before — not-writing only equals inheriting while
+ * the clone is fresh. Called when the definition BOUND to a node changes; slider drags on
+ * the same definition keep the cheap in-place merge.
+ *
+ * Texture slots are exempt on purpose: for maps, absence means CLEAR (T-151), which
+ * `applyParams` already enforces unconditionally. The physical five fall back to the
+ * class defaults when the source is not physical — a standard-sourced glass definition
+ * that omits `ior` should read as three's default, not as the previous definition's.
+ */
+function resetInherited(material: Material, source: Material): void {
+  const target = material as Material & Record<string, unknown>
+  const from = source as Material & Record<string, unknown>
+
+  if (target.color instanceof Color) target.color.copy(from.color instanceof Color ? from.color : NEUTRAL_WHITE)
+  if (target.roughness !== undefined) target.roughness = typeof from.roughness === 'number' ? from.roughness : 1
+  if (target.metalness !== undefined) target.metalness = typeof from.metalness === 'number' ? from.metalness : 0
+  material.opacity = typeof from.opacity === 'number' ? from.opacity : 1
+  material.transparent = typeof from.transparent === 'boolean' ? from.transparent : false
+  if (target.emissive instanceof Color) target.emissive.copy(from.emissive instanceof Color ? from.emissive : NEUTRAL_BLACK)
+  if (target.emissiveIntensity !== undefined)
+    target.emissiveIntensity = typeof from.emissiveIntensity === 'number' ? from.emissiveIntensity : 1
+  material.side = typeof from.side === 'number' ? (from.side as Material['side']) : FrontSide
+
+  if (isPhysical(target)) {
+    target.transmission = typeof from.transmission === 'number' ? from.transmission : 0
+    target.ior = typeof from.ior === 'number' ? from.ior : 1.5
+    target.thickness = typeof from.thickness === 'number' ? from.thickness : 0
+    target.clearcoat = typeof from.clearcoat === 'number' ? from.clearcoat : 0
+    target.clearcoatRoughness = typeof from.clearcoatRoughness === 'number' ? from.clearcoatRoughness : 0
+  }
+}
+
+const NEUTRAL_WHITE = new Color(0xffffff)
+const NEUTRAL_BLACK = new Color(0x000000)
+
+/**
  * T-153 · the physical-only parameters (glass, coated paint).
  *
  * Written only onto a material that understands them. Setting `transmission` on a
@@ -475,7 +531,7 @@ export function rebuildForBase(material: Material, base: string): Material {
  *   - uv: two materials tiling one image differently — the last one applied wins, and
  *     「分离材质」 does not separate it, because the material was never what they shared.
  */
-function samplerVariant(slot: TextureSlot, def: MaterialDef): string {
+export function samplerVariant(slot: TextureSlot, def: MaterialDef): string {
   const uv = def.params.uv
   const tiling = uv === undefined ? '1,1|0,0|0' : `${uv.repeat.join(',')}|${uv.offset.join(',')}|${uv.rotationDeg}`
   return `${TEXTURE_SLOT_COLOR_SPACE[slot]}|${tiling}|${slot === 'aoMap' ? 'ao' : ''}`

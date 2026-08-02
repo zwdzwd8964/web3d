@@ -803,15 +803,67 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
 - **实际耗时**：1.2 天
 
 
-### [ ] T-185 · 假绿收口
+### [x] T-185 · 假绿收口
 - **独占** `packages/editor/test/{patch-forwarder,undo-runtime-parity}.test.ts`, `packages/core/test/eca/actions.test.ts`
+  （+ 独占外三处，都是为了修/钉本卡抓到的东西：`core/src/runtime/material-registry.ts`
+  与其测试、`core/src/eca/types.ts`）
 - **做** `createPatchForwarder` 零单测（改坏 `'assets'` 判断两套测试照绿）；`undo-runtime-parity` 的 snapshot 不含 v0.5 的灯光/原始体/贴图/阴影标志位；「六种字段」守卫写死了错误集合（混入不存在的 `vec3`、漏掉合法的 `valueExpr`），与 `FieldDescriptor` 无机械联系。
 - **验收** 三条各有一次变异检验
+- **实际** 1.5h
+- **实际情况**：
+  ① 转发器补 10 条单测（纯 Node，全部路由分支）。卡面那句话逐字复现了：把 `'assets'`
+  改成 `'asset'`，新测试 4 条红、旧两套 18 条**照绿**——旧测试根本不 import 这个模块，
+  undo-runtime-parity 里那句「与 main.tsx 同一套接线」的注释是假的，已改成如实说明。
+  ② snapshot 扩到灯参数 / 几何 parameters / 六槽位贴图采样态 / 阴影标志位，随机操作从
+  5 类扩到 9 类，另加 5 个**先断言正向、再断言撤销**的定向场景（双向一起坏的变异会让
+  纯往返对比恒绿，正向断言防的是这个）。夹具自带守卫断言：灯、原始体、驻留贴图缺一即红
+  ——这个文件当初就是靠「夹具悄悄停在 v0 内容」绿了一整版。6 组变异全红。
+  **扩展当场抓到一条真 core bug**：`applyParams` 把 §6.1 的「缺省=继承源材质」实现成了
+  「缺省=不写」，两者只在 clone 还新鲜时等价——换成写了 color 的材质再换回没写 color 的，
+  颜色**回不来**（正向就坏，不只撤销；物理参数同理会从上一个材质粘过来）。修在
+  `material-registry`：clone 记 `lastDefId`，def 换人时先从源材质重置可继承参数；同一
+  def 的滑块路径保持就地合并（高亮写的 emissive 不被吹掉，有测试钉住）。贴图槽位不在
+  重置之列——maps 的语义本来就是「缺省=清除」（T-151）。三条回归测试就地补齐。
+  ③ 六种字段清单收敛为 `FIELD_KINDS` 单一来源（`types.ts`，`satisfies` 拒多、
+  `AssertNever` 拒漏），两处手抄清单指过去，另加一条**全注册表**守卫——原来的守卫只看
+  setLight 和 media 两对，`setVariable` 的 `valueExpr` 字段从没被任何守卫看过。变异
+  三组：伪造第七种 → 2 红；删 `valueExpr` → 守卫红；把 `vec3` 加回去 → vitest 与 tsc
+  **两层各自红**。
 
-### [ ] T-186 · minor 收口
+### [x] T-186 · minor 收口
 - **独占** 见各条
 - **做** D19「先到者为准」实际只等 `durationS`（`waitForEnd` 零生产调用者）；规则编辑器媒体下拉显示文件名而非 `media.name`；`resetScene` 的 `describe()` 未随 v0.5 更新；executor 的 B9 对 media 直接放行；清空贴图槽位不释放显存（M11 登记）。
 - **验收** 逐条测试
+- **实际** 1.8h
+- **实际情况**：
+  ① D19 竞速：`SceneRuntime` 增 `waitMediaEnd`（不进冻结的 `RuntimeContext`），`playMedia`
+  的 handler **结构探测**它并与 `ctx.wait(durationS)` 竞速，两半同挂一个内层
+  AbortController（铁律 10）；headless 与「没真开播」的剪辑（自动播放被拒）照旧只等时长
+  ——`isMediaPlaying` 守卫是承重的，`waitForEnd` 对没在播的剪辑立即 resolve，不守就等于
+  跳过等待。取舍见 [ADR-0019](adr/0019-playMedia-竞速探测-waitMediaEnd.md)。4 条动作
+  单测（假时钟）+ 2 条真 SceneRuntime 集成测试（`.finish()` 缝），6 组变异全红，其中
+  「删掉 `waitMediaEnd`」只红集成测试不红单测——证明集成测试钉的是接线不是逻辑。
+  ② 媒体下拉：标签从资产文件名改为 `media.name`（媒体面板改名后两处显示才一致），
+  连同那句「media 记录没有自己的显示名」的假注释一起改掉——v2 起 `name` 是必填字段。
+  ③ `resetScene` describe 补齐 v0.5 行为（停全部媒体 + 灯光还原），同步补 ECA_SPEC
+  §5 表的 resetScene 行（T-163 声明过的回写漏了这一格）。旧的弱正则
+  `/恢复到文档初始状态/` 对过时文案照绿——这正是它活下来的原因，已强化。
+  ④ B9 对 media：修在 **executor 的通用 `refExists`**，一行 `case 'media'`，顺带删掉
+  「media 没有 v0 运行时」的过时 default——从此七种 RefKind 全覆盖且 switch 可穷尽。
+  这一行碰了禁改文件，**裁决理由与上报记录见 [ADR-0020](adr/0020-B9-对-media-在-executor-补全.md)**
+  （通用引用机制补全 ≠ 动作知识渗入；缺陷登记原文就在 executor；B9 的 `skipped` 语义
+  必须字面成立）。engine 级测试两条：悬空 media 引用 skip + error、`stopMedia('all')`
+  永不触发守卫。
+  ⑤ M11 复查发现**登记前提已不成立**：登记它的同一个提交（759734e）把清槽位的 remove
+  补丁也送进了 `ensureAssets`，基础纹理自那时起就会被回收，登记从未回头更正。真正残留
+  的是**变体泄漏**——资产还被别的材质用着时，被清槽位的 (资产,采样态) 克隆永远无人清扫。
+  已修：`retainOnly` 按 (资产,采样态) 需求清扫变体（`samplerVariant` 导出复用，运行时
+  依赖单向无环），另补一条「remove 补丁必须走慢路」的转发器回归测试——收窄判断条件就会
+  无声复活泄漏，这条测试挡住它。
+  **清偿期间又照出四条**（登记于 IMPL_NOTES §4「E18 清偿期间新发现」）：换承载体类型丢
+  阴影标志与材质覆盖（**已修**，apply-patch 的 primitive 路由重放表面状态 + 端到端回归）、
+  材质继承漂移（已在 T-185 修）、整条材质记录替换绕过 maps 判断（登记，现 UI 不可达）、
+  `stopMedia` 不 settle 等待者与 `resetScene` 相机两侧不一致（登记，先裁决语义再动手）。
 
 ---
 

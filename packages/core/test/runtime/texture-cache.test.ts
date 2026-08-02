@@ -2,6 +2,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import type { Asset, SceneDocument } from '@w3/schema'
 import { describe, expect, it, vi } from 'vitest'
 import { TextureCache, referencedTextureIds } from '../../src/runtime/texture-cache.js'
+import { samplerVariant } from '../../src/runtime/material-registry.js'
 
 /**
  * T-151 · the texture cache.
@@ -141,6 +142,39 @@ describe('what a document actually references', () => {
     await cache.ensure(docWith({}))
 
     expect(cache.has('ast_00000001')).toBe(false)
+    expect(disposed).toHaveBeenCalled()
+  })
+
+  it('sweeps the cleared slot’s VARIANT even while the asset itself stays resident (T-186)', async () => {
+    // The residual half of M11: the old sweep only ran when the whole asset dropped, so
+    // clearing 「基础色」 while a second material kept the same image as a roughness map
+    // stranded the sRGB variant for ever — a real extra GL texture, since colour space is
+    // part of three's GL texture key.
+    const { cache } = cacheWith()
+    const base = docWith({ map: 'ast_00000001' })
+    const shared: SceneDocument = {
+      ...base,
+      materials: [
+        base.materials[0]!,
+        { ...base.materials[0]!, id: 'mat_11112222', params: { maps: { roughnessMap: 'ast_00000001' } } },
+      ],
+    } as SceneDocument
+    await cache.ensure(shared)
+    // Materialise both variants the way applyParams would.
+    const srgbVariant = cache.get('ast_00000001', samplerVariant('map', shared.materials[0]!))!
+    cache.get('ast_00000001', samplerVariant('roughnessMap', shared.materials[1]!))
+    expect(cache.variantCount).toBe(2)
+    const disposed = vi.spyOn(srgbVariant, 'dispose')
+
+    // The first material clears its slot; the asset must survive, its variant must not.
+    const cleared: SceneDocument = {
+      ...shared,
+      materials: [{ ...shared.materials[0]!, params: { maps: {} } }, shared.materials[1]!],
+    } as SceneDocument
+    await cache.ensure(cleared)
+
+    expect(cache.has('ast_00000001'), '另一个材质还在用，资产不能丢').toBe(true)
+    expect(cache.variantCount, '被清掉的槽位的变体必须回收').toBe(1)
     expect(disposed).toHaveBeenCalled()
   })
 

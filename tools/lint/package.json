@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Isolated eslint toolchain. Exists only because typescript-eslint does not support the TS 7 API yet (issue #10940); this package owns its own TS 6 so the workspace can stay on 7.",
   "scripts": {
-    "lint": "eslint --config eslint.config.js ../../packages"
+    "lint": "pnpm -w run lint"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -111,7 +111,7 @@ export const resetScene = defineAction<z.infer<typeof ResetSceneParams>>({
   },
   ui: { label: '重置场景', group: 'scene', icon: 'rotate', fields: [] },
   refs: () => [],
-  describe: () => '将变换、显隐、材质与变量全部恢复到文档初始状态',
+  describe: () => '停止全部媒体，并将变换、显隐、材质、灯光与变量全部恢复到文档初始状态',
 })
 
 export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene]

@@ -268,8 +268,9 @@ export function refOptions(doc: SceneDocument, kind: RefKind): { id: string; nam
     case 'variable':
       return doc.variables.map((v) => ({ id: v.id, name: `${v.name}（${v.id}）` }))
     case 'media':
-      // Media records carry no display name of their own; the asset they point at is
-      // what the user recognises.
-      return doc.media.map((m) => ({ id: m.id, name: doc.assets.find((a) => a.id === m.assetId)?.name ?? m.id }))
+      // `media.name` — the SAME name the media panel shows and lets the user rename
+      // (T-161). The old label here was the underlying asset's FILE name, so a renamed
+      // recording kept its stale import-time name in this one dropdown (T-186).
+      return doc.media.map((m) => ({ id: m.id, name: m.name }))
   }
 }
