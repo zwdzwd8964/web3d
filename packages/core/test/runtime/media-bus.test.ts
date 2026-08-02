@@ -336,15 +336,25 @@ describe('SceneRuntime exposes the clip ending to actions (T-186)', () => {
     runtime.dispose()
   })
 
-  it('resolves at once when autoplay was refused, so a sequence does not stall on silence', async () => {
-    // V3 · the browser may refuse to start audio. Nothing is playing, so there is nothing
-    // to wait for — waiting out `durationS` would freeze the sequence for a sound that
-    // never happened.
+  it('does NOT resolve when autoplay was refused — the clock decides instead', async () => {
+    // V3 · the browser may refuse to start audio. Nothing is playing, so there is no ending
+    // to observe — and that is NOT the same as "it already ended".
+    //
+    // The first version of this bridged straight to `MediaBus.waitForEnd`, which resolves
+    // at once for a clip that is not playing. That made `await: true` return instantly
+    // whenever audio was blocked, so the rule's next step fired immediately and the
+    // authored pacing collapsed: a scene with blocked audio broke in a second, less
+    // explicable way on top of being silent. The parity suite's self-check caught it —
+    // neither side had diverged, both were equally wrong.
     const element = fakeElement(() => Promise.reject(new Error('NotAllowedError')))
     const runtime = await makeRuntime(element)
     await runtime.playMedia(MEDIA_ID)
 
-    await expect(runtime.waitForMediaEnd(MEDIA_ID)).resolves.toBeUndefined()
+    let settled = false
+    void runtime.waitForMediaEnd(MEDIA_ID).then(() => void (settled = true))
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+
+    expect(settled, '没在响就没有「响完」可听，交给时钟').toBe(false)
     runtime.dispose()
   })
 })

@@ -255,3 +255,24 @@ export class AbortError extends Error {
 
 export const isAbortError = (error: unknown): boolean =>
   error instanceof AbortError || (error instanceof Error && error.name === 'AbortError')
+
+/**
+ * A promise for "this clip will not tell us when it ends".
+ *
+ * Used by every `waitForMediaEnd` that cannot observe an ending: headless has no DOM, and a
+ * real runtime whose clip never started has nothing to hear. Racing it against
+ * `wait(durationS)` therefore lets the clock decide, which is the honest answer — resolving
+ * instead would claim the clip had finished the moment it failed to start (ADR-0019).
+ *
+ * Rejects on abort: without that, a cancelled sequence would leave the promise attached to
+ * the signal for the life of the run.
+ */
+export function neverEnds(signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((_resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new AbortError())
+      return
+    }
+    signal?.addEventListener('abort', () => reject(new AbortError()), { once: true })
+  })
+}

@@ -1,5 +1,6 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
+import { neverEnds } from '../eca/types.js'
 import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
@@ -766,8 +767,20 @@ export class SceneRuntime implements RuntimeContext {
    * `MediaBus.waitForEnd` has existed since T-163 and had no caller until now — the action
    * only ever waited on `durationS`, so a clip whose real length differed from the recorded
    * one ended early or late with nothing to correct it.
+   *
+   * NOTHING PLAYING MEANS "no end to observe", NOT "already ended". `waitForEnd` answers
+   * the second — correctly, for its own purposes — so bridging to it unconditionally made
+   * `await: true` return instantly whenever playback had not started: autoplay refused
+   * (V3), or any environment with no audio at all. The rule's next step then fired
+   * immediately and the authored pacing collapsed, so a scene with blocked audio broke in
+   * a second, less explicable way on top of being silent.
+   *
+   * Caught by the parity suite, whose own self-check noticed the awaited step had stopped
+   * suspending. Neither side diverged — both were equally wrong — which is exactly the
+   * failure a two-sided comparison cannot see and that self-check exists for.
    */
   waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void> {
+    if (!this.media.isPlaying(id)) return neverEnds(signal)
     return this.media.waitForEnd(id, signal)
   }
 

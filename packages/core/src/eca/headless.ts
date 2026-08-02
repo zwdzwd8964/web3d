@@ -1,5 +1,5 @@
 import type { Light, SceneDocument } from '@w3/schema'
-import { AbortError } from './types.js'
+import { AbortError, neverEnds } from './types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from './types.js'
 
 /**
@@ -306,13 +306,7 @@ export class HeadlessRuntime implements RuntimeContext {
    * would leave this promise attached to the signal for the life of the run.
    */
   waitForMediaEnd(_id: string, signal?: AbortSignal): Promise<void> {
-    return new Promise<void>((_resolve, reject) => {
-      if (signal?.aborted === true) {
-        reject(new AbortError())
-        return
-      }
-      signal?.addEventListener('abort', () => reject(new AbortError()), { once: true })
-    })
+    return neverEnds(signal)
   }
 
 
