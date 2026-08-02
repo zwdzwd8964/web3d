@@ -803,10 +803,32 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
 - **实际耗时**：1.2 天
 
 
-### [ ] T-185 · 假绿收口
+### [x] T-185 · 假绿收口
 - **独占** `packages/editor/test/{patch-forwarder,undo-runtime-parity}.test.ts`, `packages/core/test/eca/actions.test.ts`
+  （+ 独占外三处，都是为了修/钉本卡抓到的东西：`core/src/runtime/material-registry.ts`
+  与其测试、`core/src/eca/types.ts`）
 - **做** `createPatchForwarder` 零单测（改坏 `'assets'` 判断两套测试照绿）；`undo-runtime-parity` 的 snapshot 不含 v0.5 的灯光/原始体/贴图/阴影标志位；「六种字段」守卫写死了错误集合（混入不存在的 `vec3`、漏掉合法的 `valueExpr`），与 `FieldDescriptor` 无机械联系。
 - **验收** 三条各有一次变异检验
+- **实际** 1.5h
+- **实际情况**：
+  ① 转发器补 10 条单测（纯 Node，全部路由分支）。卡面那句话逐字复现了：把 `'assets'`
+  改成 `'asset'`，新测试 4 条红、旧两套 18 条**照绿**——旧测试根本不 import 这个模块，
+  undo-runtime-parity 里那句「与 main.tsx 同一套接线」的注释是假的，已改成如实说明。
+  ② snapshot 扩到灯参数 / 几何 parameters / 六槽位贴图采样态 / 阴影标志位，随机操作从
+  5 类扩到 9 类，另加 5 个**先断言正向、再断言撤销**的定向场景（双向一起坏的变异会让
+  纯往返对比恒绿，正向断言防的是这个）。夹具自带守卫断言：灯、原始体、驻留贴图缺一即红
+  ——这个文件当初就是靠「夹具悄悄停在 v0 内容」绿了一整版。6 组变异全红。
+  **扩展当场抓到一条真 core bug**：`applyParams` 把 §6.1 的「缺省=继承源材质」实现成了
+  「缺省=不写」，两者只在 clone 还新鲜时等价——换成写了 color 的材质再换回没写 color 的，
+  颜色**回不来**（正向就坏，不只撤销；物理参数同理会从上一个材质粘过来）。修在
+  `material-registry`：clone 记 `lastDefId`，def 换人时先从源材质重置可继承参数；同一
+  def 的滑块路径保持就地合并（高亮写的 emissive 不被吹掉，有测试钉住）。贴图槽位不在
+  重置之列——maps 的语义本来就是「缺省=清除」（T-151）。三条回归测试就地补齐。
+  ③ 六种字段清单收敛为 `FIELD_KINDS` 单一来源（`types.ts`，`satisfies` 拒多、
+  `AssertNever` 拒漏），两处手抄清单指过去，另加一条**全注册表**守卫——原来的守卫只看
+  setLight 和 media 两对，`setVariable` 的 `valueExpr` 字段从没被任何守卫看过。变异
+  三组：伪造第七种 → 2 红；删 `valueExpr` → 守卫红；把 `vec3` 加回去 → vitest 与 tsc
+  **两层各自红**。
 
 ### [ ] T-186 · minor 收口
 - **独占** 见各条

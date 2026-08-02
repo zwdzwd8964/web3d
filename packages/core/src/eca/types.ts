@@ -144,6 +144,24 @@ export type FieldDescriptor =
   | { readonly key: string; readonly type: 'enum'; readonly label: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
   | { readonly key: string; readonly type: 'valueExpr'; readonly label: string }
 
+/**
+ * ECA_SPEC §4.4 · the closed six field kinds, as a runtime value.
+ *
+ * Guard tests compare against this instead of retyping the list — T-176 found three
+ * hand-typed copies, one of which contained a kind that has never existed ('vec3') and
+ * missed one that does ('valueExpr'). The `satisfies` clause rejects any member the type
+ * does not declare; `FieldKindsAreComplete` rejects any omission. Do not widen: growing
+ * the set means changing ECA_SPEC §4.4 and the rule editor together (stop and ask).
+ */
+export const FIELD_KINDS = ['ref', 'number', 'boolean', 'string', 'enum', 'valueExpr'] as const satisfies readonly FieldDescriptor['type'][]
+
+/** One of the six closed field kinds of ECA_SPEC §4.4. */
+export type FieldKind = (typeof FIELD_KINDS)[number]
+
+type AssertNever<T extends never> = T
+/** Compile-time proof that FIELD_KINDS omits no kind FieldDescriptor declares. */
+export type FieldKindsAreComplete = AssertNever<Exclude<FieldDescriptor['type'], FieldKind>>
+
 export type ActionHandler<P = unknown> = (
   ctx: RuntimeContext,
   params: P,

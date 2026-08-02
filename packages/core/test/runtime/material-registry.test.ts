@@ -178,6 +178,88 @@ describe('restoring and updating', () => {
   })
 })
 
+describe('switching definitions re-seeds inherited params (T-185)', () => {
+  // Writes what the golden path's cover definition INHERITS: colour. Switching to it and
+  // back is how the drift shows — the id shape is valid but deliberately not in any doc.
+  const greyDef: MaterialDef = {
+    id: 'mat_greydemo',
+    name: '演示灰',
+    base: 'standard',
+    preset: 'custom',
+    params: { color: '#b8bec4', maps: {} },
+  } as MaterialDef
+
+  it('a param the new definition omits comes from the SOURCE, not from the previous definition', () => {
+    const d = createGoldenPathDocument()
+    graph.build(d)
+    registry.applyAll(d, graph)
+    // The cover's own definition inherits colour, so the clone starts at the source's 钢.
+    expect(materialOf(IDS.cover).color.getHexString()).toBe('8a959e')
+
+    const defs = new Map([...defsOf(d.materials), [greyDef.id, greyDef]])
+    registry.applyToNode(IDS.cover, greyDef.id, defs, graph)
+    expect(materialOf(IDS.cover).color.getHexString()).toBe('b8bec4')
+
+    // Switching BACK: the definition says nothing about colour, so the source's value
+    // must return. Before the fix the previous definition's grey stayed behind —
+    // "换回原来的材质，颜色回不来" — found by T-185's undo-parity extension.
+    registry.applyToNode(IDS.cover, d.materials[0]!.id, defs, graph)
+    expect(materialOf(IDS.cover).color.getHexString(), '缺省字段必须回到源材质的值').toBe('8a959e')
+    expect(materialOf(IDS.cover).roughness).toBe(0.4)
+    expect(pump.sharedMaterial.color.getHexString(), '源材质必须没被写').toBe('8a959e')
+  })
+
+  it('re-applying the SAME definition keeps the in-place merge (the slider path)', () => {
+    const d = createGoldenPathDocument()
+    graph.build(d)
+    registry.applyAll(d, graph)
+
+    // Highlighting writes emissive on the clone via the same clone-on-write path; an
+    // edit to the definition's roughness must not blow that away mid-highlight.
+    const writable = registry.acquireWritable(IDS.cover, graph) as MeshStandardMaterial
+    writable.emissive.set('#ff0000')
+
+    const edited: MaterialDef = { ...d.materials[0]!, params: { ...d.materials[0]!.params, roughness: 0.2 } }
+    registry.updateDefinition(edited, d, graph)
+
+    expect(materialOf(IDS.cover).roughness).toBe(0.2)
+    expect(materialOf(IDS.cover).emissive.getHexString(), '同一定义的就地合并必须保留').toBe('ff0000')
+  })
+
+  it('the re-seed also clears stale physical params when switching between physical definitions', () => {
+    const glass: MaterialDef = {
+      id: 'mat_glasdemo',
+      name: '演示玻璃',
+      base: 'physical',
+      preset: 'custom',
+      params: { transmission: 0.9, ior: 1.8, maps: {} },
+    } as MaterialDef
+    const coat: MaterialDef = {
+      id: 'mat_coatdemo',
+      name: '演示清漆',
+      base: 'physical',
+      preset: 'custom',
+      params: { clearcoat: 1, maps: {} },
+    } as MaterialDef
+
+    const d = createGoldenPathDocument()
+    graph.build(d)
+    registry.applyAll(d, graph)
+
+    const defs = new Map([...defsOf(d.materials), [glass.id, glass], [coat.id, coat]])
+    registry.applyToNode(IDS.cover, glass.id, defs, graph)
+    expect((materialOf(IDS.cover) as unknown as { transmission: number }).transmission).toBe(0.9)
+
+    // 清漆 says nothing about transmission — inheriting the GLASS's 0.9 would make the
+    // coated paint transparent, with nothing on the panel explaining why (the L1 shape).
+    registry.applyToNode(IDS.cover, coat.id, defs, graph)
+    const m = materialOf(IDS.cover) as unknown as { transmission: number; ior: number; clearcoat: number }
+    expect(m.transmission, '上一个定义的玻璃参数必须清掉').toBe(0)
+    expect(m.ior).toBe(1.5)
+    expect(m.clearcoat).toBe(1)
+  })
+})
+
 describe('applyParams()', () => {
   const textures: { get: (id: string) => Texture | undefined } = { get: () => undefined }
 

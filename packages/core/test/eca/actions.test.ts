@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { ActionRegistry, BUILTIN_ACTIONS, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { HeadlessRuntime } from '../../src/eca/headless.js'
 import type { ActionDefinition, RuntimeEvent } from '../../src/eca/types.js'
+import { FIELD_KINDS } from '../../src/eca/types.js'
 import { IDS } from '../helpers.js'
 
 /**
@@ -331,7 +332,7 @@ describe('light actions', () => {
   it('is renderable by the rule editor with no new field kinds', () => {
     // v0.5's claim is that a new action needs zero rule-editor changes. That holds only
     // while every field it declares is one of the six kinds ECA_SPEC §4.4 closes over.
-    const KNOWN = new Set(['ref', 'number', 'boolean', 'string', 'enum', 'valueExpr'])
+    const KNOWN = new Set<string>(FIELD_KINDS)
     for (const field of registry.get('setLight')!.ui.fields) {
       expect(KNOWN, `字段 ${field.key} 用了规则编辑器不认识的类型 ${field.type}`).toContain(field.type)
     }
@@ -485,10 +486,31 @@ describe('media actions (v0.5 · T-163)', () => {
   it('the rule editor needs no change: every field is one of the six kinds', async () => {
     // C5's acceptance evidence. `refKind: 'media'` has been in `FieldDescriptor` since v0,
     // so the form grows on its own — which is the whole claim v0.5 makes about actions.
-    const kinds = new Set(['string', 'number', 'boolean', 'enum', 'ref', 'vec3'])
+    //
+    // T-185 ③ · the set now comes from FIELD_KINDS. The hand-typed copy this replaces
+    // contained 'vec3' — a kind that has never existed — so it could never have failed
+    // on the drift it was written to catch.
+    const kinds = new Set<string>(FIELD_KINDS)
     for (const type of ['playMedia', 'stopMedia']) {
       for (const field of registry.get(type)!.ui.fields) {
         expect(kinds.has(field.type), `${type}.${field.key} 用了第七种字段类型`).toBe(true)
+      }
+    }
+  })
+})
+
+describe('ECA_SPEC §4.4 · field kinds are closed at six', () => {
+  it('every registered action uses only the six kinds, and the list stays six', () => {
+    // §4.4 freezes the set at exactly six. If the length assertion goes red you are
+    // changing the spec's closed set — that is a stop-and-ask event, not a test edit.
+    // The loop is registry-wide on purpose: the per-action guards above only ever
+    // inspected setLight and the media pair, so setVariable's `valueExpr` field had no
+    // guard at all until this one.
+    expect(FIELD_KINDS).toHaveLength(6)
+    const known = new Set<string>(FIELD_KINDS)
+    for (const action of BUILTIN_ACTIONS) {
+      for (const field of action.ui.fields) {
+        expect(known.has(field.type), `${action.type}.${field.key} 用了第七种字段类型 ${field.type}`).toBe(true)
       }
     }
   })
