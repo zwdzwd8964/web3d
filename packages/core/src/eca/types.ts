@@ -136,13 +136,29 @@ export interface RuntimeContext {
 export type RefKind = 'node' | 'material' | 'animation' | 'hotspot' | 'viewpoint' | 'variable' | 'media'
 
 /** ECA_SPEC §4.4 · a closed set, because the rule editor renders exactly these. */
+/**
+ * ECA_SPEC §4.4 · the closed set of field kinds the rule editor can render.
+ *
+ * A runtime array, and `FieldDescriptor['type']` is derived FROM it — so the two cannot
+ * drift, and a seventh kind added to the union without being added here is a type error
+ * rather than a form that renders blank.
+ *
+ * It exists because two tests each hand-copied this set and each got it wrong in a
+ * different direction: one listed a `vec3` that has never existed, the other omitted the
+ * `valueExpr` that does. Both passed. A guard that says 「没有第七种字段」 while not
+ * knowing what the six are is not a guard (T-176 审查所得).
+ */
+export const FIELD_KINDS = ['ref', 'number', 'boolean', 'string', 'enum', 'valueExpr'] as const
+
+export type FieldKind = (typeof FIELD_KINDS)[number]
+
 export type FieldDescriptor =
-  | { readonly key: string; readonly type: 'ref'; readonly refKind: RefKind; readonly label: string; readonly required?: boolean }
-  | { readonly key: string; readonly type: 'number'; readonly label: string; readonly min?: number; readonly max?: number; readonly step?: number; readonly default?: number }
-  | { readonly key: string; readonly type: 'boolean'; readonly label: string; readonly default?: boolean }
-  | { readonly key: string; readonly type: 'string'; readonly label: string; readonly multiline?: boolean; readonly default?: string }
-  | { readonly key: string; readonly type: 'enum'; readonly label: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
-  | { readonly key: string; readonly type: 'valueExpr'; readonly label: string }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'ref'>; readonly refKind: RefKind; readonly label: string; readonly required?: boolean }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'number'>; readonly label: string; readonly min?: number; readonly max?: number; readonly step?: number; readonly default?: number }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'boolean'>; readonly label: string; readonly default?: boolean }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'string'>; readonly label: string; readonly multiline?: boolean; readonly default?: string }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'enum'>; readonly label: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
+  | { readonly key: string; readonly type: Extract<FieldKind, 'valueExpr'>; readonly label: string }
 
 export type ActionHandler<P = unknown> = (
   ctx: RuntimeContext,

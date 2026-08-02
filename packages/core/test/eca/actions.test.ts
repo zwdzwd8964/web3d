@@ -3,6 +3,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ActionRegistry, BUILTIN_ACTIONS, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { HeadlessRuntime } from '../../src/eca/headless.js'
+import { FIELD_KINDS } from '../../src/eca/types.js'
 import type { ActionDefinition, RuntimeEvent } from '../../src/eca/types.js'
 import { IDS } from '../helpers.js'
 
@@ -331,7 +332,9 @@ describe('light actions', () => {
   it('is renderable by the rule editor with no new field kinds', () => {
     // v0.5's claim is that a new action needs zero rule-editor changes. That holds only
     // while every field it declares is one of the six kinds ECA_SPEC §4.4 closes over.
-    const KNOWN = new Set(['ref', 'number', 'boolean', 'string', 'enum', 'valueExpr'])
+    // Imported, not retyped. The hand-copied version of this listed a `vec3` that has
+    // never existed and omitted the `valueExpr` that does — and passed either way.
+    const KNOWN = new Set<string>(FIELD_KINDS)
     for (const field of registry.get('setLight')!.ui.fields) {
       expect(KNOWN, `字段 ${field.key} 用了规则编辑器不认识的类型 ${field.type}`).toContain(field.type)
     }
@@ -485,7 +488,7 @@ describe('media actions (v0.5 · T-163)', () => {
   it('the rule editor needs no change: every field is one of the six kinds', async () => {
     // C5's acceptance evidence. `refKind: 'media'` has been in `FieldDescriptor` since v0,
     // so the form grows on its own — which is the whole claim v0.5 makes about actions.
-    const kinds = new Set(['string', 'number', 'boolean', 'enum', 'ref', 'vec3'])
+    const kinds = new Set<string>(FIELD_KINDS)
     for (const type of ['playMedia', 'stopMedia']) {
       for (const field of registry.get(type)!.ui.fields) {
         expect(kinds.has(field.type), `${type}.${field.key} 用了第七种字段类型`).toBe(true)
