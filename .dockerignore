@@ -1,0 +1,11 @@
+# Keep the build context small and the install layer honest: dependencies come from
+# the lockfile inside the image, never from a host node_modules copied in.
+.git
+node_modules
+**/node_modules
+**/dist
+**/coverage
+e2e/test-results
+e2e/playwright-report
+Dockerfile
+.dockerignore
