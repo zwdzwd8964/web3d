@@ -9,19 +9,26 @@ import type { Node, SceneDocument } from '../src/index.js'
  * test that fails when someone else's build kicks off, and the team learns to re-run it
  * until it passes — at which point it stops being a gate at all.
  *
- * So each one measures the same operation at n and 2n and asserts the RATIO. Linear work
- * doubles (~2×); quadratic work quadruples (~4×). The bound is 3, which is far enough from
- * 2 that ordinary noise cannot reach it and far enough from 4 that a genuine regression
- * cannot hide under it. Every one of these was ~4× before this card (measured, and written
- * into METRICS): `buildIndex` 6.8 ms → 100 ms going from 1000 nodes to 4000.
+ * So each one measures the same operation at n and 4n and asserts the RATIO. Linear work
+ * grows ~4×; quadratic work grows ~16×. The bound is 8 — the geometric midpoint, over 60%
+ * away from both honest outcomes. (The first version used 2n and a bound of 3; a loaded CI
+ * runner reached 3.097 on an operation that takes tens of microseconds, and a gate that
+ * red-flags someone else's build is exactly what the paragraph above forbids.)
+ *
+ * Two more defenses against a busy machine, both in `growth()`:
+ * - the small and large runs are interleaved SAMPLE BY SAMPLE, so sustained load inflates
+ *   both sides by the same factor and cancels out of the ratio;
+ * - each side reports its MINIMUM, not its median. Noise on a timing sample is strictly
+ *   additive, so the minimum is the best available estimate of the noise-free cost, and
+ *   one quiet sample per side is enough to recover it.
  *
  * The document is deliberately built with real depth. A flat list of roots would make
  * `childrenOf` one bucket and hide exactly the bug this is here to catch.
  */
 
 const SMALL = 400
-const LARGE = 800
-/** Repeats per measurement — enough that one unlucky GC pause cannot decide the ratio. */
+const LARGE = 1600
+/** Repeats per measurement — enough that one quiet sample per side is very likely. */
 const REPEATS = 12
 
 function makeDocument(count: number): SceneDocument {
@@ -47,49 +54,46 @@ function makeDocument(count: number): SceneDocument {
 const small = makeDocument(SMALL)
 const large = makeDocument(LARGE)
 
-/** Median rather than mean: one GC pause must not move the number it reports. */
-function median(samples: number[]): number {
-  const sorted = [...samples].sort((a, b) => a - b)
-  return sorted[Math.floor(sorted.length / 2)]!
+function timed(doc: SceneDocument, run: (doc: SceneDocument) => void): number {
+  const start = performance.now()
+  run(doc)
+  return performance.now() - start
 }
 
-function cost(doc: SceneDocument, run: (doc: SceneDocument) => void): number {
-  run(doc) // warm up: the first call pays for JIT, and that cost is not in the algorithm
-  const samples: number[] = []
-  for (let i = 0; i < REPEATS; i++) {
-    const start = performance.now()
-    run(doc)
-    samples.push(performance.now() - start)
-  }
-  return median(samples)
-}
-
-/** How much slower the operation got when the document doubled. */
+/** How much slower the operation got when the document quadrupled. */
 function growth(run: (doc: SceneDocument) => void): number {
-  // Interleaved, so a machine that gets busy halfway through skews both measurements
-  // rather than only the second one — which would otherwise read as a regression.
-  const a = cost(small, run)
-  const b = cost(large, run)
-  const a2 = cost(small, run)
-  return b / Math.max(median([a, a2]), 0.001)
+  // Warm up both sizes: the first calls pay for JIT, and that cost is not in the algorithm.
+  run(small)
+  run(large)
+  const smallSamples: number[] = []
+  const largeSamples: number[] = []
+  // Interleaved per sample: sustained machine load then inflates both sides by the same
+  // factor and divides out, instead of landing on whichever side ran while it lasted.
+  for (let i = 0; i < REPEATS; i++) {
+    smallSamples.push(timed(small, run))
+    largeSamples.push(timed(large, run))
+  }
+  // Minimum, not median: timing noise is strictly additive, so the fastest sample is the
+  // closest to the noise-free cost — one quiet sample per side recovers the true ratio.
+  return Math.min(...largeSamples) / Math.max(Math.min(...smallSamples), 0.001)
 }
 
-describe('doubling the document must not quadruple the work (T-184)', () => {
+describe('quadrupling the document must not square the work (T-184)', () => {
   it('buildIndex is linear', () => {
     // Was O(n²): `childrenOf` called `getChildren` — a full array scan — once per node.
     // This runs on every structural edit, so a 1000-node import spent 6.8 ms rebuilding the
     // index each time and a 4000-node one spent 100 ms, which is six frames of frozen UI.
-    expect(growth((doc) => void buildIndex(doc))).toBeLessThan(3)
+    expect(growth((doc) => void buildIndex(doc))).toBeLessThan(8)
   })
 
   it('checkIntegrity is linear', () => {
     // Was O(n²) through `getUnreachableNodes` → `walkTree`. The status bar runs it after
     // every commit, so the whole editor got slower with the square of the model size.
-    expect(growth((doc) => void checkIntegrity(doc))).toBeLessThan(3)
+    expect(growth((doc) => void checkIntegrity(doc))).toBeLessThan(8)
   })
 
   it('walkTree is linear', () => {
-    expect(growth((doc) => walkTree(doc, () => undefined))).toBeLessThan(3)
+    expect(growth((doc) => walkTree(doc, () => undefined))).toBeLessThan(8)
   })
 })
 
