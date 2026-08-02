@@ -408,15 +408,26 @@ test('黄金路径 II · 12 步', async ({ page, context }) => {
   await page.waitForTimeout(SETTLE * 2)
 
   await clickNode(page, '立方体')
-  await page.waitForTimeout(SETTLE * 4)
+  await page.waitForTimeout(SETTLE)
 
   // 音频：断言运行时状态，不断言声卡。CI 没有声卡，「真的响了」观测不到，硬测只会做出一个
   // 自信满满的 flaky 测试（进化规划 §2 原话）。
+  //
+  // 在 0.4s 断言，不是 1.6s：夹具剪辑恰好 1.5s，原来的定点等待把断言放在自然结束点
+  // 之后 0.1s——绿红取决于播放开始的延迟 δ，而 δ 随机器负载漂移（满载的共享环境里
+  // 实测翻红两次）。0.4s 离结束点还有 1.1s，负载翻不动它。
   expect(await isMediaPlaying(page, mediaId), '规则应当把音频播起来').toBe(true)
 
   // 灯：断言**渲染器手上的值**。setLight 写的是 three 对象、不是文档，所以读文档的断言是空的
   // ——它在用户根本没点过「预览」时同样成立（T-176 审查抓到的就是这一条）。
-  expect((await renderedLight(page, lightId))?.intensity, '规则应当把灯调到 6').toBe(6)
+  // 轮询而非定点：setLight 在 playMedia 的 await 之后才执行，完成时刻 = 播放开始 +
+  // min(真实结束, durationS)（D19），本身就随 δ 漂移。
+  await expect
+    .poll(async () => (await renderedLight(page, lightId))?.intensity, {
+      timeout: 8000,
+      message: '规则应当把灯调到 6',
+    })
+    .toBe(6)
 
   await page.getByRole('button', { name: '编辑', exact: true }).click()
   await page.waitForTimeout(SETTLE * 2)
