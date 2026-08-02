@@ -760,6 +760,17 @@ export class SceneRuntime implements RuntimeContext {
     return this.media.isPlaying(id)
   }
 
+  /**
+   * ADR-0019 · the real `ended` event, which is D19's other half.
+   *
+   * `MediaBus.waitForEnd` has existed since T-163 and had no caller until now — the action
+   * only ever waited on `durationS`, so a clip whose real length differed from the recorded
+   * one ended early or late with nothing to correct it.
+   */
+  waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void> {
+    return this.media.waitForEnd(id, signal)
+  }
+
   lightOf(nodeId: string): LiveLight | null {
     const node = this.document.nodes.find((n) => n.id === nodeId)
     if (!node || node.light === null) return null

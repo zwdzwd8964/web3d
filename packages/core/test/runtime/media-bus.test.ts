@@ -294,3 +294,107 @@ describe('a media record deleted while it plays (M12 审查所得)', () => {
     expect(bus.isPlaying(MEDIA_ID)).toBe(true)
   })
 })
+
+/**
+ * T-186 / ADR-0019 · the runtime side of D19's 「以先到者为准」.
+ *
+ * Everything above tests `MediaBus.waitForEnd`, which was complete, correct and had ZERO
+ * production callers (T-176 审查所得) — the action only ever waited on `durationS`. A clip
+ * whose real length differs from what the browser reported at import then finished early or
+ * late with nothing to correct it, and 「响完铃再弹面板」 either cut the last second off or
+ * left the user watching a still frame.
+ */
+describe('SceneRuntime exposes the clip ending to actions (T-186)', () => {
+  const makeRuntime = async (element: ReturnType<typeof fakeElement>) => {
+    const { SceneRuntime } = await import('../../src/runtime/scene-runtime.js')
+    const { NullHotspotRenderer } = await import('../../src/runtime/hotspot-layer.js')
+    const doc = docWithMedia()
+    const runtime = new SceneRuntime(doc, {
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      mode: 'play',
+      createMediaElement: () => element as unknown as MediaElementLike,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+    })
+    runtime.media.setDocument(doc)
+    return runtime
+  }
+
+  it('resolves when the element really ends, not when a timer says so', async () => {
+    const element = fakeElement()
+    const runtime = await makeRuntime(element)
+    await runtime.playMedia(MEDIA_ID)
+
+    let settled = false
+    void runtime.waitForMediaEnd(MEDIA_ID).then(() => void (settled = true))
+    await Promise.resolve()
+    expect(settled, '还在响，不该结束').toBe(false)
+
+    element.finish()
+    await Promise.resolve()
+    expect(settled, '真的播完了就该结束——这一跳此前没有任何调用者').toBe(true)
+    runtime.dispose()
+  })
+
+  it('resolves at once when autoplay was refused, so a sequence does not stall on silence', async () => {
+    // V3 · the browser may refuse to start audio. Nothing is playing, so there is nothing
+    // to wait for — waiting out `durationS` would freeze the sequence for a sound that
+    // never happened.
+    const element = fakeElement(() => Promise.reject(new Error('NotAllowedError')))
+    const runtime = await makeRuntime(element)
+    await runtime.playMedia(MEDIA_ID)
+
+    await expect(runtime.waitForMediaEnd(MEDIA_ID)).resolves.toBeUndefined()
+    runtime.dispose()
+  })
+})
+
+/**
+ * T-186 · the race itself, driven through the action against a REAL MediaBus.
+ *
+ * The tests above prove each half works. Neither proves the action USES both: deleting the
+ * race and going back to `await ctx.wait(durationS)` left all 699 tests green, because
+ * headless never resolves the other side, so in headless the race and the bare wait are
+ * indistinguishable by construction.
+ *
+ * So this one gives the clip an hour-long `durationS` and ends the element immediately. On
+ * the clock alone it would take an hour; if the race is wired, it returns at once.
+ */
+describe('playMedia ends when the clip does, not when the clock says (T-186)', () => {
+  it('returns as soon as the element fires ended, however long durationS claims', async () => {
+    const { SceneRuntime } = await import('../../src/runtime/scene-runtime.js')
+    const { NullHotspotRenderer } = await import('../../src/runtime/hotspot-layer.js')
+    const { MEDIA_ACTIONS } = await import('../../src/eca/actions/media.js')
+    const playMedia = MEDIA_ACTIONS.find((a) => a.type === 'playMedia')!
+
+    const element = fakeElement()
+    const base = docWithMedia()
+    // An hour. The recorded duration and the real one disagree — which is the whole point
+    // of D19: `durationS` is what the browser guessed at import.
+    const doc = { ...base, media: [{ ...base.media[0]!, durationS: 3600 }] } as SceneDocument
+
+    const runtime = new SceneRuntime(doc, {
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      mode: 'play',
+      createMediaElement: () => element as unknown as MediaElementLike,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+    })
+    runtime.media.setDocument(doc)
+
+    let settled = false
+    const running = playMedia
+      .handler(runtime as never, { mediaId: MEDIA_ID, await: true }, new AbortController().signal)
+    void Promise.resolve(running).then(() => void (settled = true))
+
+    // Let `play()` resolve and the wait attach before the clip ends.
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    expect(settled, '还没播完，不该返回').toBe(false)
+
+    element.finish()
+    await running
+    expect(settled, '片段真的播完了就该返回，不必等满一小时').toBe(true)
+
+    runtime.dispose()
+  })
+})

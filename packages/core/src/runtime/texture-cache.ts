@@ -163,11 +163,15 @@ export class TextureCache implements TextureSource {
   /**
    * Drops textures no material references any more.
    *
-   * Called from `ensure`, and therefore only when the host has a reason to await something:
-   * an asset arriving, or a material starting to reference a texture. CLEARING a slot does
-   * neither, so the bytes stay resident until the next import or the next `load` (M11 —
-   * registered rather than fixed, because freeing them eagerly would mean making the
-   * synchronous patch path await, which is what D1 exists to avoid).
+   * Called from `ensure`, and therefore only when the host has a reason to await something.
+   *
+   * That includes CLEARING a slot, which M11 registered as a leak and which is no longer
+   * one: the patch forwarder takes the slow path for any patch under
+   * `/materials/i/params/maps/*`, and clearing a slot emits exactly that path. So the
+   * clear reaches `ensure`, and `ensure` frees the bytes.
+   *
+   * The connection is indirect and holds only while the forwarder keys on `maps`, so it is
+   * pinned by a test rather than trusted (T-186).
    */
   private retainOnly(wanted: ReadonlySet<string>, doc: SceneDocument): void {
     const counts = new Map<string, number>()

@@ -422,8 +422,24 @@ describe('media actions (v0.5 · T-163)', () => {
     await ctx.clock.advance(1999)
     expect(settled, '还没到 2 秒，不该结束').toBe(false)
     await ctx.clock.advance(1)
+    // Two microtasks, not one: since ADR-0019 the handler awaits a `Promise.race`, and a
+    // race settles one tick after its winner does. Nothing about the timing a USER sees
+    // changed — the clock still decides — but the assertion has to let that tick run.
+    await Promise.resolve()
     await Promise.resolve()
     expect(settled, '2 秒到了就该继续').toBe(true)
+  })
+
+  it('headless never lets the clip-ended side win, so the clock still decides (ADR-0019)', async () => {
+    // The race only helps if the losing side genuinely never resolves here. A headless
+    // `waitForMediaEnd` that resolved immediately would make `await: true` return at once,
+    // and every 「响完再弹面板」 rule would fire its next step instantly — with the fake
+    // clock making that indistinguishable from success in every other test.
+    let ended = false
+    void ctx.waitForMediaEnd(MEDIA_ID).then(() => void (ended = true))
+    await ctx.clock.advance(60_000)
+    await Promise.resolve()
+    expect(ended, 'headless 观测不到「播完」，就不该假装观测到了').toBe(false)
   })
 
   it('a LOOPING clip resolves immediately even with await: true (D6 边界，必测)', async () => {

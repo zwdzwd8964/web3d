@@ -111,7 +111,10 @@ export const resetScene = defineAction<z.infer<typeof ResetSceneParams>>({
   },
   ui: { label: '重置场景', group: 'scene', icon: 'rotate', fields: [] },
   refs: () => [],
-  describe: () => '将变换、显隐、材质与变量全部恢复到文档初始状态',
+  // Kept in step with what `RuntimeContext.resetScene` actually does. v0.5 added lights,
+  // highlights and media to that list, and this string did not follow — the generated
+  // acceptance document (R14) then described a narrower action than the one that ships.
+  describe: () => '停止播放与高亮，将变换、显隐、材质、灯光与变量全部恢复到文档初始状态',
 })
 
 export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene]

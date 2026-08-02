@@ -176,3 +176,53 @@ describe('what a document actually references', () => {
     expect(decode).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * T-186 · clearing a texture slot, and whether the bytes actually go.
+ *
+ * M11 registered this as a leak and the comment on `retainOnly` still said the bytes stay
+ * resident until the next import. That stopped being true when the patch forwarder learned
+ * to treat `/materials/i/params/maps/*` as needing bytes (M11's own fix): CLEARING a slot
+ * emits a patch on that same path, so it takes the slow path too and `ensure` runs.
+ *
+ * Written as a test rather than a comment edit, because the connection is indirect — it
+ * holds only as long as the forwarder keys on `maps` — and 「顺手就好了」 is exactly the
+ * kind of claim that quietly stops being true.
+ */
+describe('clearing a slot frees the texture (T-186)', () => {
+  it('drops the bytes once no material references them', async () => {
+    const { cache, decode } = cacheWith()
+    const used = docWith({ map: 'ast_00000001' })
+    await cache.ensure(used)
+    expect(cache.size, '前提：贴图真的加载了').toBe(1)
+    expect(decode).toHaveBeenCalledTimes(1)
+
+    const cleared = docWith({})
+    await cache.ensure(cleared)
+
+    expect(cache.size, '没有材质再引用它，就不该继续占显存').toBe(0)
+    expect(cache.refCount('ast_00000001')).toBe(0)
+  })
+
+  it('keeps it while ANY material still references it', async () => {
+    // The mistake this rules out is freeing on the first clear: two materials sharing one
+    // image, one of them clears its slot, and the other renders untextured.
+    const { cache } = cacheWith()
+    const base = docWith({ map: 'ast_00000001' })
+    const shared = {
+      ...base,
+      materials: [base.materials[0]!, { ...base.materials[0]!, id: 'mat_00000002' }],
+    } as SceneDocument
+    await cache.ensure(shared)
+    expect(cache.refCount('ast_00000001'), '两个材质引用').toBe(2)
+
+    const oneCleared = {
+      ...shared,
+      materials: [{ ...shared.materials[0]!, params: { ...shared.materials[0]!.params, maps: {} } }, shared.materials[1]!],
+    } as SceneDocument
+    await cache.ensure(oneCleared)
+
+    expect(cache.size, '还有一个材质在用，不许释放').toBe(1)
+    expect(cache.refCount('ast_00000001')).toBe(1)
+  })
+})

@@ -55,7 +55,11 @@ const playMedia = defineAction<z.infer<typeof PlayMediaParams>>({
       return
     }
 
-    await ctx.wait(durationS * 1000, signal)
+    // D19 · 以先到者为准 (ADR-0019). `durationS` is what the browser reported at import;
+    // the real clip can run a little longer or shorter, and only the element knows. In
+    // headless `waitForMediaEnd` never resolves, so the clock wins — which is what D19
+    // specifies there.
+    await Promise.race([ctx.wait(durationS * 1000, signal), ctx.waitForMediaEnd(p.mediaId, signal)])
   },
   ui: {
     label: '播放媒体',

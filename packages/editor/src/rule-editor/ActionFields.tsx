@@ -268,8 +268,10 @@ export function refOptions(doc: SceneDocument, kind: RefKind): { id: string; nam
     case 'variable':
       return doc.variables.map((v) => ({ id: v.id, name: `${v.name}（${v.id}）` }))
     case 'media':
-      // Media records carry no display name of their own; the asset they point at is
-      // what the user recognises.
-      return doc.media.map((m) => ({ id: m.id, name: doc.assets.find((a) => a.id === m.assetId)?.name ?? m.id }))
+      // The record's OWN name (SCHEMA_SPEC §6.8), which defaults to the filename at import
+      // and is what the user renames in the media panel. Reading the asset's name instead
+      // meant the rule editor kept showing `alarm.wav` after they renamed it 「警报声」,
+      // and two clips cut from one file were indistinguishable in the dropdown.
+      return doc.media.map((m) => ({ id: m.id, name: m.name }))
   }
 }

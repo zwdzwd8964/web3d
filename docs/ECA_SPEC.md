@@ -369,6 +369,9 @@ export interface RuntimeContext {
   /** `'all'` 是退出预览时调的那个（B13 扩展：离开预览必须静音） */
   stopMedia(id: string | 'all'): void
   isMediaPlaying(id: string): boolean
+  /** v0.5 · 片段真的播完时 resolve；与 `wait(durationS)` 竞速构成 D19 的「先到者为准」。
+      未在播放（含 V3 自动播放被拒）立即 resolve；headless 永不 resolve，由时钟决定（ADR-0019） */
+  waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void>
 
   // ---- 动画 ----
   playAnimation(id: string, opts: { signal?: AbortSignal }): Promise<void>

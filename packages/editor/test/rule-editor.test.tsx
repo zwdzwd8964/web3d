@@ -1,4 +1,5 @@
 import { createGoldenPathDocument, z } from '@w3/schema'
+import type { SceneDocument } from '@w3/schema'
 import { ActionRegistry, allActions, defaultRegistry, defineAction, getAction, registerBuiltinActions } from '@w3/core'
 import type { FieldDescriptor } from '@w3/core'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -99,6 +100,25 @@ describe('refOptions', () => {
 
   it('names entities the way the user does, not by id', () => {
     expect(refOptions(doc, 'node').map((o) => o.name)).toContain('阀盖')
+  })
+
+  it('shows a media record by ITS name, not the file it came from (T-186)', () => {
+    // The dropdown read the asset's name, which is the filename at import. So renaming a
+    // clip 「警报声」 in the media panel changed nothing here — the rule editor went on
+    // saying `alarm.wav` — and two clips cut from one file were indistinguishable.
+    const withMedia = {
+      ...doc,
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio' as const, name: 'alarm.wav' }],
+      media: [
+        { id: 'med_00000001', type: 'audio' as const, assetId: 'ast_med00001', name: '警报声', durationS: 2 },
+        { id: 'med_00000002', type: 'audio' as const, assetId: 'ast_med00001', name: '解除警报', durationS: 3 },
+      ],
+    } as SceneDocument
+
+    expect(refOptions(withMedia, 'media').map((o) => o.name), '用户改的是 media.name').toEqual([
+      '警报声',
+      '解除警报',
+    ])
   })
 })
 

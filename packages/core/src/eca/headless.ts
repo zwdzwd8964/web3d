@@ -298,6 +298,23 @@ export class HeadlessRuntime implements RuntimeContext {
   isMediaPlaying(id: string): boolean {
     return this.playingMedia.has(id)
   }
+  /**
+   * ADR-0019 · headless cannot observe a clip ending, so it says so by never resolving.
+   *
+   * Racing this against `wait(durationS)` therefore always ends on the clock, which is what
+   * D19 specifies for headless. Rejecting on abort matters: without it a cancelled sequence
+   * would leave this promise attached to the signal for the life of the run.
+   */
+  waitForMediaEnd(_id: string, signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((_resolve, reject) => {
+      if (signal?.aborted === true) {
+        reject(new AbortError())
+        return
+      }
+      signal?.addEventListener('abort', () => reject(new AbortError()), { once: true })
+    })
+  }
+
 
   /** What each playing clip was started with. Read by the parity trace and the tests. */
   mediaState(id: string): { loop: boolean; volume: number } | null {

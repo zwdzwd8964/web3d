@@ -34,10 +34,25 @@ function refExists(index: DocIndex, kind: RefKind, id: string): boolean {
       return index.viewpointById.has(id)
     case 'variable':
       return index.variableById.has(id)
-    default:
-      // Media has no v0 runtime; nothing to verify against.
-      return true
+    case 'media':
+      // v0.5 · media DOES have a runtime now. The `default: return true` left over from v0
+      // meant a rule pointing at a deleted clip reported success and played nothing — the
+      // one outcome B9 exists to prevent, because 「规则跑了但没声音」 sends the user
+      // looking at their speakers.
+      return index.mediaById.has(id)
   }
+}
+
+/**
+ * ECA_SPEC §9.2 B9 · the reference also has to be the right KIND of thing.
+ *
+ * `playMedia` may only point at an audio record (§4.2 I14). A rule aimed at a video or an
+ * image resolves — the id exists — and then plays silence.
+ */
+function refTypeOk(index: DocIndex, ref: { kind: RefKind; id: string; expectType?: string }): boolean {
+  if (ref.expectType === undefined) return true
+  if (ref.kind !== 'media') return true
+  return index.mediaById.get(ref.id)?.type === ref.expectType
 }
 
 interface StepOutcome {
@@ -77,6 +92,13 @@ async function runStep(
     for (const ref of definition.refs(parsed.data)) {
       if (!refExists(options.index, ref.kind, ref.id)) {
         ctx.log('error', `规则「${rule.name}」第 ${order + 1} 步引用了已不存在的${ref.kind}：${ref.id}，该步骤跳过`)
+        return { status: 'skipped' }
+      }
+      if (!refTypeOk(options.index, ref)) {
+        ctx.log(
+          'error',
+          `规则「${rule.name}」第 ${order + 1} 步要的是 ${ref.expectType} 类型的${ref.kind}，${ref.id} 不是，该步骤跳过`,
+        )
         return { status: 'skipped' }
       }
     }

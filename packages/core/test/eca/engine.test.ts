@@ -124,6 +124,74 @@ describe('B9 · a rule pointing at something the user deleted', () => {
     expect(result.status).toBe('completed')
     expect(h.ctx.errors().some((e) => e.message.includes('已不存在'))).toBe(true)
   })
+
+  /**
+   * T-186 · media used to be waved straight through.
+   *
+   * `refExists` carried a `default: return true` from v0, when media had no runtime. So a
+   * rule pointing at a clip the user had deleted reported SUCCESS and played nothing —
+   * the exact outcome B9 exists to prevent, in its worst shape: 「规则跑了但没声音」 sends
+   * the user to check their speakers rather than their rule.
+   */
+  const withMedia = (media: SceneDocument['media']): SceneDocument => {
+    const doc = createGoldenPathDocument()
+    return {
+      ...doc,
+      hotspots: [],
+      animations: [],
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio', name: '警报.wav' }],
+      media,
+      rules: [
+        makeRule({
+          when: { event: 'sceneReady' },
+          then: [
+            { action: 'playMedia', params: { mediaId: 'med_00000001' } },
+            { action: 'mark', params: {} },
+          ],
+        }),
+      ],
+    } as SceneDocument
+  }
+
+  const audio = [
+    { id: 'med_00000001', type: 'audio' as const, assetId: 'ast_med00001', name: '警报声', durationS: 2 },
+  ]
+
+  it('skips a step whose media record was deleted', async () => {
+    const h = harness(withMedia([]), { registry })
+    h.engine.dispatch({ event: 'sceneReady' })
+    await h.settle()
+
+    const result = h.engine.history.at(-1)!
+    expect(result.steps[0]!.status, '引用已删除的媒体，该步骤跳过').toBe('skipped')
+    expect(result.steps[1]!.status, '跳过不是失败，后面的步骤照跑').toBe('ok')
+    // The WORDING matters, not just that something was logged: the type check below skips
+    // a missing record too (`undefined?.type !== 'audio'`), so asserting only "an error
+    // mentioning the id" passed with the existence check deleted. Two guards covering one
+    // guarantee make neither one testable — the same shape T-182 hit.
+    expect(
+      h.ctx.errors().some((e) => e.message.includes('已不存在') && e.message.includes('med_00000001')),
+      '要说的是「不存在」，不是「类型不对」',
+    ).toBe(true)
+  })
+
+  it('skips a step aimed at the wrong TYPE of media record', async () => {
+    // §4.2 I14 · `playMedia` may only point at audio. A video record RESOLVES — the id is
+    // real — and then plays silence, which looks identical to a broken speaker.
+    const h = harness(withMedia([{ ...audio[0]!, type: 'video' }]), { registry })
+    h.engine.dispatch({ event: 'sceneReady' })
+    await h.settle()
+
+    expect(h.engine.history.at(-1)!.steps[0]!.status, 'playMedia 只认音频').toBe('skipped')
+  })
+
+  it('runs the step normally when the record is there and is audio', async () => {
+    const h = harness(withMedia(audio), { registry })
+    h.engine.dispatch({ event: 'sceneReady' })
+    await h.settle()
+
+    expect(h.engine.history.at(-1)!.steps[0]!.status, '正常的引用不许被拦下来').toBe('ok')
+  })
 })
 
 describe('B10 · variable chain depth', () => {

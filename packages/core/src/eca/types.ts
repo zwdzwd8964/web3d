@@ -85,6 +85,21 @@ export interface RuntimeContext {
   /** Stops one clip, or every clip. `'all'` is what leaving preview mode calls (B13). */
   stopMedia(id: string | 'all'): void
   isMediaPlaying(id: string): boolean
+  /**
+   * v0.5 · resolves when the clip actually finishes (ADR-0019).
+   *
+   * The other half of D19's 「以先到者为准」. `durationS` is what the browser reported at
+   * import and can be off by a noticeable margin, so an action that only waits on the clock
+   * either cuts the last second off or leaves the user watching a still frame. Racing this
+   * against `wait(durationS)` takes whichever is right.
+   *
+   * Resolves immediately when nothing is playing — autoplay refused (V3) means there is no
+   * sound to wait for, and a sequence must not stall on silence.
+   *
+   * Headless never resolves it: with no DOM there is no honest way to observe the end, so
+   * the clock always wins there — which is exactly what D19 asks of headless.
+   */
+  waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void>
 
   // ---- animation ----
   /**
