@@ -202,9 +202,9 @@ export function allActions(): ActionDefinition[]
 | `setVariable` | `{ variableId, value: ValueExpr, mode?: 'set'\|'add' }` | 赋值 | 立即，同步触发 `variableChange` |
 | `wait` | `{ ms }` | 等待 | 挂起 `ms` 毫秒（走 `ctx.wait`） |
 | `openLink` | `{ url, target: '_blank'\|'_self' }` | 打开链接 | 立即 |
-| `resetScene` | `{}` | 恢复到文档初始状态（transform / visible / material / 变量默认值 / **灯光参数**） | 立即 |
+| `resetScene` | `{}` | 恢复到文档初始状态（transform / visible / material / 变量默认值 / **灯光参数**），并**停止全部媒体**（`stopMedia('all')`，B13 扩展） | 立即 |
 | `setLight` **（v0.5）** | `{ nodeId, intensity?, color? }` | 改灯光参数（目标节点须为灯节点，否则 skip + error，同 B9） | 立即 |
-| `playMedia` **（v0.5）** | `{ mediaId, await?: false, loop?: false, volume?: 1 }` | 播放媒体 | `await: true` 时按 media 记录的 `durationS` 挂起（走 `ctx.wait`）；**`loop: true` 立即 resolve**（同 D6 边界）；`durationS` 缺失立即 resolve + warn |
+| `playMedia` **（v0.5）** | `{ mediaId, await?: false, loop?: false, volume?: 1 }` | 播放媒体 | `await: true` 时按 media 记录的 `durationS` 挂起（走 `ctx.wait`）；**真实环境同时听 `ended`，先到者为准**（D19，ADR-0019，headless 只走假时钟）；**`loop: true` 立即 resolve**（同 D6 边界）；`durationS` 缺失立即 resolve + warn |
 | `stopMedia` **（v0.5）** | `{ mediaId \| 'all' }` | 停止播放 | 立即 |
 
 `moveCamera` **只能飞到已保存的视点**（技术方案 §1.3 原文限定）。允许填任意坐标等于让用户在规则编辑器里手搓相机，UI 复杂度暴涨且几乎无人用对。

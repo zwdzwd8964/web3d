@@ -531,7 +531,7 @@ export function rebuildForBase(material: Material, base: string): Material {
  *   - uv: two materials tiling one image differently — the last one applied wins, and
  *     「分离材质」 does not separate it, because the material was never what they shared.
  */
-function samplerVariant(slot: TextureSlot, def: MaterialDef): string {
+export function samplerVariant(slot: TextureSlot, def: MaterialDef): string {
   const uv = def.params.uv
   const tiling = uv === undefined ? '1,1|0,0|0' : `${uv.repeat.join(',')}|${uv.offset.join(',')}|${uv.rotationDeg}`
   return `${TEXTURE_SLOT_COLOR_SPACE[slot]}|${tiling}|${slot === 'aoMap' ? 'ao' : ''}`

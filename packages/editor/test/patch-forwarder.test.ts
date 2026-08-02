@@ -111,6 +111,21 @@ describe("createPatchForwarder · the 'assets' judgment", () => {
     expect(kinds(calls)).toEqual(['ensureAssets', 'applyPatch'])
   })
 
+  it('CLEARING a slot (a remove op) takes the same slow path — VRAM reclamation rides on it (T-186)', async () => {
+    // The hop that closed M11: `ensureAssets` ends in the cache's retainOnly sweep, so a
+    // clear only reclaims memory if its remove-op patch reaches the queue path too.
+    // Narrowing the judgment to add/replace ops would reintroduce the leak all-green.
+    const clearPatches: DocumentPatch[] = [{ op: 'remove', path: ['materials', 0, 'params', 'maps', 'map'] }]
+    const { calls, runtime } = makeFakeRuntime()
+    const forward = createPatchForwarder(() => runtime)
+
+    forward(clearPatches, doc, doc)
+
+    expect(calls).toEqual([])
+    await patchesSettled()
+    expect(kinds(calls)).toEqual(['ensureAssets', 'applyPatch'])
+  })
+
   it('frames the camera only when the asset batch actually added nodes', async () => {
     const grew = makeFakeRuntime()
     const forwardGrew = createPatchForwarder(() => grew.runtime)

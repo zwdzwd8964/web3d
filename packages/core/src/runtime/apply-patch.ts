@@ -231,13 +231,24 @@ export class PatchApplier {
         return true
       case 'locked':
         return true
-      case 'primitive':
+      case 'primitive': {
         // Covers `/primitive` wholesale and `/primitive/size/1`: the carrier is re-read
         // either way, and the factory decides whether that is an in-place update.
-        return graph.setPrimitive(node.id, node)
+        if (!graph.setPrimitive(node.id, node)) return false
+        // A KIND change replaced the Object3D, and a fresh mesh carries three's defaults:
+        // castShadow false, the factory's neutral grey. Re-apply what the document says
+        // about this node's surface — without this, switching 盒子 to 球 silently dropped
+        // the shadow and the material override until the next full load (T-186，T-185 的
+        // 快照扩展审查所得). Same-kind updates keep the mesh, so this is a cheap no-op.
+        this.targets.applyNodeShadow?.(next, node.id)
+        materials.applyToNode(node.id, node.overrides.materialId ?? null, new Map(next.materials.map((m) => [m.id, m])), graph)
+        return true
+      }
       case 'light':
         // Same, and it is the path that carries `/light/shadow/bias` and
-        // `/light/intensity` — every `setLight` action and every slider drag.
+        // `/light/intensity` — every `setLight` action and every slider drag. A light
+        // kind change also replaces the object, but the factory rebuilds it FROM the
+        // definition, so there is no default-flag drift to repair here.
         return graph.setLight(node.id, node)
       case 'overrides': {
         if (sub === 'castShadow' || sub === 'receiveShadow') {

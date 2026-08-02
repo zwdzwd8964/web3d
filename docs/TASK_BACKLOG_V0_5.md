@@ -830,10 +830,40 @@ T-176 修了 6 条、登记了其余。这一节把登记项立成卡逐条清�
   三组：伪造第七种 → 2 红；删 `valueExpr` → 守卫红；把 `vec3` 加回去 → vitest 与 tsc
   **两层各自红**。
 
-### [ ] T-186 · minor 收口
+### [x] T-186 · minor 收口
 - **独占** 见各条
 - **做** D19「先到者为准」实际只等 `durationS`（`waitForEnd` 零生产调用者）；规则编辑器媒体下拉显示文件名而非 `media.name`；`resetScene` 的 `describe()` 未随 v0.5 更新；executor 的 B9 对 media 直接放行；清空贴图槽位不释放显存（M11 登记）。
 - **验收** 逐条测试
+- **实际** 1.8h
+- **实际情况**：
+  ① D19 竞速：`SceneRuntime` 增 `waitMediaEnd`（不进冻结的 `RuntimeContext`），`playMedia`
+  的 handler **结构探测**它并与 `ctx.wait(durationS)` 竞速，两半同挂一个内层
+  AbortController（铁律 10）；headless 与「没真开播」的剪辑（自动播放被拒）照旧只等时长
+  ——`isMediaPlaying` 守卫是承重的，`waitForEnd` 对没在播的剪辑立即 resolve，不守就等于
+  跳过等待。取舍见 [ADR-0019](adr/0019-playMedia-竞速探测-waitMediaEnd.md)。4 条动作
+  单测（假时钟）+ 2 条真 SceneRuntime 集成测试（`.finish()` 缝），6 组变异全红，其中
+  「删掉 `waitMediaEnd`」只红集成测试不红单测——证明集成测试钉的是接线不是逻辑。
+  ② 媒体下拉：标签从资产文件名改为 `media.name`（媒体面板改名后两处显示才一致），
+  连同那句「media 记录没有自己的显示名」的假注释一起改掉——v2 起 `name` 是必填字段。
+  ③ `resetScene` describe 补齐 v0.5 行为（停全部媒体 + 灯光还原），同步补 ECA_SPEC
+  §5 表的 resetScene 行（T-163 声明过的回写漏了这一格）。旧的弱正则
+  `/恢复到文档初始状态/` 对过时文案照绿——这正是它活下来的原因，已强化。
+  ④ B9 对 media：修在 **executor 的通用 `refExists`**，一行 `case 'media'`，顺带删掉
+  「media 没有 v0 运行时」的过时 default——从此七种 RefKind 全覆盖且 switch 可穷尽。
+  这一行碰了禁改文件，**裁决理由与上报记录见 [ADR-0020](adr/0020-B9-对-media-在-executor-补全.md)**
+  （通用引用机制补全 ≠ 动作知识渗入；缺陷登记原文就在 executor；B9 的 `skipped` 语义
+  必须字面成立）。engine 级测试两条：悬空 media 引用 skip + error、`stopMedia('all')`
+  永不触发守卫。
+  ⑤ M11 复查发现**登记前提已不成立**：登记它的同一个提交（759734e）把清槽位的 remove
+  补丁也送进了 `ensureAssets`，基础纹理自那时起就会被回收，登记从未回头更正。真正残留
+  的是**变体泄漏**——资产还被别的材质用着时，被清槽位的 (资产,采样态) 克隆永远无人清扫。
+  已修：`retainOnly` 按 (资产,采样态) 需求清扫变体（`samplerVariant` 导出复用，运行时
+  依赖单向无环），另补一条「remove 补丁必须走慢路」的转发器回归测试——收窄判断条件就会
+  无声复活泄漏，这条测试挡住它。
+  **清偿期间又照出四条**（登记于 IMPL_NOTES §4「E18 清偿期间新发现」）：换承载体类型丢
+  阴影标志与材质覆盖（**已修**，apply-patch 的 primitive 路由重放表面状态 + 端到端回归）、
+  材质继承漂移（已在 T-185 修）、整条材质记录替换绕过 maps 判断（登记，现 UI 不可达）、
+  `stopMedia` 不 settle 等待者与 `resetScene` 相机两侧不一致（登记，先裁决语义再动手）。
 
 ---
 

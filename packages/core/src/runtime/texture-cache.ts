@@ -2,6 +2,11 @@ import type { Asset, SceneDocument } from '@w3/schema'
 import { Texture } from 'three'
 import type { LogLevel } from '../eca/types.js'
 import type { AssetResolver } from './types.js'
+// Runtime import in ONE direction only: material-registry's own import of this module is
+// type-only (TextureSource), so no cycle exists at runtime. The key builder stays next to
+// the slot semantics it encodes; this module owns the map the keys index.
+import { samplerVariant } from './material-registry.js'
+import type { TextureSlot } from './material-registry.js'
 
 /**
  * T-151 · one Texture per texture ASSET, shared by every material that references it.
@@ -163,18 +168,25 @@ export class TextureCache implements TextureSource {
   /**
    * Drops textures no material references any more.
    *
-   * Called from `ensure`, and therefore only when the host has a reason to await something:
-   * an asset arriving, or a material starting to reference a texture. CLEARING a slot does
-   * neither, so the bytes stay resident until the next import or the next `load` (M11 —
-   * registered rather than fixed, because freeing them eagerly would mean making the
-   * synchronous patch path await, which is what D1 exists to avoid).
+   * Called from `ensure`. M11 originally registered "clearing a slot never reclaims" —
+   * that closed itself when the patch forwarder started routing EVERY maps patch
+   * (including the remove of a clear) through `ensureAssets`, so a clear does reach this
+   * sweep. What stayed leaked until T-186 was the VARIANT of a retained asset: the old
+   * sweep only ran inside the dropped-asset branch, so clearing one slot while another
+   * material kept the asset stranded that slot's per-(asset, sampler-state) clone — and
+   * with a distinct colorSpace or wrap, that is a real extra GL texture. Variants are now
+   * kept by (asset, sampler-state) demand. A uv tweak alone takes the fast patch path
+   * (no ensure), so its orphaned variant lingers until the next ensure — bounded by the
+   * number of distinct settings, and reclaimed instead of immortal.
    */
   private retainOnly(wanted: ReadonlySet<string>, doc: SceneDocument): void {
     const counts = new Map<string, number>()
+    const wantedVariants = new Set<string>()
     for (const material of doc.materials) {
-      for (const assetId of Object.values(material.params.maps)) {
+      for (const [slot, assetId] of Object.entries(material.params.maps)) {
         if (typeof assetId !== 'string') continue
         counts.set(assetId, (counts.get(assetId) ?? 0) + 1)
+        wantedVariants.add(`${assetId}::${samplerVariant(slot as TextureSlot, material)}`)
       }
     }
 
@@ -183,11 +195,11 @@ export class TextureCache implements TextureSource {
       if (wanted.has(assetId)) continue
       entry.texture.dispose()
       this.entries.delete(assetId)
-      for (const [key, variant] of [...this.variants]) {
-        if (!key.startsWith(`${assetId}::`)) continue
-        variant.dispose()
-        this.variants.delete(key)
-      }
+    }
+    for (const [key, variant] of [...this.variants]) {
+      if (wantedVariants.has(key)) continue
+      variant.dispose()
+      this.variants.delete(key)
     }
   }
 

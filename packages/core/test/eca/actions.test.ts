@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { ActionRegistry, BUILTIN_ACTIONS, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { HeadlessRuntime } from '../../src/eca/headless.js'
 import type { ActionDefinition, RuntimeEvent } from '../../src/eca/types.js'
-import { FIELD_KINDS } from '../../src/eca/types.js'
+import { AbortError, FIELD_KINDS } from '../../src/eca/types.js'
 import { IDS } from '../helpers.js'
 
 /**
@@ -351,7 +351,9 @@ describe('describe() produces the acceptance-case wording (R14)', () => {
       ['openPanel', { hotspotId: IDS.hotspot }, /热点「拆卸提示」/],
       ['setVariable', { variableId: 'step', value: { const: 2 } }, /变量「当前步骤」为 2/],
       ['wait', { ms: 500 }, /等待 500 毫秒/],
-      ['resetScene', {}, /恢复到文档初始状态/],
+      // T-186 · the weak pattern /恢复到文档初始状态/ passed for the stale v0 text too —
+      // the strengthened one pins the two v0.5 deltas (media stop, light restore).
+      ['resetScene', {}, /停止全部媒体.*灯光.*恢复到文档初始状态/],
     ]
     for (const [type, params, pattern] of cases) {
       const definition = registry.get(type)!
@@ -422,6 +424,86 @@ describe('media actions (v0.5 · T-163)', () => {
     await ctx.clock.advance(1)
     await Promise.resolve()
     expect(settled, '2 秒到了就该继续').toBe(true)
+  })
+
+  it('resolves as soon as the clip actually ends — 先到者为准 (D19 · T-186)', async () => {
+    // The real runtime exposes `waitMediaEnd`; the action races it against durationS.
+    // Before T-186 the race did not exist: `waitForEnd` had zero production callers and
+    // a clip that ended early kept the rule chain waiting out the full recording.
+    let endClip: (() => void) | undefined
+    const seen: { signal?: AbortSignal } = {}
+    Object.assign(ctx, {
+      waitMediaEnd: (_id: string, signal?: AbortSignal) =>
+        new Promise<void>((resolve) => {
+          seen.signal = signal
+          endClip = resolve
+        }),
+    })
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => void (settled = true))
+
+    await ctx.clock.advance(500)
+    expect(settled, '还没播完也没到时长，不该结束').toBe(false)
+    endClip!()
+    // On regression (no race wired) this await hangs on a clock nobody advances and the
+    // test times out red; the clock assertion below is the "did not wait it out" proof.
+    await Promise.resolve(done)
+    expect(ctx.now(), '真实结束先到，就不等录制时长').toBeLessThan(2000)
+    expect(seen.signal, '竞速的两半都要能被中止（铁律 10）').toBeDefined()
+  })
+
+  it('durationS still wins when the clip never reports an end (D19 · T-186)', async () => {
+    Object.assign(ctx, {
+      waitMediaEnd: () => new Promise<void>(() => undefined),
+    })
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => void (settled = true))
+
+    await ctx.clock.advance(1999)
+    expect(settled).toBe(false)
+    await ctx.clock.advance(1)
+    await Promise.resolve(done)
+    expect(ctx.now(), '时长先到也算先到者').toBe(2000)
+  })
+
+  it('a clip that never actually started falls back to the plain durationS wait (T-186)', async () => {
+    // Autoplay refusal / no element factory: `waitForEnd` would resolve immediately for
+    // a non-playing clip, so racing it would skip the wait entirely. The isMediaPlaying
+    // guard keeps today's behavior for exactly those clips.
+    Object.assign(ctx, {
+      waitMediaEnd: () => Promise.resolve(),
+      isMediaPlaying: () => false,
+    })
+    const { done } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => void (settled = true))
+
+    await ctx.clock.advance(1)
+    await Promise.resolve()
+    expect(settled, '没真开播的剪辑仍按录制时长等待').toBe(false)
+    await ctx.clock.advance(1999)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+  })
+
+  it('aborting the rule aborts both halves of the race (铁律 10 · T-186)', async () => {
+    const seen: { aborted?: boolean } = {}
+    Object.assign(ctx, {
+      waitMediaEnd: (_id: string, signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            seen.aborted = true
+            reject(new AbortError())
+          })
+        }),
+    })
+    const { done, controller } = await run('playMedia', { mediaId: MEDIA_ID, await: true })
+    await ctx.clock.advance(100)
+    controller.abort()
+    await expect(Promise.resolve(done)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(seen.aborted, '外层中止必须传到真实结束的那一半').toBe(true)
   })
 
   it('a LOOPING clip resolves immediately even with await: true (D6 边界，必测)', async () => {

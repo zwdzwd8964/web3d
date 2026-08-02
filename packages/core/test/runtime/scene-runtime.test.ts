@@ -1,7 +1,7 @@
 import type { Light, NodeOverrides, SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument, identityTransform } from '@w3/schema'
 import { PCFSoftShadowMap } from 'three'
-import type { SpotLight } from 'three'
+import type { Mesh, MeshStandardMaterial, SpotLight } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionRegistry, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { EcaEngine } from '../../src/eca/engine.js'
@@ -10,7 +10,7 @@ import { NullHotspotRenderer } from '../../src/runtime/hotspot-layer.js'
 import { SceneRuntime } from '../../src/runtime/scene-runtime.js'
 import type { LogLevel } from '../../src/eca/types.js'
 import { describeRuntimeContract } from '../runtime-contract.js'
-import { IDS } from '../helpers.js'
+import { IDS, makeRule } from '../helpers.js'
 import { buildPumpGlb } from '../assets/glb.js'
 
 /**
@@ -234,6 +234,127 @@ describe('composition and lifecycle', () => {
     expect(runtime.loader.size).toBe(1)
     // 泵体 maps to Root/Pump/Body, which the fixture GLB really contains.
     expect(runtime.graph.isPlaceholder(IDS.body)).toBe(false)
+    runtime.dispose()
+  })
+})
+
+describe('a carrier KIND change keeps the node’s surface (T-186 · T-185 审查所得)', () => {
+  it('box → sphere: the replacement mesh keeps castShadow and the material override', async () => {
+    // `replaceObject` builds a fresh mesh, and a fresh mesh carries three's defaults —
+    // castShadow false, the factory's neutral grey. Before the fix, switching a
+    // primitive's kind silently dropped its shadow and its material until the next full
+    // load, while every panel showed the right values.
+    const doc = createGoldenPathDocument()
+    const template = doc.nodes[0]!
+    const withCarriers: SceneDocument = {
+      ...doc,
+      materials: [
+        ...doc.materials,
+        { id: 'mat_deftest1', name: '默认材质', base: 'standard', preset: 'custom', params: { color: '#b8bec4', roughness: 0.8, metalness: 0, maps: {} } },
+      ],
+      nodes: [
+        ...doc.nodes,
+        { ...template, id: 'nd_pr000000', name: '展台', parent: null, order: 9000, assetRef: null, primitive: { kind: 'box', size: [1, 1, 1] }, light: null, overrides: { materialId: 'mat_deftest1' } },
+        { ...template, id: 'nd_li000000', name: '聚光灯', parent: null, order: 10000, assetRef: null, primitive: null, light: { kind: 'spot', color: '#ffffff', intensity: 2, range: 0, decay: 2, angleDeg: 30, penumbra: 0.2, shadow: { enabled: true, quality: 'medium', bias: -0.0005 } } },
+      ],
+    } as SceneDocument
+    const { runtime } = makeRuntime(withCarriers)
+    await runtime.load(withCarriers)
+
+    const mesh = () => runtime.graph.objectFor('nd_pr000000') as Mesh
+    expect(mesh().castShadow, '前提：阴影管线开着').toBe(true)
+    expect((mesh().material as MeshStandardMaterial).color.getHexString(), '前提：材质覆盖生效').toBe('b8bec4')
+
+    const next: SceneDocument = {
+      ...withCarriers,
+      nodes: withCarriers.nodes.map((n) =>
+        n.id === 'nd_pr000000' ? { ...n, primitive: { kind: 'sphere' as const, radius: 0.5 } } : n,
+      ),
+    }
+    runtime.applyPatch(
+      [{ op: 'replace', path: ['nodes', 3, 'primitive'], value: { kind: 'sphere', radius: 0.5 } }],
+      next,
+      withCarriers,
+    )
+
+    expect(runtime.fullRebuildCount).toBe(0)
+    expect(mesh().geometry.type).toBe('SphereGeometry')
+    expect(mesh().castShadow, '换类型后投影标志必须还在').toBe(true)
+    expect((mesh().material as MeshStandardMaterial).color.getHexString(), '换类型后材质覆盖必须还在').toBe('b8bec4')
+    runtime.dispose()
+  })
+})
+
+describe('D19 · playMedia races the real end against durationS (T-186)', () => {
+  const mediaRuntime = (durationS: number) => {
+    clock = 0
+    const doc = createGoldenPathDocument()
+    const withMedia: SceneDocument = {
+      ...doc,
+      assets: [...doc.assets, { ...doc.assets[0]!, id: 'ast_med00001', type: 'audio', name: '讲解.mp3' }],
+      media: [{ id: 'med_00000001', type: 'audio', assetId: 'ast_med00001', name: '讲解', durationS }],
+      hotspots: doc.hotspots,
+      rules: [
+        makeRule({
+          when: { event: 'sceneReady' },
+          then: [
+            { action: 'playMedia', params: { mediaId: 'med_00000001', await: true } },
+            { action: 'openPanel', params: { hotspotId: doc.hotspots[0]!.id } },
+          ],
+        }),
+      ],
+    } as SceneDocument
+    const elements: ReturnType<typeof fakeMediaElement>[] = []
+    const runtime = new SceneRuntime(withMedia, {
+      canvas: canvas(),
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      mode: 'play',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      createMediaElement: () => {
+        const element = fakeMediaElement()
+        elements.push(element)
+        return element
+      },
+      now: () => clock,
+    })
+    const registry = registerBuiltinActions(new ActionRegistry())
+    const engine = new EcaEngine(runtime, { registry })
+    engine.attach(withMedia)
+    engine.setEnabled(true)
+    return { runtime, engine, elements, hotspotId: doc.hotspots[0]!.id }
+  }
+
+  it('the real ended event releases the chain without waiting out the recording', async () => {
+    const { runtime, engine, elements, hotspotId } = mediaRuntime(2)
+    engine.dispatch({ event: 'sceneReady' })
+    await flush()
+
+    expect(runtime.isMediaPlaying('med_00000001'), '前提：剪辑真的开播了').toBe(true)
+    expect(runtime.isPanelOpen(hotspotId), '等待播完期间面板不能开').toBe(false)
+
+    elements[0]!.finish()
+    await flush()
+
+    // The clock never moved: only the real 'ended' event can have released the chain.
+    expect(runtime.isPanelOpen(hotspotId), '真实结束先到，链条立刻继续').toBe(true)
+    expect(engine.history.at(-1)?.status).toBe('completed')
+    engine.detach()
+    runtime.dispose()
+  })
+
+  it('durationS still bounds a clip that never fires ended', async () => {
+    const { runtime, engine, hotspotId } = mediaRuntime(2)
+    engine.dispatch({ event: 'sceneReady' })
+    await flush()
+    expect(runtime.isPanelOpen(hotspotId)).toBe(false)
+
+    advanceClock(2000)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flush()
+
+    expect(runtime.isPanelOpen(hotspotId), '录制时长到了，链条也要继续').toBe(true)
+    engine.detach()
     runtime.dispose()
   })
 })
