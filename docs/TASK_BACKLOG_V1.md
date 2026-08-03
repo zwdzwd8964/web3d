@@ -290,8 +290,15 @@
   ④ 64 MB 往返只比长度 → **把返回值改成全零字节必须红**（`toHaveLength` 对全零数组同样成立）。
 - ⚠ **cross-check X-26**：blocker，不是排期问题。
 
-### [ ] T-203 ★ · `ref-kinds.ts` 注册表：`refExists` / `refOptions` 从 `executor.ts` 外迁
-- **依赖** 无 · **预估** 1.2d · **实际** —
+### [x] T-203 ★ · `ref-kinds.ts` 注册表：`refExists` / `refOptions` 从 `executor.ts` 外迁
+- **依赖** 无 · **预估** 1.2d · **实际** 0.8h
+- **⑥ 的守卫比卡面多了一步**：卡面给的 `case` 正则**结构上永不可能匹配**——
+  `check-core-purity.mjs` 用的 `stripCommentsAndStrings` 会把字符串内容清空只留引号，
+  `case 'step'` 到达正则时已经是 `case '    '`。补了一个「只去注释、保留字符串」的扫描面
+  （`stripCommentsOnly`）后才真的生效。**这是探针跑出来的，不是读正则读出来的**：
+  同一个探针在旧扫描面上只报 1 条（switch 那条），补完报 2 条。
+  不做这一步，这条守卫从加上那天起就是装饰品，而 T-302 的关键变异会是绿的。
+- `executor.ts` 本卡 diff：**一处 import + 删掉两个函数**，零 switch，调用点一字未动。
 - **独占** `packages/core/src/eca/ref-kinds.ts`（新）· `packages/core/src/eca/executor.ts` ·
   `packages/core/src/eca/types.ts`（`RefKind` 段）· `packages/editor/src/rule-editor/ActionFields.tsx`（`refOptions`）·
   `packages/core/test/eca/ref-kinds.test.ts`（新）· **`scripts/check-core-purity.mjs`（`EXECUTOR_SMELLS` 两条新正则）**·

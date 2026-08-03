@@ -1,7 +1,8 @@
 import type { Action, DocIndex, Rule } from '@w3/schema'
 import type { ActionRegistry } from './actions/registry.js'
 import { defaultRegistry } from './actions/registry.js'
-import type { ExecResult, ExecStep, RefKind, RuntimeContext, RuntimeEvent, StepStatus } from './types.js'
+import { refExists, refTypeOk } from './ref-kinds.js'
+import type { ExecResult, ExecStep, RuntimeContext, RuntimeEvent, StepStatus } from './types.js'
 import { isAbortError } from './types.js'
 
 /**
@@ -18,41 +19,6 @@ export interface ExecuteOptions {
   readonly registry?: ActionRegistry
   /** Used to check that an action's references still resolve (ECA_SPEC §9.2 B9). */
   readonly index?: DocIndex
-}
-
-function refExists(index: DocIndex, kind: RefKind, id: string): boolean {
-  switch (kind) {
-    case 'node':
-      return index.nodeById.has(id)
-    case 'material':
-      return index.materialById.has(id)
-    case 'animation':
-      return index.animationById.has(id)
-    case 'hotspot':
-      return index.hotspotById.has(id)
-    case 'viewpoint':
-      return index.viewpointById.has(id)
-    case 'variable':
-      return index.variableById.has(id)
-    case 'media':
-      // v0.5 · media DOES have a runtime now. The `default: return true` left over from v0
-      // meant a rule pointing at a deleted clip reported success and played nothing — the
-      // one outcome B9 exists to prevent, because 「规则跑了但没声音」 sends the user
-      // looking at their speakers.
-      return index.mediaById.has(id)
-  }
-}
-
-/**
- * ECA_SPEC §9.2 B9 · the reference also has to be the right KIND of thing.
- *
- * `playMedia` may only point at an audio record (§4.2 I14). A rule aimed at a video or an
- * image resolves — the id exists — and then plays silence.
- */
-function refTypeOk(index: DocIndex, ref: { kind: RefKind; id: string; expectType?: string }): boolean {
-  if (ref.expectType === undefined) return true
-  if (ref.kind !== 'media') return true
-  return index.mediaById.get(ref.id)?.type === ref.expectType
 }
 
 interface StepOutcome {

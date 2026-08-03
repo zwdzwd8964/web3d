@@ -125,10 +125,50 @@ const EXECUTOR_SMELLS = [
   [/\bswitch\s*\(\s*[\w.]*\.\s*(action|type|kind)\s*\)/, 'switch on a step discriminant — dispatch through the action registry instead'],
   [/\.\s*(action|type|kind)\s*===\s*['"]/, 'literal comparison against a step discriminant — dispatch through the action registry instead'],
 ]
+
+/**
+ * T-203 / ADR-0028 · two more, and ONLY for `executor.ts`.
+ *
+ * Both rules above require a `.` before the discriminant. `executor.ts:24` was a bare
+ * `switch (kind)` — so the C5 executor-must-not-branch guard was blind to the one real
+ * switch this repository's executor actually had. It was, in other words, passing on the
+ * exact shape it exists to catch.
+ *
+ * Scoped to `executor.ts` rather than the whole ECA directory on purpose: `ref-kinds.ts` and
+ * the files under `actions/` branch on kind legitimately, and a rule that shouts at them
+ * gets suppressed, at which point it protects nothing. Narrow and accurate beats broad and
+ * noisy — that trade-off is written down in ADR-0028's cost 3.
+ *
+ * The `case` list carries v1.2 / v1.5 kinds (`flow` / `step` / `page` / `dataSource`) that do
+ * not exist yet. That is deliberate: T-302's key mutation is "hand-write a `case 'step'` in
+ * executor.ts and watch the guard go red", and a guard added after the fact would be a guard
+ * nobody ever saw fail.
+ */
+const EXECUTOR_ONLY_SMELLS = [
+  [/\bswitch\s*\(/, 'any switch in executor.ts — the reference registry (ref-kinds.ts) owns per-kind knowledge (ADR-0028)'],
+  [
+    /\bcase\s+['"](node|material|animation|hotspot|viewpoint|variable|media|flow|step|page|dataSource)['"]/,
+    'a per-kind case in executor.ts — add a row to REF_KINDS instead (ADR-0028)',
+    // Needs the string CONTENTS. `stripCommentsAndStrings` blanks them (keeping only the
+    // quotes), so against that input this pattern can never match a single character of the
+    // thing it names — the guard would have been decorative from the day it was added. Found
+    // by running the probe the card asks for rather than by reading the regex.
+    'keep-strings',
+  ],
+]
+
+/** Comments out, string contents kept. Line numbers preserved. */
+function stripCommentsOnly(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))
+}
+
 for (const file of ecaFiles.filter((f) => /executor|dispatch/i.test(f))) {
-  const stripped = stripCommentsAndStrings(readFileSync(file, 'utf8'))
-  for (const [re, why] of EXECUTOR_SMELLS) {
-    for (const hit of matchLines(stripped, re)) {
+  const source = readFileSync(file, 'utf8')
+  const stripped = stripCommentsAndStrings(source)
+  const withStrings = stripCommentsOnly(source)
+  const rules = /executor\.ts$/.test(file) ? [...EXECUTOR_SMELLS, ...EXECUTOR_ONLY_SMELLS] : EXECUTOR_SMELLS
+  for (const [re, why, mode] of rules) {
+    for (const hit of matchLines(mode === 'keep-strings' ? withStrings : stripped, re)) {
       report.add(file, hit.line, `C5/A3: ${why}`)
     }
   }

@@ -1,3 +1,4 @@
+import { refOptions as coreRefOptions } from '@w3/core'
 import type { FieldDescriptor, RefKind } from '@w3/core'
 import type { SceneDocument, ValueExpr } from '@w3/schema'
 import { NODE_PROP_KEYS } from '@w3/schema'
@@ -252,26 +253,18 @@ function ValueExprInput({
   )
 }
 
-/** The document's entities of one ref kind, as `{id, name}` for a dropdown. */
+/**
+ * The document's entities of one ref kind, as `{id, name}` for a dropdown.
+ *
+ * T-203 · delegates to `@w3/core`'s `REF_KINDS`. It used to be a second exhaustive
+ * `switch (kind)` — the twin of the one in `executor.ts` — so adding a reference kind meant
+ * editing both of the files ECA_SPEC §10 forbids touching, which made a two-line change a
+ * 分诊 Q4. See ADR-0028.
+ *
+ * Kept as a named export rather than inlining `refOptions(doc, kind)` at the call site: it
+ * is what the rule-editor tests drive, and the indirection is where the editor's contract
+ * with core is stated.
+ */
 export function refOptions(doc: SceneDocument, kind: RefKind): { id: string; name: string }[] {
-  switch (kind) {
-    case 'node':
-      return doc.nodes.map((n) => ({ id: n.id, name: n.name }))
-    case 'material':
-      return doc.materials.map((m) => ({ id: m.id, name: m.name }))
-    case 'animation':
-      return doc.animations.map((a) => ({ id: a.id, name: a.name }))
-    case 'hotspot':
-      return doc.hotspots.map((h) => ({ id: h.id, name: h.name }))
-    case 'viewpoint':
-      return doc.viewpoints.map((v) => ({ id: v.id, name: v.name }))
-    case 'variable':
-      return doc.variables.map((v) => ({ id: v.id, name: `${v.name}（${v.id}）` }))
-    case 'media':
-      // The record's OWN name (SCHEMA_SPEC §6.8), which defaults to the filename at import
-      // and is what the user renames in the media panel. Reading the asset's name instead
-      // meant the rule editor kept showing `alarm.wav` after they renamed it 「警报声」,
-      // and two clips cut from one file were indistinguishable in the dropdown.
-      return doc.media.map((m) => ({ id: m.id, name: m.name }))
-  }
+  return coreRefOptions(doc, kind)
 }
