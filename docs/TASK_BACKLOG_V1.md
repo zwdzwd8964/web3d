@@ -252,8 +252,16 @@
 - ⚠ **这是 T-225（schema v3）的前置**：不先建，T-225 那三条 blocker 会以五个新集合的面积复发。
   本卡不依赖 v3，清的是 v0.5 就存在的债。
 
-### [ ] T-202 ★ · IndexedDB 版本阶梯：四类 store 一次建齐
-- **依赖** 无 · **预估** 1.5d · **实际** —
+### [x] T-202 ★ · IndexedDB 版本阶梯：四类 store 一次建齐
+- **依赖** 无 · **预估** 1.5d · **实际** 1.0h
+- **交付偏差**：⑥ 的落点是新增 `e2e/tests/storage-reset.ts`（`resetStorage(page, sessionKey)`）
+  而不是六个 spec 各自 import `DB_NAME`——六处各写一遍等于把「一个常量」换成「一个常量 +
+  六份相同的 addInitScript 样板」。`e2e/package.json` 因此新增 `@w3/storage: workspace:*`
+  （工作区链接，不是新第三方依赖）。
+- ④ 的 IndexedDb 侧**没有**给 provider 加 `maxBytes` 选项：那会是一条零生产调用者的
+  公开 API（T-205 要抓的正是这个形状）。改为在测试里给 `IDBObjectStore.prototype.put`
+  注入一个浏览器真实形状的 `QuotaExceededError`，跑的是 `mapWriteError` 的真实识别路径。
+  `MemoryProvider` 的 `maxBytes` 按卡面保留。
 - **独占** `packages/storage/src/idb-provider.ts` · `packages/storage/src/provider.ts`（配额码与常量段）·
   `packages/storage/src/memory-provider.ts` · `packages/storage/test/contract.ts` ·
   `packages/storage/test/idb-upgrade.test.ts`（新）· `docs/adr/0027-indexeddb-版本阶梯.md`（新）

@@ -2,6 +2,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { expect, it } from 'vitest'
 import { hashBytes } from '../src/hash.js'
+import { StorageError } from '../src/provider.js'
 import type { Snapshot, StorageProvider } from '../src/provider.js'
 
 /**
@@ -20,7 +21,25 @@ function docNamed(name: string, projectId: string, updatedAt: string): SceneDocu
   return { ...doc, projectId, name, meta: { ...doc.meta, updatedAt } }
 }
 
-export function describeProviderContract(label: string, makeProvider: () => Promise<StorageProvider> | StorageProvider) {
+/** Per-provider hooks for the parts of the contract only that provider can set up. */
+export interface ProviderContractOptions {
+  /**
+   * Builds a provider that will reject the NEXT blob write with `quota-exceeded`.
+   *
+   * Running out of space is the one storage failure a user can act on, and it is the one
+   * this product hits first — but only `IndexedDbProvider` can produce it naturally, and a
+   * Map never can. Without this hook the promise could only be asserted on one side, which
+   * is how two implementations of one interface end up meaning different things by the same
+   * error. `done()` undoes whatever the factory did to arrange it.
+   */
+  readonly makeFull?: () => Promise<{ provider: StorageProvider; done: () => void }>
+}
+
+export function describeProviderContract(
+  label: string,
+  makeProvider: () => Promise<StorageProvider> | StorageProvider,
+  options: ProviderContractOptions = {},
+) {
   const withProvider = async (body: (p: StorageProvider) => Promise<void>) => {
     const provider = await makeProvider()
     try {
@@ -163,6 +182,70 @@ export function describeProviderContract(label: string, makeProvider: () => Prom
     await provider.close()
     await expect(provider.close()).resolves.toBeUndefined()
   })
+
+  /**
+   * T-202 · a 64 MB asset survives the round trip byte for byte.
+   *
+   * The size is the point: one 4K PBR texture set or a short video lands here, and this is
+   * the first test in the repository that stores anything above a few kilobytes. Structured
+   * cloning, `slice()`, and IndexedDB's own value serialisation all get exercised at a size
+   * where a copy that quietly truncates or re-allocates actually shows up.
+   *
+   * Verified through the content hash, not through `toHaveLength`. That is deliberate:
+   * `toHaveLength` is also satisfied by 64 MB of zeroes, which is precisely the failure a
+   * broken copy produces.
+   */
+  it(`${label}: round-trips a 64 MB blob byte for byte`, async () => {
+    await withProvider(async (p) => {
+      const bytes = patternedBytes(64 * 1024 * 1024)
+      const hash = await p.putBlob(bytes)
+      const got = await p.getBlob(hash)
+
+      expect(got).not.toBeUndefined()
+      expect(got?.byteLength).toBe(bytes.byteLength)
+      // Bit equality. A hash mismatch is the only thing that distinguishes "the same bytes"
+      // from "the right number of bytes".
+      expect(await hashBytes(got!)).toBe(hash)
+      // Both ends of the buffer, so a truncation that happens to hash-collide is still caught
+      // by something a human can read in the failure output.
+      expect(got![0]).toBe(bytes[0])
+      expect(got![bytes.byteLength - 1]).toBe(bytes[bytes.byteLength - 1])
+    })
+  })
+
+  if (options.makeFull) {
+    const makeFull = options.makeFull
+    it(`${label}: reports a full store as quota-exceeded, in Chinese`, async () => {
+      const { provider, done } = await makeFull()
+      try {
+        const error = await provider.putBlob(patternedBytes(4096)).then(
+          () => null,
+          (cause: unknown) => cause,
+        )
+        expect(error).toBeInstanceOf(StorageError)
+        expect((error as StorageError).code).toBe('quota-exceeded')
+        // Asserted to the wording, not to "it threw". Two guards reporting the same failure
+        // with different messages is how one of them silently stops mattering (E18 教训 1).
+        expect((error as StorageError).message).toContain('存储空间不足')
+      } finally {
+        done()
+        await provider.close()
+      }
+    })
+  }
+}
+
+/**
+ * `size` bytes whose value depends on their index.
+ *
+ * Not `new Uint8Array(size)`: an all-zero buffer is indistinguishable from a copy that
+ * allocated the right length and never filled it, and that is exactly the bug worth
+ * catching at 64 MB.
+ */
+function patternedBytes(size: number): Uint8Array {
+  const bytes = new Uint8Array(size)
+  for (let i = 0; i < size; i++) bytes[i] = (i * 31 + (i >> 13)) & 0xff
+  return bytes
 }
 
 function snapshotOf(document: SceneDocument, snapshotId: string, publishedAt = '2026-05-01T00:00:00.000Z'): Snapshot {

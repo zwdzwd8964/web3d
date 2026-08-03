@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildTestGlb } from '../fixtures/glb.js'
+import { resetStorage } from './storage-reset.js'
 
 /**
  * T-112 · G0-1 · MVP_V0 §2's twelve steps, in order, in one run.
@@ -97,11 +98,7 @@ async function colourBuckets(page: Page, selector = 'canvas'): Promise<number> {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('w3-e2e-full-cleaned')) return
-    sessionStorage.setItem('w3-e2e-full-cleaned', '1')
-    void indexedDB.deleteDatabase('w3-editor')
-  })
+  await resetStorage(page, 'w3-e2e-full-cleaned')
   page.on('console', (m) => {
     if (m.type() === 'error') console.log(`[browser error] ${m.text()}`)
   })

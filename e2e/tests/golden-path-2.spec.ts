@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { buildTestGlb } from '../fixtures/glb.js'
+import { resetStorage } from './storage-reset.js'
 
 /**
  * 黄金路径 II · 进化规划 §2 · the definition of v0.5.
@@ -52,11 +53,7 @@ const ALARM_SECONDS = 1.5
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('w3-gp2-cleaned')) return
-    sessionStorage.setItem('w3-gp2-cleaned', '1')
-    void indexedDB.deleteDatabase('w3-editor')
-  })
+  await resetStorage(page, 'w3-gp2-cleaned')
   page.on('console', (message) => {
     if (message.type() === 'error') console.log(`[browser error] ${message.text()}`)
   })

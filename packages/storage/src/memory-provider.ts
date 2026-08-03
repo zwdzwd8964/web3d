@@ -1,6 +1,21 @@
 import type { SceneDocument } from '@w3/schema'
 import { hashBytes } from './hash.js'
 import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider } from './provider.js'
+import { StorageError } from './provider.js'
+
+/**
+ * T-202 · options, existing so far only to make the quota path testable.
+ *
+ * `quota-exceeded` is a condition `IndexedDbProvider` can produce and `MemoryProvider`
+ * cannot — a Map does not run out of room. Without an injectable ceiling the contract suite
+ * could only assert the behaviour on one side, which means the two providers would be held
+ * to different promises about the one storage failure a user can act on. This is the only
+ * way to run the same assertion on both.
+ */
+export interface MemoryProviderOptions {
+  /** Ceiling on total stored bytes. Absent = unlimited, which is every non-test caller. */
+  readonly maxBytes?: number
+}
 
 /**
  * T-022 · an in-memory StorageProvider.
@@ -17,6 +32,27 @@ export class MemoryProvider implements StorageProvider {
   private blobs = new Map<BlobHash, Uint8Array>()
   private snapshots = new Map<string, Snapshot>()
   private closed = false
+  private readonly maxBytes: number
+  private storedBytes = 0
+
+  constructor(options: MemoryProviderOptions = {}) {
+    this.maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY
+  }
+
+  /**
+   * Refuses a write that would take the store past its ceiling.
+   *
+   * Charged on blob bytes only. Documents are kilobytes and assets are megabytes, so a
+   * byte-accurate accounting of both would add machinery for a rounding error — and the
+   * ceiling exists to reproduce a failure, not to model a browser's storage manager.
+   */
+  private reserve(bytes: number, what: string): void {
+    if (this.storedBytes + bytes <= this.maxBytes) {
+      this.storedBytes += bytes
+      return
+    }
+    throw new StorageError('quota-exceeded', `浏览器本地存储空间不足，${what}失败。请清理其他站点数据或删除不用的项目后重试。`)
+  }
 
   private assertOpen(): void {
     if (this.closed) throw new Error('MemoryProvider has been closed')
@@ -56,8 +92,12 @@ export class MemoryProvider implements StorageProvider {
   async putBlob(bytes: Uint8Array): Promise<BlobHash> {
     this.assertOpen()
     const hash = await hashBytes(bytes)
-    // D4: identical bytes are the same asset. Re-storing is a no-op, not a duplicate.
-    if (!this.blobs.has(hash)) this.blobs.set(hash, bytes.slice())
+    // D4: identical bytes are the same asset. Re-storing is a no-op, not a duplicate —
+    // and therefore costs no quota either.
+    if (!this.blobs.has(hash)) {
+      this.reserve(bytes.byteLength, '保存资产')
+      this.blobs.set(hash, bytes.slice())
+    }
     return hash
   }
 
@@ -96,5 +136,6 @@ export class MemoryProvider implements StorageProvider {
     this.documents.clear()
     this.blobs.clear()
     this.snapshots.clear()
+    this.storedBytes = 0
   }
 }

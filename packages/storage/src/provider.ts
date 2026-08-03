@@ -76,10 +76,50 @@ export interface AssetResolver {
 }
 
 export class StorageError extends Error {
-  readonly code: 'not-found' | 'conflict' | 'unavailable' | 'corrupt'
+  readonly code: 'not-found' | 'conflict' | 'unavailable' | 'corrupt' | 'quota-exceeded'
   constructor(code: StorageError['code'], message: string, options?: { cause?: unknown }) {
     super(message, options)
     this.name = 'StorageError'
     this.code = code
   }
+}
+
+/**
+ * T-202 · turns a provider-specific write failure into `quota-exceeded`.
+ *
+ * Running out of space is the one storage failure a user can actually do something about,
+ * and it is the one this product will hit first: a scene with a handful of 4K textures and
+ * a video is tens of megabytes, and the browser's default quota is a fraction of the disk.
+ * Before this, IndexedDB's `QuotaExceededError` reached the editor as a raw DOMException
+ * with an English message, through a catch that said 「保存失败」.
+ *
+ * Every write path in every provider goes through here, so the contract suite can assert one
+ * behaviour on both — which is the only way `MemoryProvider` and `IndexedDbProvider` can be
+ * held to the same promise about a condition only one of them can naturally produce.
+ */
+export async function mapWriteError<T>(what: string, body: () => Promise<T>): Promise<T> {
+  try {
+    return await body()
+  } catch (cause) {
+    if (cause instanceof StorageError) throw cause
+    if (isQuotaError(cause)) {
+      throw new StorageError('quota-exceeded', `浏览器本地存储空间不足，${what}失败。请清理其他站点数据或删除不用的项目后重试。`, {
+        cause,
+      })
+    }
+    throw cause
+  }
+}
+
+/**
+ * Whether `cause` is the browser saying "no more room".
+ *
+ * Matched by name rather than by `instanceof DOMException`: the name is what the spec fixes,
+ * and `fake-indexeddb` (which is how this path is tested at all) raises its own error class.
+ * `QUOTA_EXCEEDED_ERR` is the legacy code some engines still set.
+ */
+function isQuotaError(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null) return false
+  const { name, code } = cause as { name?: unknown; code?: unknown }
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' || code === 22
 }

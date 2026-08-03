@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
+import { resetStorage } from './storage-reset.js'
 
 /**
  * v0.5 · T-146 · the placement gestures, at the DOM.
@@ -18,11 +19,7 @@ import type { Locator, Page } from '@playwright/test'
 const SETTLE = 400
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('w3-e2e-cleaned')) return
-    sessionStorage.setItem('w3-e2e-cleaned', '1')
-    void indexedDB.deleteDatabase('w3-editor')
-  })
+  await resetStorage(page, 'w3-e2e-cleaned')
   page.on('console', (message) => {
     if (message.type() === 'error') console.log(`[browser error] ${message.text()}`)
   })

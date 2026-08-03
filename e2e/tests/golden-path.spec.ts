@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { buildTestGlb } from '../fixtures/glb.js'
+import { resetStorage } from './storage-reset.js'
 
 /**
  * G0-1 · the golden path.
@@ -24,11 +25,7 @@ test.beforeEach(async ({ page }) => {
   // Guarded by a sessionStorage flag because addInitScript runs on EVERY navigation:
   // unguarded, test ⑤'s reload wiped the database it had just saved to, and the test
   // failed for a reason that had nothing to do with the code under test.
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('w3-e2e-cleaned')) return
-    sessionStorage.setItem('w3-e2e-cleaned', '1')
-    void indexedDB.deleteDatabase('w3-editor')
-  })
+  await resetStorage(page, 'w3-e2e-cleaned')
   page.on('console', (message) => {
     if (message.type() === 'error') console.log(`[browser error] ${message.text()}`)
   })

@@ -3,7 +3,7 @@
 import 'fake-indexeddb/auto'
 
 import { describe, expect, it } from 'vitest'
-import { IndexedDbProvider } from '../src/idb-provider.js'
+import { IndexedDbProvider, OBJECT_STORES } from '../src/idb-provider.js'
 import { describeProviderContract } from './contract.js'
 
 /**
@@ -28,9 +28,36 @@ describe('IndexedDbProvider', () => {
   })
 
   let counter = 0
-  describeProviderContract('indexeddb', () => new IndexedDbProvider({ databaseName: `w3-test-${counter++}` }))
+  describeProviderContract('indexeddb', () => new IndexedDbProvider({ databaseName: `w3-test-${counter++}` }), {
+    /**
+     * Fault injection in the TEST, not a `maxBytes` option on the provider.
+     *
+     * A ceiling parameter on `IndexedDbProvider` would be production API with no production
+     * caller — the exact "complete implementation, tested, zero production callers" shape
+     * T-205 exists to catch. Making the store itself raise the browser's own error is both
+     * more honest and stricter: it is `mapWriteError`'s real detection path that runs, on an
+     * error shaped the way a real browser shapes it.
+     */
+    makeFull: async () => {
+      const provider = new IndexedDbProvider({ databaseName: `w3-test-quota-${counter++}` })
+      await provider.listProjects()
+      const store = IDBObjectStore.prototype
+      const original = store.put
+      store.put = function put() {
+        const error = new Error('The quota has been exceeded.')
+        error.name = 'QuotaExceededError'
+        throw error
+      }
+      return {
+        provider,
+        done: () => {
+          store.put = original
+        },
+      }
+    },
+  })
 
-  it('creates its four object stores on first open', async () => {
+  it('creates every object store on first open', async () => {
     const provider = new IndexedDbProvider({ databaseName: 'w3-test-stores' })
     // Any call forces the upgrade transaction to run.
     await provider.listProjects()
@@ -46,7 +73,9 @@ describe('IndexedDbProvider', () => {
       }
       request.onerror = () => reject(request.error)
     })
-    expect(names.sort()).toEqual(['blobs', 'documents', 'projects', 'snapshots'])
+    // Set equality against the exported list, not `toContain`. `toContain` passes while a
+    // store is missing, which is the entire failure mode this card exists to prevent.
+    expect(names.sort()).toEqual([...OBJECT_STORES].sort())
   })
 
   it('survives a close-and-reopen with its data intact — the point of persistence', async () => {

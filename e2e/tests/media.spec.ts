@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { buildWav } from '../fixtures/wav.js'
+import { resetStorage } from './storage-reset.js'
 
 /**
  * v0.5 · T-160 / T-161 · media import and the media library, at the DOM.
@@ -15,11 +16,7 @@ import { buildWav } from '../fixtures/wav.js'
 const SETTLE = 400
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('w3-e2e-cleaned')) return
-    sessionStorage.setItem('w3-e2e-cleaned', '1')
-    void indexedDB.deleteDatabase('w3-editor')
-  })
+  await resetStorage(page, 'w3-e2e-cleaned')
   page.on('console', (message) => {
     if (message.type() === 'error') console.log(`[browser error] ${message.text()}`)
   })
