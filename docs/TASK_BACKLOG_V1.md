@@ -174,8 +174,16 @@
 > 六张地基卡排在一切功能卡之前，且互相之间有序；紧随其后的是三条「门槛本身是空的」的修复
 > （`pnpm size-limit` 命令不存在 · 覆盖率门槛从未执行 · 断网构建两边互指没人做）。
 
-### [ ] T-200 ★ · `SceneRuntime` 的渲染器注入缝
-- **依赖** 无 · **预估** 1.0d · **实际** —
+### [x] T-200 ★ · `SceneRuntime` 的渲染器注入缝
+- **依赖** 无 · **预估** 1.0d · **实际** 0.8h
+- **交付偏差**（两处，均因验收标准超出「独占」清单）：`packages/core/src/assets/thumbnail.ts`
+  （验收要求 `new WebGLRenderer(` 恰好 1 处，第二个自建渲染器必须收进工厂）与
+  `packages/core/src/runtime/index.ts`（一行转出 `renderer-like.js`）。
+- **接缝清单的 12 个方法**：`registerChrome` · `setChromeVisible` · `pipelineMode` ·
+  `setPostFxEnabled`（T-235）· `setSelectionOutline`（T-241）· `setExplode`（T-244）·
+  `captureImage`（T-266）· `flyToView`（T-337）· `showPage` · `hidePage` · `isPageVisible`
+  （T-307）· `swapDocument`（T-429）。**实现其中一个的卡，把它从
+  `renderer-injection.test.ts` 的 `SEAMS` 表里删掉一行**——那张表同时是断言和进度台账。
 - **独占** `packages/core/src/runtime/scene-runtime.ts`（`attachRenderer` / `detach` / options 三处）·
   `packages/core/src/runtime/renderer-like.ts`（新）· `packages/core/test/runtime/renderer-injection.test.ts`（新）
 - **做** 仓库实测：`private renderer: WebGLRenderer | null = null`（`:97`）· `private attachRenderer(canvas)`（`:352`）·

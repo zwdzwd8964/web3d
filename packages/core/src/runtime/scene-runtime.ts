@@ -1,7 +1,10 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { neverEnds } from '../eca/types.js'
-import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3, WebGLRenderer } from 'three'
+import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
+import type { WebGLRenderer } from 'three'
+import { createWebGLRenderer } from './renderer-like.js'
+import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
 import { ClipPlayer } from './animator/clip.js'
@@ -45,8 +48,14 @@ export interface SceneRuntimeOptions {
   readonly canvas?: HTMLCanvasElement
   readonly resolver: AssetResolver
   readonly mode: RuntimeMode
-  /** Injected in tests; production builds a real WebGLRenderer. */
-  readonly createRenderer?: (canvas: HTMLCanvasElement) => WebGLRenderer
+  /**
+   * T-200 · injected in tests; production builds a real WebGLRenderer.
+   *
+   * Returns `RendererLike`, not `WebGLRenderer`: the point of the seam is that a hand-written
+   * stub with zero GL calls satisfies it. Typed as the concrete class, every stub needed an
+   * `as unknown as WebGLRenderer` cast, and a cast tells you nothing about what it forgot.
+   */
+  readonly createRenderer?: (canvas: HTMLCanvasElement) => RendererLike
   readonly hotspotRenderer?: HotspotRenderer
   /** T-133 · injected in tests; production prefilters through PMREM, which needs GL. */
   readonly compileEnvMap?: EnvMapCompiler
@@ -94,7 +103,7 @@ export class SceneRuntime implements RuntimeContext {
   /** T-163 · the scene's audio: what rules started and what leaving preview silences. */
   readonly media: MediaBus
 
-  private renderer: WebGLRenderer | null = null
+  private renderer: RendererLike | null = null
   private hotspotRenderer: HotspotRenderer
   private document: SceneDocument
   private variables = new Map<string, VarValue>()
@@ -160,7 +169,14 @@ export class SceneRuntime implements RuntimeContext {
     })
     this.environment = new EnvironmentController({
       scene: this.scene,
-      renderer: () => this.renderer,
+      // The one place `RendererLike` is narrowed back to the concrete class. `environment.ts`
+      // types its renderer as `WebGLRenderer` because the default PMREM compiler genuinely
+      // needs one, and that file belongs to T-239 — widening it here would be a second card's
+      // change smuggled into this one. Safe in practice: the two members `EnvironmentController`
+      // writes (`toneMapping`, `toneMappingExposure`) are both on `RendererLike`, and the
+      // compiler is already injectable (`compileEnvMap`), which is how every Node test avoids
+      // PMREM today.
+      renderer: () => this.renderer as WebGLRenderer | null,
       resolve: (url) => options.resolver.resolve(url),
       log: (level, message, data) => this.log(level, message, data),
       ...(options.compileEnvMap ? { compile: options.compileEnvMap } : {}),
@@ -349,19 +365,30 @@ export class SceneRuntime implements RuntimeContext {
     this.environment.syncScene(doc)
   }
 
-  private attachRenderer(canvas: HTMLCanvasElement): void {
-    const create =
-      this.options.createRenderer ??
-      ((c: HTMLCanvasElement) =>
-        new WebGLRenderer({
-          canvas: c,
-          antialias: true,
-          alpha: true,
-          // Required for T-053's thumbnail and v1's image export: without it the
-          // drawing buffer is undefined by the time toDataURL runs.
-          preserveDrawingBuffer: true,
-        }))
-    this.renderer = create(canvas)
+  /**
+   * Installs the thing that draws. Public, and that is the whole point of T-200.
+   *
+   * It used to be `private attachRenderer(canvas)` with `new WebGLRenderer(...)` inside, so
+   * the only way into this code path was a real browser. Five domains' no-GPU unit tests
+   * (clipping planes, capture surface, composer passes, KTX2 decoder wiring, loader
+   * before/after) are assertions about *what happens once a renderer is attached*, and none
+   * of them could be written.
+   *
+   * Accepts either a canvas (production: build the default renderer for it) or an
+   * already-built `RendererLike` (tests: a stub with zero GL calls). Two entry points rather
+   * than a `__attachRendererForTest` escape hatch, because a test-only alias makes the tested
+   * path different from the production path — the exact difference this project has been
+   * bitten by four times (`lightFactory`, KTX2, the texture cache, the material registry).
+   *
+   * The name is `attachRenderer` and stays `attachRenderer`: `AssetLoader.attachRenderer`
+   * (T-219) is its counterpart, and appendix A.1/C7 records that these two were once written
+   * as two cards with two different names for the same fix.
+   */
+  attachRenderer(target: HTMLCanvasElement | RendererLike): void {
+    const create = this.options.createRenderer ?? defaultCreateRenderer
+    const renderer = isRendererLike(target) ? target : create(target)
+    this.renderer = renderer
+    const canvas = renderer.domElement
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
     // Tone mapping and the prefilter both live on the renderer, so a document that was
     // loaded before the canvas existed has to be re-applied onto it now.
@@ -369,6 +396,25 @@ export class SceneRuntime implements RuntimeContext {
     // The renderer usually arrives after the document, so the pipeline state has to be
     // pushed onto it rather than waiting for the next edit.
     this.syncShadows(this.document, true)
+  }
+
+  /**
+   * Releases the renderer without tearing the runtime down.
+   *
+   * `dispose()` ends the runtime's life; this ends only the drawing half, so a canvas can be
+   * unmounted and a new one attached (the editor does exactly this when the viewport pane is
+   * hidden). T-219 hangs `loader.attachRenderer(null)` here: the KTX2 transcoder holds GPU
+   * state belonging to the renderer that just went away.
+   */
+  detach(): void {
+    if (!this.renderer) return
+    this.renderer.dispose()
+    this.renderer = null
+  }
+
+  /** The renderer currently installed, or null when running head-less. Read-only on purpose. */
+  get activeRenderer(): RendererLike | null {
+    return this.renderer
   }
 
   resize(width: number, height: number): void {
@@ -965,6 +1011,86 @@ export class SceneRuntime implements RuntimeContext {
     this.options.onLog?.(level, message, data)
   }
 
+  /* --- 接缝清单 · the seam list (T-200 ④) ---------------------------------
+   *
+   * Twelve methods that later cards will implement, declared here and now, all throwing
+   * `SEAM_NOT_WIRED`. This is a deliberate 0.5-day prepayment: `scene-runtime.ts` is claimed
+   * exclusively by thirteen cards, and without the signatures existing up front every one of
+   * them has to wait for the previous one to land. Appendix A.3 measures the cost of not
+   * doing it — the critical path goes from 16 waves to 25+, wall clock roughly doubles.
+   *
+   * Why `throw` rather than an empty body: an empty body is indistinguishable from a correct
+   * implementation to every caller and every test. That is the failure mode this repository
+   * has hit fourteen times ("finished, tested, zero production callers"), and a silent no-op
+   * seam would be its fifteenth. `renderer-injection.test.ts` asserts each of these throws;
+   * when a card implements one, it deletes that entry from the list in the test — which is
+   * how the test doubles as the progress ledger.
+   *
+   * Every entry names the card that owns it. No owner, no seam (D36's rule, applied early).
+   */
+
+  /** T-235 · registers an editor-only object into the chrome group. Returns an un-register. */
+  registerChrome(_object: Object3D): () => void {
+    throw new Error(SEAM_NOT_WIRED('registerChrome', 'T-235'))
+  }
+
+  /** T-235 · shows/hides everything registered as chrome. Supersedes `setEditorChromeVisible`. */
+  setChromeVisible(_visible: boolean): void {
+    throw new Error(SEAM_NOT_WIRED('setChromeVisible', 'T-235'))
+  }
+
+  /** T-235 · whether the frame goes straight to the canvas or through the composer. */
+  get pipelineMode(): 'direct' | 'composed' {
+    throw new Error(SEAM_NOT_WIRED('pipelineMode', 'T-235'))
+  }
+
+  /** T-235 · benchmark-only override; the document is the normal driver. */
+  setPostFxEnabled(_enabled: boolean): void {
+    throw new Error(SEAM_NOT_WIRED('setPostFxEnabled', 'T-235'))
+  }
+
+  /** T-241 · the editor's selection channel into the outline pass. */
+  setSelectionOutline(_nodeIds: readonly string[]): void {
+    throw new Error(SEAM_NOT_WIRED('setSelectionOutline', 'T-241'))
+  }
+
+  /** T-244 · drives one explode group to `factor`, optionally over `durationS`. */
+  setExplode(_groupNodeId: string, _factor: number, _options?: { durationS?: number; signal?: AbortSignal }): Promise<void> {
+    throw new Error(SEAM_NOT_WIRED('setExplode', 'T-244'))
+  }
+
+  /** T-266 · the eight-step capture: resize, freeze, draw, compose overlays, restore. */
+  captureImage(_request: unknown): Promise<Blob | null> {
+    throw new Error(SEAM_NOT_WIRED('captureImage', 'T-266'))
+  }
+
+  /** T-337（v1.2）· flies the camera through N viewpoints as one continuous path. */
+  flyToView(_viewpointIds: readonly string[], _options?: { durationS?: number; signal?: AbortSignal }): Promise<void> {
+    throw new Error(SEAM_NOT_WIRED('flyToView', 'T-337'))
+  }
+
+  /** T-307（v1.2）· shows one page's overlays. `exclusive` defaults to false (§1.3). */
+  showPage(_pageId: string, _options?: { exclusive?: boolean }): void {
+    throw new Error(SEAM_NOT_WIRED('showPage', 'T-307'))
+  }
+
+  /** T-307（v1.2）· hides one page, or every page when given `'all'`. */
+  hidePage(_pageId: string): void {
+    throw new Error(SEAM_NOT_WIRED('hidePage', 'T-307'))
+  }
+
+  /** T-307（v1.2）· the condition side of the same trio. */
+  isPageVisible(_pageId: string): boolean {
+    throw new Error(SEAM_NOT_WIRED('isPageVisible', 'T-307'))
+  }
+
+  /** T-429（v1.5）· swaps the whole document, clearing mixers/materials/textures in order. */
+  swapDocument(_doc: SceneDocument): Promise<void> {
+    throw new Error(SEAM_NOT_WIRED('swapDocument', 'T-429'))
+  }
+
+  /* --- end 接缝清单 -------------------------------------------------------- */
+
   private subtree(nodeId: string, includeDescendants: boolean | undefined): string[] {
     if (!includeDescendants) return [nodeId]
     const object = this.graph.objectFor(nodeId)
@@ -976,6 +1102,33 @@ export class SceneRuntime implements RuntimeContext {
     })
     return out.length > 0 ? out : [nodeId]
   }
+}
+
+/**
+ * T-200 · what an un-implemented seam says when someone calls it.
+ *
+ * Exported so the seam-list test asserts the same string the runtime throws, rather than a
+ * copy of it that can drift. The card number is in the message on purpose: the person who
+ * hits this needs to know who owes them the implementation, not just that it is missing.
+ */
+export function SEAM_NOT_WIRED(member: string, owner: string): string {
+  return `SceneRuntime.${member} 未接线（由 ${owner} 交付）`
+}
+
+/** Production's renderer factory. The single default behind `options.createRenderer`. */
+function defaultCreateRenderer(canvas: HTMLCanvasElement): RendererLike {
+  return createWebGLRenderer({ canvas })
+}
+
+/**
+ * Tells an already-built renderer from a canvas.
+ *
+ * Duck-typed on `render`, which a canvas does not have and every renderer must. An
+ * `instanceof WebGLRenderer` check would defeat the entire seam — a hand-written stub is
+ * never an instance of anything.
+ */
+function isRendererLike(target: HTMLCanvasElement | RendererLike): target is RendererLike {
+  return typeof (target as RendererLike).render === 'function'
 }
 
 function setPanel(renderer: HotspotRenderer, hotspot: { id: string }, open: boolean, doc?: SceneDocument): void {

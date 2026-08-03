@@ -7,9 +7,9 @@ import {
   Scene,
   Sphere,
   Vector3,
-  WebGLRenderer,
 } from 'three'
-import type { Object3D } from 'three'
+import type { Object3D, WebGLRenderer } from 'three'
+import { createWebGLRenderer } from '../runtime/renderer-like.js'
 
 /**
  * T-053 · client-side thumbnails.
@@ -101,7 +101,10 @@ export async function renderThumbnail(object: Object3D, options: ThumbnailOption
 
   let renderer: WebGLRenderer | null = null
   try {
-    renderer = new WebGLRenderer({ canvas, antialias: true, alpha: options.background === null, preserveDrawingBuffer: true })
+    // T-200 · through the shared factory, so `preserveDrawingBuffer: true` is stated once.
+    // It used to be chosen independently here; the two sites could have drifted, and the
+    // symptom of losing that flag is a blank thumbnail on some drivers only.
+    renderer = createWebGLRenderer({ canvas, alpha: options.background === null })
     renderer.setSize(size, size, false)
     renderer.setPixelRatio(1)
 
