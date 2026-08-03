@@ -7,6 +7,7 @@ import { candidateRules } from './events.js'
 import { execute } from './executor.js'
 import type { ExecResult, RuntimeContext, RuntimeEvent } from './types.js'
 import { isAbortError } from './types.js'
+import { CHURN_LIMIT, ChurnGuard } from './churn-guard.js'
 
 /**
  * T-086 · ECA_SPEC §7.
@@ -99,6 +100,12 @@ export class EcaEngine {
   private slots = new Map<string, Slot>()
   private timers = new Set<() => void>()
   private chainDepth = 0
+  /**
+   * T-204 · B10's other half. `chainDepth` only measures SYNCHRONOUS nesting, so a rule
+   * chain with any `await` in it resets to depth 1 every hop and loops forever unwatched.
+   * See ADR-0029.
+   */
+  private readonly churn = new ChurnGuard()
   private historyBuffer: ExecResult[] = []
 
   constructor(
@@ -132,6 +139,7 @@ export class EcaEngine {
     this.doc = null
     this.index = null
     this.enabled = false
+    this.churn.reset()
   }
 
   /** Rebuilds the dispatch index after the editor edits rules or variables. */
@@ -154,6 +162,7 @@ export class EcaEngine {
       this.slots.clear()
       for (const cancel of this.timers) cancel()
       this.timers.clear()
+      this.churn.reset()
     }
   }
 
@@ -170,6 +179,17 @@ export class EcaEngine {
         this.ctx.log(
           'error',
           `规则连锁深度超过 ${MAX_CHAIN_DEPTH}，已中止本次分发（很可能是变量变化规则相互触发形成环）`,
+          { event },
+        )
+        return
+      }
+
+      // The same guarantee, measured a second way. Deliberately NOT stack-shaped: this is the
+      // only judgement that reads the same for a synchronous loop and an awaited one.
+      if (event.event === 'variableChange' && this.churn.tripped(event.variableId, this.ctx.now())) {
+        this.ctx.log(
+          'error',
+          `变量「${event.variableId}」1 秒内变化超过 ${CHURN_LIMIT} 次，已中止本次分发（很可能是带等待的规则相互触发形成环）`,
           { event },
         )
         return

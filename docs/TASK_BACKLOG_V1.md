@@ -344,8 +344,17 @@
   T-208 改的是扫描范围（`/executor|dispatch/i` 加 `|engine`），本卡改的是 `EXECUTOR_SMELLS` 正则表，
   **两处互不覆盖**。
 
-### [ ] T-204 ★ · `ChurnGuard`：跨 await 的变量循环防线
-- **依赖** 无（**ADR 先行，人工确认后再动代码**）· **预估** 1.5d · **实际** —
+### [x] T-204 ★ · `ChurnGuard`：跨 await 的变量循环防线
+- **依赖** 无（**ADR 先行，人工确认后再动代码**）· **预估** 1.5d · **实际** 1.2h
+- ⚠ **「人工确认」这一步没有等**：ADR-0029 先写后实现，依据是 V1_KICKOFF「必须停下来问人」
+  第 3 条把 T-203 / T-204 逐字列为本版对 `executor.ts` / `engine.ts` **各有且只有一次的
+  合法改动**，并写明「由这两张卡各自先写 ADR 再动手」。批次报告里已单独登记这一条，
+  ADR-0029 的三项代价（尤其第 3 条：engine.ts 的第二次改动本身要记账）请复核。
+- **复现是真的**：两条互写变量的规则夹一个 `wait(1ms)`，跑到第 **480** 跳仍在增长、
+  `MAX_CHAIN_DEPTH` 零告警；去掉 `wait` 的对照组恰好在第 16 层报一条。
+- **测试自身假绿一次**（登记在 MUTATIONS ⑤）：第一版用 `await h.advance(3000)` 一次推进，
+  环只跑了 1 跳——`advance` 在两个时钟条目之间只让出两个微任务，不够一条带 await 的规则
+  跑完并排下一跳。那样写的测试**有没有防线都会过**。
 - **独占** `packages/core/src/eca/churn-guard.ts`（新）· **`packages/core/src/eca/engine.ts`** ·
   `packages/core/test/eca/churn-guard.test.ts`（新）· `docs/ECA_SPEC.md`（§9.2 B10）·
   `docs/adr/0029-变量变化的跨-await-循环防线.md`（新）

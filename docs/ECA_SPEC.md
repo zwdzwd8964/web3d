@@ -483,13 +483,17 @@ type TestCase = {
 | B7 | 动作抛错 + `onError: 'abort'` | 后续步骤 `skipped`，`status: 'failed'` |
 | B8 | 动作抛错 + `onError: 'continue'` | 后续步骤照常执行 |
 | B9 | 规则引用了已删除的 nodeId | 不崩溃，记 error 日志，该动作 `skipped` |
-| B10 | `variableChange` 事件中 `setVariable` 同一变量 | 有循环保护：同一 tick 内同一变量的连锁深度上限 16，超出则 abort + error |
+| B10 | `variableChange` 事件中 `setVariable` 同一变量 | **两道各自独立的防线**：① 同步连锁深度上限 **16**（`MAX_CHAIN_DEPTH`），越限则中止本次分发 + error；② 每个变量每 **1 秒**变化上限 **240 次**（`ChurnGuard`，`CHURN_WINDOW_MS` / `CHURN_LIMIT`），越限则中止本次分发 + error |
 | B11 | `detach()` 时有规则在跑 | 全部 abort，无悬挂 Promise，无泄漏定时器 |
 | B12 | parallel + 首个失败 + `abort` | 其余动作收到 abort |
 | B13 | 退出预览模式 | 变量、可见性、transform、材质、**灯光参数（v0.5）** 全部回到进入前的编辑态 |
 | B14 | `{ event: 'nodeId' }` 值表达式 | 在 `target: { any: true }` 的规则中拿到正确的节点 |
 
-**B10 值得单独说**：变量变化触发规则、规则又改变量，是最容易写出无限循环的地方，而且它在编辑器里表现为整个页面卡死。必须有硬性深度上限。
+**B10 值得单独说**：变量变化触发规则、规则又改变量，是最容易写出无限循环的地方，而且它在编辑器里表现为整个页面卡死。必须有硬性上限。
+
+**为什么是两道而不是一道**（T-204 / [ADR-0029](adr/0029-变量变化的跨-await-循环防线.md)）：`MAX_CHAIN_DEPTH` 数的是 `dispatch` 的**同步嵌套深度**，而这个数只在整条链同步时才等于「链有多长」。规则的 `then` 里只要出现一个 `await`（`wait` / `playAnimation(await:true)` / `playMedia` / 任何返回 Promise 的动作），那次 `dispatch` 就已经返回、`chainDepth` 已经减回去，下一跳是从干净的栈上重新进来的，深度永远是 1。**实测**：两条互写变量的规则夹一个 `wait(1ms)`，跑到第 480 跳仍然零告警不收敛；去掉 `wait` 的对照组恰好在第 16 层报一条。所以第二道防线的判据刻意**不看调用栈**，只问「这个变量在过去 1 秒里变了多少次」——这个问题对同步环和带 await 的环给出同一个答案。
+
+**明确接受的代价**：它**只拦失控环，不拦慢环**。每秒 239 次的环不会被拦住——它不是失控，它是慢。240 这个数字是手算的（16 ms 一帧 × 每帧至多 4 次写），**不是实测的**（G0.5-8 未闭合），撤销条件见 ADR-0029。
 
 ### 9.3 Parity 测试（宪法 C3 的验证 · MVP 规划 G0-4）
 
