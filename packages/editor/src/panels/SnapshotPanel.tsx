@@ -1,3 +1,5 @@
+import { ID_COLLECTION_NAMES } from '@w3/schema'
+import type { SceneDocument } from '@w3/schema'
 import type { SnapshotSummary } from '@w3/storage'
 import { useCallback, useEffect, useState } from 'react'
 import { useProject } from '../project/ProjectContext.jsx'
@@ -14,6 +16,30 @@ import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.j
 function replaceInPlace<T>(target: T[], source: readonly T[]): void {
   if (target.length > source.length) target.splice(source.length, target.length - source.length)
   for (let i = 0; i < source.length; i++) target[i] = source[i]!
+}
+
+/**
+ * Writes a rolled-back document over the live draft, collection by collection.
+ *
+ * T-201 · driven by `ID_COLLECTIONS`, and exported so it can be tested without rendering
+ * anything. It used to be eleven hand-written `replaceInPlace` statements inside the click
+ * handler, which had two problems at once: a twelfth collection would be missed and
+ * TypeScript would not say a word (the symptom is "roll back, and the new collection still
+ * shows last week's data" — data loss that looks like a rendering bug), and the only way to
+ * reach the code was to click a button in a mounted panel.
+ *
+ * Deliberately NOT `Object.assign(draft, document)`: whole-array replacement is what makes
+ * `applyPatch` fall back to a full rebuild, and 铁律 11's alarm counter is only worth having
+ * if ordinary operations keep it at zero.
+ */
+export function applyRollback(draft: SceneDocument, document: SceneDocument): void {
+  for (const name of ID_COLLECTION_NAMES) {
+    // Both sides are indexed by the same `IdCollection` key, so the element types line up
+    // and no cast is needed — the registry being typed is what buys that.
+    replaceInPlace<never>(draft[name] as never[], document[name] as never[])
+  }
+  draft.name = document.name
+  Object.assign(draft.meta, document.meta)
 }
 
 /**
@@ -58,7 +84,8 @@ export function SnapshotPanel() {
       // document's undo stack, so pressing Ctrl+Z after a rollback replayed inverse
       // patches belonging to a document that no longer existed, silently corrupting the
       // one that did. Meanwhile this panel was promising the user they could undo it.
-      commit(`回滚到 ${formatPublishedAt(summary.publishedAt)}${summary.label ? ` · ${summary.label}` : ''}`, (draft) => {
+      commit(
+        `回滚到 ${formatPublishedAt(summary.publishedAt)}${summary.label ? ` · ${summary.label}` : ''}`,
         // Field-by-field, but element-by-element inside each array.
         //
         // Assigning whole arrays looked incremental and is not: immer describes it as one
@@ -67,20 +94,8 @@ export function SnapshotPanel() {
         // full-rebuild fallback and put 铁律 11's alarm counter at 1 on a perfectly
         // ordinary operation. Splicing in place produces per-element patches the renderer
         // reconciles like any other edit.
-        replaceInPlace(draft.nodes, document.nodes)
-        replaceInPlace(draft.materials, document.materials)
-        replaceInPlace(draft.animations, document.animations)
-        replaceInPlace(draft.hotspots, document.hotspots)
-        replaceInPlace(draft.viewpoints, document.viewpoints)
-        replaceInPlace(draft.variables, document.variables)
-        replaceInPlace(draft.rules, document.rules)
-        replaceInPlace(draft.assets, document.assets)
-        replaceInPlace(draft.media, document.media)
-        replaceInPlace(draft.pages, document.pages)
-        replaceInPlace(draft.flows, document.flows)
-        draft.name = document.name
-        Object.assign(draft.meta, document.meta)
-      })
+        (draft) => applyRollback(draft, document),
+      )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }

@@ -215,8 +215,15 @@
 - ⚠ **cross-check X-25**：五个领域的无 GPU 单测的共同前置，**先于表现力四条线**。不先建，
   那五份的单测会在实现期集体退化成 E2E（= 慢 + 只能证明连着、不能证明对）。
 
-### [ ] T-201 ★ · `ID_COLLECTIONS` 变成真的集合注册表
-- **依赖** 无 · **预估** 1.0d · **实际** —
+### [x] T-201 ★ · `ID_COLLECTIONS` 变成真的集合注册表
+- **依赖** 无 · **预估** 1.0d · **实际** 0.9h
+- **本卡查出的两件事**（都登记在 `docs/MUTATIONS.md`）：
+  ① **`variables` 的 id 根本不是铸出来的**——它是作者自己敲的标识符（`VariableIdSchema` 的
+  模式 + 保留字表），`PREFIXES.variable = 'var'` 全仓无人使用。注册表因此把 `idPrefix` 建成
+  `Prefix | null`，`variables` 是唯一的 null，并有一条断言钉住「只有它是 null」。
+  ② **整块 `/materials` 补丁故意回落全量重建**（`applyMaterialPatch` 对 `indexRaw === undefined`
+  显式 `return false`，T-176 记录过）。覆盖测试里建了 `DELIBERATE_FULL_REBUILD` 表，一条，
+  owner 是 T-257，配一条「只能缩不能涨」的棘轮。
 - **独占** `packages/schema/src/document.ts`（`ID_COLLECTIONS` 段）· `packages/schema/src/integrity.ts`
   （collections / sets / `KIND_LABEL` 三段）· `packages/schema/src/selectors.ts`（`collectAllIds`）·
   `packages/schema/test/collection-registry.test.ts`（新）· `packages/core/test/runtime/apply-patch-coverage.test.ts`（新）·

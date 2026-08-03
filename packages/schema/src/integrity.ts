@@ -1,3 +1,4 @@
+import { ID_COLLECTIONS, ID_COLLECTION_NAMES } from './document.js'
 import type { SceneDocument } from './document.js'
 import type { ActionRefResolver, RefTarget } from './index-builder.js'
 import { PHYSICAL_ONLY_PARAMS } from './material.js'
@@ -42,15 +43,25 @@ export interface CheckIntegrityOptions {
   readonly actionRefs?: ActionRefResolver
 }
 
+/**
+ * Chinese labels for every kind a reference can name.
+ *
+ * T-201 · derived from `ID_COLLECTIONS` rather than hand-copied. It used to be a literal
+ * whose nine entries had to be kept in step with a separate eleven-entry I1 table and a
+ * separate eight-entry `sets` — three lists, no mechanical relationship, and a label
+ * silently falling back to the English kind name when one of them was missed.
+ *
+ * `step` is added on top because it is the one referenceable kind that is not a top-level
+ * collection: steps live inside a flow. It is listed here explicitly rather than derived
+ * from `nested`, because `nested` records where ids live, not what a `RefKind` is called —
+ * conflating the two would make `overlays` look like a reference kind, which it is not.
+ */
 const KIND_LABEL: Record<string, string> = {
-  asset: '资产',
-  node: '对象',
-  material: '材质',
-  animation: '动画',
-  viewpoint: '视点',
-  hotspot: '热点',
-  variable: '变量',
-  media: '多媒体',
+  ...Object.fromEntries(
+    ID_COLLECTION_NAMES.map((name) => ID_COLLECTIONS[name])
+      .filter((spec) => spec.refKind !== null)
+      .map((spec) => [spec.refKind, spec.label]),
+  ),
   step: '流程步骤',
 }
 
@@ -66,15 +77,13 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     issues.push({ code, level, path, message, ...(ref ? { refKind: ref.kind, refId: ref.id } : {}) })
   }
 
-  const sets: Record<string, Set<string>> = {
-    asset: new Set(doc.assets.map((a) => a.id)),
-    node: new Set(doc.nodes.map((n) => n.id)),
-    material: new Set(doc.materials.map((m) => m.id)),
-    animation: new Set(doc.animations.map((a) => a.id)),
-    hotspot: new Set(doc.hotspots.map((h) => h.id)),
-    viewpoint: new Set(doc.viewpoints.map((v) => v.id)),
-    variable: new Set(doc.variables.map((v) => v.id)),
-    media: new Set(doc.media.map((m) => m.id)),
+  // T-201 · one derivation, not a second hand-written list. A collection whose `refKind` is
+  // null contributes nothing: nothing in the document points at a rule, a page or a flow.
+  const sets: Record<string, Set<string>> = {}
+  for (const name of ID_COLLECTION_NAMES) {
+    const spec = ID_COLLECTIONS[name]
+    if (spec.refKind === null) continue
+    sets[spec.refKind] = new Set(doc[name].map((record) => record.id))
   }
 
   const requireRef = (code: string, kind: string, id: string | null | undefined, path: string) => {
@@ -109,19 +118,10 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
   }
 
   /* --- I1 · ids unique within each collection ---------------------------- */
-  const collections: [string, readonly { id: string }[]][] = [
-    ['assets', doc.assets],
-    ['nodes', doc.nodes],
-    ['materials', doc.materials],
-    ['animations', doc.animations],
-    ['hotspots', doc.hotspots],
-    ['viewpoints', doc.viewpoints],
-    ['variables', doc.variables],
-    ['rules', doc.rules],
-    ['pages', doc.pages],
-    ['flows', doc.flows],
-    ['media', doc.media],
-  ]
+  // T-201 · driven by the registry, so a collection added in T-225 is checked the day it is
+  // registered. The literal this replaced is the reason `pages` and `flows` went two whole
+  // versions with no I1 coverage at all: they were added to the document and to nothing else.
+  const collections: [string, readonly { id: string }[]][] = ID_COLLECTION_NAMES.map((name) => [name, doc[name]])
   for (const [name, items] of collections) {
     const first = new Map<string, number>()
     items.forEach((item, i) => {

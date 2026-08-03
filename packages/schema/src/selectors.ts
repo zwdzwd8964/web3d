@@ -1,3 +1,4 @@
+import { ID_COLLECTIONS, ID_COLLECTION_NAMES } from './document.js'
 import type { SceneDocument } from './document.js'
 import type { Node } from './node.js'
 import { ORDER_STEP } from './primitives.js'
@@ -216,23 +217,42 @@ export function renumberSiblings(doc: SceneDocument, parentId: string | null): M
   return out
 }
 
-/** Every id currently in use across the document — for `newId` collision checks. */
+/**
+ * Every id currently in use across the document — for `newId` collision checks.
+ *
+ * T-201 · driven by `ID_COLLECTIONS` rather than by eleven hand-written `add()` calls plus
+ * one hand-written nested loop. The old shape had a specific way of failing: adding a
+ * collection and forgetting this function compiles cleanly, passes every test, and then
+ * mints a duplicate id the first time anyone writes into the new collection — because
+ * `newId`'s taken-set never contained the ids it was supposed to avoid. Nothing about that
+ * failure points back here.
+ *
+ * `doc[name]` is indexed with `name: IdCollection`, so a registry entry naming a collection
+ * the document does not have is a compile error rather than a silently skipped line.
+ */
 export function collectAllIds(doc: SceneDocument): Set<string> {
   const ids = new Set<string>([doc.projectId])
-  const add = (items: readonly { id: string }[]) => {
-    for (const item of items) ids.add(item.id)
+  for (const name of ID_COLLECTION_NAMES) {
+    const spec = ID_COLLECTIONS[name]
+    for (const record of doc[name]) {
+      ids.add(record.id)
+      for (const nested of spec.nested) {
+        // The nested arrays are `steps` on a flow and `overlays` on a page. Neither is
+        // reachable through `SceneDocument`'s type from a string key, so this is the one
+        // place the shape is read structurally — narrowed to "an array of things with a
+        // string id" and skipped otherwise, never cast.
+        const children: unknown = (record as Record<string, unknown>)[nested]
+        if (!Array.isArray(children)) continue
+        for (const child of children) {
+          if (isIdBearing(child)) ids.add(child.id)
+        }
+      }
+    }
   }
-  add(doc.assets)
-  add(doc.nodes)
-  add(doc.materials)
-  add(doc.animations)
-  add(doc.hotspots)
-  add(doc.viewpoints)
-  add(doc.variables)
-  add(doc.rules)
-  add(doc.pages)
-  add(doc.flows)
-  add(doc.media)
-  for (const flow of doc.flows) add(flow.steps)
   return ids
+}
+
+/** True when `value` is an object carrying a non-empty string `id`. */
+function isIdBearing(value: unknown): value is { id: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string'
 }
