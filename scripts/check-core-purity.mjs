@@ -157,15 +157,10 @@ const EXECUTOR_ONLY_SMELLS = [
   ],
 ]
 
-/** Comments out, string contents kept. Line numbers preserved. */
-function stripCommentsOnly(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))
-}
-
 for (const file of ecaFiles.filter((f) => /executor|dispatch/i.test(f))) {
   const source = readFileSync(file, 'utf8')
   const stripped = stripCommentsAndStrings(source)
-  const withStrings = stripCommentsOnly(source)
+  const withStrings = stripComments(source)
   const rules = /executor\.ts$/.test(file) ? [...EXECUTOR_SMELLS, ...EXECUTOR_ONLY_SMELLS] : EXECUTOR_SMELLS
   for (const [re, why, mode] of rules) {
     for (const hit of matchLines(mode === 'keep-strings' ? withStrings : stripped, re)) {
