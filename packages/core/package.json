@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@gltf-transform/core": "4.4.2",
+    "@gltf-transform/extensions": "4.4.2",
     "@w3/schema": "workspace:*",
     "three": "0.185.1"
   },

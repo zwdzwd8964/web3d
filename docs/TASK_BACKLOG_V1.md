@@ -802,8 +802,24 @@
   ② 把 ② 改回 `if (!entry.loop)` → loop stop 那条在 headless 侧转红。
   **两条都要指定「在哪一侧红」**——契约测试最容易的假绿是「两侧一致地错」。
 
-### [ ] T-217 · GLB 容器感知与压缩件体检
-- **依赖** 无 · **预估** 1.2d · **实际** —
+### [x] T-217 · GLB 容器感知与压缩件体检
+- **依赖** 无 · **预估** 1.2d · **实际** 1.4h
+- ⚠ **卡面的一条验收在实现层面不成立，已就地更正**：把 `readGlb` 改用
+  `registerExtensions(ALL_EXTENSIONS)` **不能**让「`auditGlb` 对声明 Draco 的 GLB 不再抛异常」
+  成立。实测它把可读的 `Error: Missing required extension` 换成了不可读的
+  `TypeError: Cannot read properties of undefined (reading 'DT_FLOAT32')`——
+  `KHRDracoMeshCompression.install()` 会急切调用 `initDecoderModule(undefined)`，
+  抢在它自己那句「请安装解码器」之前炸掉。
+  **「不再抛异常」只能由容器分流实现**；`registerExtensions` 仍然交付，但它买的是另一件事
+  （扩展块被读进 Document、不再把 `Missing optional extension` 刷到 stderr），
+  并另配了一条真会红的断言。
+- **交叉校验的三处假绿**（详见 `docs/MUTATIONS.md` 的 ①、①′、④）：现有 fixture 全是 mode 4、
+  且 1 image / 1 texture，两个实现的差异在它上面**结构上不可见**。补了 `buildMixedModeGlb`
+  与「一张图背两个 texture」两份 fixture 之后，mode 那条**第二次仍然绿**——
+  4 个顶点时两个公式的和恰好相等（`0+0+1+2+2` = `1+1+1+1+1` = 5），改成 7 个顶点才分得开。
+  magic 校验那条同理：合成坏字节的 JSON chunk 是四个 0，`JSON.parse` 先抛先返回 null，
+  要拿一份**完全合法、只改了头四个字节**的 GLB 才测得出来。
+- **`pnpm -F @w3/core test assets` 67 → 87 条**（卡面写的「现有 67 条」核实无误）。
 - **独占** `packages/core/src/assets/glb-header.ts`（新）· `packages/core/src/assets/audit.ts` ·
   `packages/core/test/assets/glb-header.test.ts`（新）· `packages/core/package.json`
 - **做** `readGlbHeader(bytes)` 解析 GLB 容器（magic / version / chunk 表），返回

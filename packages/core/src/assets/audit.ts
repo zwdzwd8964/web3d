@@ -1,7 +1,10 @@
 import type { AssetAudit, AssetStats, AuditFinding, AuditLevel } from '@w3/schema'
 import { Document, WebIO } from '@gltf-transform/core'
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import type { AssetPolicy, PolicyScope } from './policy.js'
 import { DEFAULT_POLICY, METRICS, WARN_RATIO, formatMetric, metricsFor } from './policy.js'
+import { measureFromHeader, needsContainerRoute, readGlbHeader } from './glb-header.js'
+import type { GlbHeader } from './glb-header.js'
 
 /**
  * T-050 · the import health check (R01).
@@ -39,6 +42,11 @@ export interface AuditOptions {
    * grading exactly the seven metrics it always did.
    */
   readonly scope?: PolicyScope
+  /**
+   * T-217 · an already-parsed container, so a caller that read the header to decide something
+   * else does not pay for a second `JSON.parse` of a multi-megabyte JSON chunk.
+   */
+  readonly header?: GlbHeader
 }
 
 /** Decoded VRAM for one mip chain: w*h*4 bytes, plus ~1/3 again for the mipmaps. */
@@ -46,9 +54,24 @@ export function estimateTextureBytes(width: number, height: number): number {
   return Math.round(width * height * 4 * (4 / 3))
 }
 
-/** Reads a GLB into a gltf-transform document. Isomorphic — works in Node and browsers. */
+/**
+ * Reads a GLB into a gltf-transform document. Isomorphic — works in Node and browsers.
+ *
+ * T-217 · `registerExtensions(ALL_EXTENSIONS)` is what lets the reader UNDERSTAND the
+ * extensions a file declares. Without it, every `KHR_materials_*` block is dropped on the
+ * floor and every optional extension logs `Missing optional extension, "…"` to stderr on
+ * import — noise the user cannot act on, about data we then silently discard.
+ *
+ * **It does not make Draco readable, and the card says it does.** Measured: on a
+ * Draco-declaring GLB, registering the extensions turns a legible
+ * `Error: Missing required extension` into `TypeError: Cannot read properties of undefined
+ * (reading 'DT_FLOAT32')`, because `KHRDracoMeshCompression.install()` eagerly calls
+ * `initDecoderModule(undefined)` before it reaches its own "please install the decoder"
+ * message. Compressed containers are routed away from this function entirely — see
+ * `auditGlb`. That routing is the half that satisfies the acceptance bar.
+ */
 export async function readGlb(bytes: ArrayBuffer): Promise<Document> {
-  const io = new WebIO()
+  const io = new WebIO().registerExtensions(ALL_EXTENSIONS)
   return io.readBinary(new Uint8Array(bytes))
 }
 
@@ -165,8 +188,27 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
   }
 }
 
-/** Read, measure and grade in one call — what the import pipeline uses. */
+/**
+ * Read, measure and grade in one call — what the import pipeline uses.
+ *
+ * T-217 · **two routes, chosen by the container.** A file whose `extensionsRequired` names a
+ * compression extension is measured from its JSON chunk; everything else goes through the
+ * document reader exactly as before.
+ *
+ * The routing is not an optimisation. Before it, importing a Draco-compressed GLB threw out
+ * of `readGlb` with nothing caught anywhere between here and the drop controller, so the user
+ * saw 「引入失败：Missing required extension, "KHR_draco_mesh_compression".」 and the health
+ * check — the one thing that exists to say WHY a model is a problem — never ran. Every number
+ * it reports lives in the JSON chunk, which needs no decoder.
+ *
+ * `options.header` lets a caller that has already parsed the container pass it in rather than
+ * paying for a second `JSON.parse` of a multi-megabyte chunk.
+ */
 export async function auditGlb(bytes: ArrayBuffer, options: AuditOptions = {}): Promise<AuditResult> {
+  const header = options.header ?? readGlbHeader(bytes)
+  if (header && needsContainerRoute(header)) {
+    return grade(measureFromHeader(header, bytes, bytes.byteLength), options)
+  }
   const document = await readGlb(bytes)
   return grade(measure(document, bytes.byteLength), options)
 }

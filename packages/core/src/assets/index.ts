@@ -8,6 +8,7 @@
  * Hashing and storage belong to @w3/storage; this package owns everything between.
  */
 export * from './audit.js'
+export * from './glb-header.js'
 export * from './instantiate.js'
 export * from './normalize.js'
 export * from './policy.js'
