@@ -314,6 +314,31 @@ textarea {
   padding: 0;
 }
 
+/* T-224 · search box. Outside `.panel__body` on purpose — the body is the scroll
+   container, and a box inside it would scroll away exactly when the list is long
+   enough for searching to be the point. */
+.tree-search {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tree-search__input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: inherit;
+  font: inherit;
+  padding: 3px 6px;
+}
+
+/* An ancestor kept only so a match has a path to it is dimmed: it is scaffolding,
+   not a result, and showing both at full weight makes a 3-hit search look like 12. */
+.tree-row[data-matched='false'] .tree-row__name {
+  color: var(--dim);
+}
+
 .tree-row {
   display: flex;
   align-items: center;

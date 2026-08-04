@@ -1,8 +1,9 @@
 import type { SceneDocument } from '@w3/schema'
 import { buildIndex, describeReferences, getSubtreeIds } from '@w3/schema'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
-import { applyDropPlan, canDrop, dropPositionFor, flattenTree, rangeBetween } from './tree-dnd.js'
+import { setUi, useUi } from '../store/ui-store.js'
+import { applyDropPlan, canDrop, canDragRows, clampScrollTop, dropPositionFor, filterNodes, flattenTree, rangeBetween } from './tree-dnd.js'
 import type { DropTarget } from './tree-dnd.js'
 
 /**
@@ -24,9 +25,9 @@ export function HierarchyTree() {
   const selection = useDocumentSelector((s) => s.selection)
   const { commit, select, toggleSelection } = useDocumentActions()
 
+  const { search, renaming, pendingDelete } = useUi()
+
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<RemoveRequest | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<(DropTarget & { ok: boolean }) | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -34,7 +35,22 @@ export function HierarchyTree() {
   const lastClicked = useRef<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  const rows = useMemo(() => flattenTree(doc, collapsed), [doc, collapsed])
+  const filter = useMemo(() => filterNodes(doc, search), [doc, search])
+  const rows = useMemo(() => flattenTree(doc, collapsed, filter), [doc, collapsed, filter])
+  const draggable = canDragRows(filter)
+  const confirming = useMemo(() => (pendingDelete ? describeRemoval(doc, pendingDelete) : null), [doc, pendingDelete])
+
+  // T-224 · the list gets shorter as you type, and the browser does NOT pull the offset
+  // back on its own — you land on a blank panel with the rows scrolled off above. Written
+  // against `clampScrollTop` rather than inline so it is testable at all (the editor's
+  // tests run in plain Node with no jsdom).
+  useEffect(() => {
+    const clamped = clampScrollTop(scrollTop, rows.length, ROW_HEIGHT, height)
+    if (clamped === scrollTop) return
+    setScrollTop(clamped)
+    if (bodyRef.current) bodyRef.current.scrollTop = clamped
+  }, [rows.length, scrollTop, height])
+
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
   const visible = rows.slice(first, first + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2)
 
@@ -76,23 +92,8 @@ export function HierarchyTree() {
     })
   }
 
-  const askRemove = (nodeId: string) => {
-    const index = buildIndex(doc)
-    const affected = describeReferences(index, nodeId)
-    const subtree = getSubtreeIds(doc, nodeId)
-    const name = doc.nodes.find((n) => n.id === nodeId)?.name ?? '对象'
-    // T-092 · the reverse index answers "what breaks if I delete this" BEFORE the delete,
-    // not as a broken rule discovered at acceptance.
-    const question = affected
-      ? `「${name}」被 ${affected} 引用，删除后这些引用会失效。确认删除？`
-      : subtree.length > 1
-        ? `将同时删除「${name}」及其 ${subtree.length - 1} 个子对象。确认？`
-        : `确认删除「${name}」？`
-    setConfirming({ nodeId, name, question, subtree })
-  }
-
   const doRemove = (request: RemoveRequest) => {
-    setConfirming(null)
+    setUi({ pendingDelete: null })
     commit(`删除 ${request.name}`, (draft) => {
       // Spliced in place rather than `draft.nodes = filter(...)`. Immer describes a
       // reassignment as one patch replacing the WHOLE array, which the renderer then has
@@ -109,7 +110,20 @@ export function HierarchyTree() {
     <aside className="panel panel--left">
       <div className="panel__head">
         层级树
-        <span className="num">{doc.nodes.length}</span>
+        <span className="num">{filter ? `${filter.matched.size} / ${doc.nodes.length}` : doc.nodes.length}</span>
+      </div>
+      <div className="tree-search">
+        <input
+          className="tree-search__input"
+          type="search"
+          value={search}
+          placeholder="搜索名称，或粘贴 nd_ 开头的 ID"
+          aria-label="搜索对象"
+          onChange={(event) => setUi({ search: event.currentTarget.value })}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setUi({ search: '' })
+          }}
+        />
       </div>
       <div
         className="panel__body panel__body--tight"
@@ -120,7 +134,19 @@ export function HierarchyTree() {
         }}
       >
         {rows.length === 0 ? (
-          <p className="panel__empty">拖入 GLB 文件开始</p>
+          // Two different nothings. "The scene is empty" and "the search matched nothing"
+          // want opposite actions from the user, and one shared sentence sends half of them
+          // looking for a file to drag when what they need is to clear the box.
+          doc.nodes.length === 0 ? (
+            <p className="panel__empty">拖入 GLB 文件开始</p>
+          ) : (
+            <p className="panel__empty">
+              没有匹配「{search.trim()}」的对象
+              <button type="button" className="tbtn" onClick={() => setUi({ search: '' })}>
+                清空搜索
+              </button>
+            </p>
+          )
         ) : (
           <div style={{ height: rows.length * ROW_HEIGHT, position: 'relative' }}>
             {visible.map((row, i) => {
@@ -134,6 +160,7 @@ export function HierarchyTree() {
                   // and it makes "click 阀盖" mean the object rather than a guessed pixel.
                   data-node-id={row.node.id}
                   data-selected={selection.includes(row.node.id)}
+                  data-matched={row.matched}
                   data-drop={isDropTarget ? dropTarget.position : undefined}
                   data-drop-ok={isDropTarget ? dropTarget.ok : undefined}
                   style={{
@@ -142,14 +169,16 @@ export function HierarchyTree() {
                     height: ROW_HEIGHT,
                     paddingLeft: 6 + row.depth * 14,
                   }}
-                  draggable
+                  // Filtered rows are not siblings of what they appear next to, so a drop
+                  // computed from the row above would silently reparent to the wrong place.
+                  draggable={draggable}
                   onDragStart={() => setDragging(row.node.id)}
                   onDragEnd={() => {
                     setDragging(null)
                     setDropTarget(null)
                   }}
                   onDragOver={(event) => {
-                    if (!dragging) return
+                    if (!dragging || !draggable) return
                     event.preventDefault()
                     const rect = event.currentTarget.getBoundingClientRect()
                     const position = dropPositionFor(event.clientY - rect.top, ROW_HEIGHT, row.hasChildren || !row.node.assetRef)
@@ -161,7 +190,7 @@ export function HierarchyTree() {
                     onDrop()
                   }}
                   onClick={(event) => onRowClick(row.node.id, event)}
-                  onDoubleClick={() => setRenaming(row.node.id)}
+                  onDoubleClick={() => setUi({ renaming: row.node.id })}
                 >
                   <button
                     type="button"
@@ -206,7 +235,7 @@ export function HierarchyTree() {
                       onClick={(event) => event.stopPropagation()}
                       onBlur={(event) => {
                         rename(row.node.id, event.currentTarget.value)
-                        setRenaming(null)
+                        setUi({ renaming: null })
                       }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') event.currentTarget.blur()
@@ -257,7 +286,7 @@ export function HierarchyTree() {
                     title="删除"
                     onClick={(event) => {
                       event.stopPropagation()
-                      askRemove(row.node.id)
+                      setUi({ pendingDelete: row.node.id })
                     }}
                   >
                     ✕
@@ -275,12 +304,35 @@ export function HierarchyTree() {
       {confirming && (
         <ConfirmDialog
           question={confirming.question}
-          onCancel={() => setConfirming(null)}
+          onCancel={() => setUi({ pendingDelete: null })}
           onConfirm={() => doRemove(confirming)}
         />
       )}
     </aside>
   )
+}
+
+/**
+ * The sentence shown before a delete, and the subtree the delete will take with it.
+ *
+ * A function of `(doc, nodeId)` rather than a snapshot taken when the ✕ was clicked: the
+ * pending id now lives in `ui-store` while the document lives in the document store, and
+ * re-deriving is what keeps the question honest if the document changes underneath the
+ * open dialog. T-290 lifts this out as `describeRemoval` for the Delete shortcut to share.
+ */
+function describeRemoval(doc: SceneDocument, nodeId: string): RemoveRequest | null {
+  const name = doc.nodes.find((n) => n.id === nodeId)?.name
+  if (name === undefined) return null
+  const affected = describeReferences(buildIndex(doc), nodeId)
+  const subtree = getSubtreeIds(doc, nodeId)
+  // T-092 · the reverse index answers "what breaks if I delete this" BEFORE the delete,
+  // not as a broken rule discovered at acceptance.
+  const question = affected
+    ? `「${name}」被 ${affected} 引用，删除后这些引用会失效。确认删除？`
+    : subtree.length > 1
+      ? `将同时删除「${name}」及其 ${subtree.length - 1} 个子对象。确认？`
+      : `确认删除「${name}」？`
+  return { nodeId, name, question, subtree }
 }
 
 interface RemoveRequest {

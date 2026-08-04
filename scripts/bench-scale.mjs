@@ -18,6 +18,11 @@ import {
   validate,
   walkTree,
 } from '../packages/schema/dist/index.js'
+// T-224 · imported from source, not from a build. `@w3/editor` has no module dist (it is a
+// bundled Vite app), and Node 24 strips the types natively. There is deliberately NO
+// try/catch fallback here: a bench that silently skips the thing it was extended to measure
+// reads exactly like a bench that measured it and found it fast.
+import { filterNodes, flattenTree } from '../packages/editor/src/panels/tree-dnd.ts'
 
 const COUNT = Number(process.argv[2] ?? 1000)
 const REPEATS = 20
@@ -84,6 +89,20 @@ results.getDescendants = time('getDescendants（删子树）', () => getDescenda
 // shifts, so every downstream consumer sees a changed index.
 const afterDelete = { ...doc, nodes: doc.nodes.filter((_, i) => i !== 1) }
 results.rebuildAfterDelete = time('删一个节点后重建索引', () => buildIndex(afterDelete))
+
+// T-224 · the hierarchy tree re-flattens on EVERY document change, and once there is a
+// search box it also re-filters on every keystroke. Both are on the typing path, so a
+// number over one frame here is a visibly laggy search box, not a slow batch job.
+const noCollapse = new Set()
+// Matches one group's parts — a partial word, which is what people actually type, and the
+// case where the ancestor walk has real work to do (the matches are deep, their parents
+// are not matches).
+const QUERY = '零件 1-'
+results.flattenTree = time('flattenTree（渲染行）', () => flattenTree(doc, noCollapse))
+results.filterNodes = time('filterNodes（搜索过滤）', () => filterNodes(doc, QUERY))
+const filter = filterNodes(doc, QUERY)
+results.flattenFiltered = time('flattenTree（过滤后）', () => flattenTree(doc, noCollapse, filter))
+console.log(`  ${'（命中 / 可见 / 全部）'.padEnd(24)} ${filter.matched.size} / ${filter.visible.size} / ${doc.nodes.length}`)
 
 console.log('')
 for (const [key, ms] of Object.entries(results)) {

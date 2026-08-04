@@ -981,8 +981,20 @@
 - **自测** `node scripts/gen-library-starter.mjs --check && pnpm check:constitution`
 - **变异检验** 把比对改成只比文件数 → 「改一个字节要 FAIL」必须红。
 
-### [ ] T-224 · 层级树搜索过滤
-- **依赖** 无 · **预估** 1.0d · **实际** —
+### [x] T-224 · 层级树搜索过滤
+- **依赖** 无 · **预估** 1.0d · **实际** 1.5h
+- **本卡查出的一件事**（登记在 `docs/MUTATIONS.md` 的 ⓪）：**卡面「必须用 1000/2000」是对的，
+  但不充分。** 把祖先查找改成扫数组（O(n²)）之后比值测试**先是绿的**（查询命中每个节点 →
+  父节点总是已在 `visible` 里 → 循环第一跳就 break，被变异的那行根本没执行），改成只命中最深
+  节点之后**变成时红时绿**（这个规模下二次项与线性建表同量级，落在 3 附近由 GC 决定归属）。
+  最终改成**数数不掐表**：Proxy 包住 `doc.nodes` 数下标读取，诚实实现 ~2n、每跳一扫 ~n²/20，
+  断言 `< 6n`，连跑 5 次全红。比值测试保留——它是卡面的字面验收，且能抓整体算法退化。
+- **`helpOpen` 的去处**：四个瞬态里只有它今天没有消费端，**由 T-290 的速查面板读**。
+  写在本卡是因为 T-290 也重写 `HierarchyTree.tsx` 的删除入口，一次定死四字段的形状比两张卡
+  各改一次同一个类型省一次冲突。
+- **`bench-scale.mjs` 直接 import 了 `.ts`**：`@w3/editor` 没有模块 dist（它是打包后的 Vite 应用），
+  Node 24 原生剥类型。**故意没写 try/catch 兜底**——一个静默跳过被测对象的基准，读起来和
+  「测了，很快」一模一样。
 - **独占** `packages/editor/src/panels/tree-dnd.ts` · `packages/editor/src/panels/HierarchyTree.tsx` ·
   `packages/editor/src/store/ui-store.ts`（新）· `packages/editor/test/tree-search.test.ts`（新）·
   `scripts/bench-scale.mjs`

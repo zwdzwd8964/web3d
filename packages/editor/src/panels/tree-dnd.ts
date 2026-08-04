@@ -121,6 +121,81 @@ export interface TreeRow {
   readonly node: Node
   readonly depth: number
   readonly hasChildren: boolean
+  /** T-224 · true when this row matched the search itself, rather than being an ancestor. */
+  readonly matched?: boolean
+}
+
+/**
+ * T-224 · which nodes a search keeps visible, or **`null` when there is no search**.
+ *
+ * `null` is not a convenience — it is the zero-cost path, and it is asserted with `toBe`.
+ * Returning an empty `Set` instead would look identical to every caller and would make
+ * `flattenTree` do a membership test per node on every render of an unfiltered tree, which
+ * is the state it is in essentially all the time.
+ *
+ * Matching is on the name, case-insensitively, **except** for a query that starts with
+ * `nd_`: an id is exact. Typing a node id is what you do when you have one from a log or an
+ * integrity report, and substring-matching ids would return a handful of unrelated rows.
+ *
+ * The returned set contains **matches plus every ancestor of a match**. Without the
+ * ancestors a match nested three levels down has no path to it — the tree would show a row
+ * whose parents are absent, which is not a tree.
+ */
+export interface NodeFilter {
+  /** Matches plus every ancestor of a match — the rows the tree may draw. */
+  readonly visible: ReadonlySet<string>
+  /** Only the rows that matched the query themselves. */
+  readonly matched: ReadonlySet<string>
+}
+
+export function filterNodes(doc: SceneDocument, query: string): NodeFilter | null {
+  const trimmed = query.trim()
+  if (trimmed === '') return null
+
+  const byId = new Map(doc.nodes.map((node) => [node.id, node]))
+  const matches = trimmed.startsWith('nd_')
+    ? doc.nodes.filter((node) => node.id === trimmed)
+    : doc.nodes.filter((node) => node.name.toLowerCase().includes(trimmed.toLowerCase()))
+
+  const visible = new Set<string>()
+  const matchedIds = new Set(matches.map((node) => node.id))
+  for (const node of matches) {
+    visible.add(node.id)
+    // Walk to the root, bounded by the node count: a corrupted parent chain must not hang
+    // the panel, exactly as `flattenTree`'s own `seen` guard does.
+    let parent = node.parent
+    for (let hops = 0; parent !== null && hops <= doc.nodes.length; hops++) {
+      if (visible.has(parent)) break
+      visible.add(parent)
+      parent = byId.get(parent)?.parent ?? null
+    }
+  }
+  return { visible, matched: matchedIds }
+}
+
+/**
+ * Where the scroll offset has to move to when the row count shrinks.
+ *
+ * Pure, because it is otherwise unobservable: the editor's tests run in plain Node with no
+ * jsdom, so a clamp written inline in the component could be described in a test and never
+ * actually exercised (`shortcuts.ts` says the same thing about `handleShortcut`). The
+ * symptom it prevents is searching in a long tree and landing on a blank panel — the rows
+ * are there, the viewport is scrolled past all of them.
+ */
+export function clampScrollTop(scrollTop: number, rowCount: number, rowHeight: number, viewportHeight: number): number {
+  const max = Math.max(0, rowCount * rowHeight - viewportHeight)
+  return Math.min(Math.max(0, scrollTop), max)
+}
+
+/**
+ * Whether rows may be dragged right now.
+ *
+ * Dropping while filtered is not a rendering problem, it is a correctness one: the drop
+ * target is computed from the row ABOVE and below the pointer, and under a filter those are
+ * not the node's real siblings. The reparent would be silently wrong.
+ */
+export function canDragRows(filter: NodeFilter | null): boolean {
+  return filter === null
 }
 
 /**
@@ -129,7 +204,7 @@ export interface TreeRow {
  * A flat list is what a virtualised tree needs (T-063 targets 1,000 nodes), and it keeps
  * the row renderer free of recursion.
  */
-export function flattenTree(doc: SceneDocument, collapsed: ReadonlySet<string>): TreeRow[] {
+export function flattenTree(doc: SceneDocument, collapsed: ReadonlySet<string>, filter: NodeFilter | null = null): TreeRow[] {
   // One grouping pass for the whole tree. This used to call `getChildren` twice per node —
   // once to iterate and once just to ask whether the row needs a disclosure triangle — and
   // each of those scans the entire node array. On a 1000-node assembly that was 8.9 ms of
@@ -141,9 +216,15 @@ export function flattenTree(doc: SceneDocument, collapsed: ReadonlySet<string>):
   const walk = (parent: string | null, depth: number) => {
     for (const node of children.get(parent) ?? []) {
       if (seen.has(node.id)) continue // a corrupted parent chain must not hang the panel
+      if (filter !== null && !filter.visible.has(node.id)) continue
       seen.add(node.id)
-      rows.push({ node, depth, hasChildren: (children.get(node.id)?.length ?? 0) > 0 })
-      if (!collapsed.has(node.id)) walk(node.id, depth + 1)
+      const hasChildren = (children.get(node.id)?.length ?? 0) > 0
+      rows.push(filter === null ? { node, depth, hasChildren } : { node, depth, hasChildren, matched: filter.matched.has(node.id) })
+      // **While filtering, `collapsed` is ignored.** A hit inside a folded branch that the
+      // user cannot see is the search failing to do the one thing it is for; they searched
+      // precisely because they do not know where the thing is. Unfiltered, `collapsed` is
+      // authoritative as always.
+      if (filter !== null || !collapsed.has(node.id)) walk(node.id, depth + 1)
     }
   }
   walk(null, 0)
