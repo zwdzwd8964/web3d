@@ -669,8 +669,28 @@
 - ⚠ **债 A**：C7 的守卫脚本**根本不扫 fetch**，尽管宪法与铁律 8 白纸黑字点名「fetch 到固定端点」。
   这条不做，v1.5 引 HTTP 后 C7 在机器层面是空的。
 
-### [ ] T-210 · 断网的两半各自取证 + CI job `offline`
-- **依赖** T-207 · T-208 · **预估** 1.0d · **实际** —
+### [x] T-210 · 断网的两半各自取证 + CI job `offline`
+- **依赖** T-207 · T-208 · **预估** 1.0d · **实际** 1.4h
+- **✅ 在 GitHub 上真绿过一次**：[run 30944876523](https://github.com/zwdzwd8964/web3d/actions/runs/30944876523)，
+  `offline` job 38 秒。`IMPL_NOTES` U-17 由「未执行」改为「已真实执行」。
+- **它第一次跑就查出一条真缺陷，而且是交付物本身的**：`pnpm build` 这条命令会联网。
+  pnpm 11 在执行任何脚本之前先核对 `node_modules` 与 lockfile，那次核对发起一次
+  `pnpm install`，install 里又带一次 supply-chain policy 校验。**本机永远看不见**——
+  `~/.cache` 里有「N 小时前验过」的记录；一台全新的内网机器没有，**这正是客户的处境**。
+  实测现象：431 个包轮流重试 registry，**卡 24 分 30 秒**。
+  三处一起修：offline job 的容器 · **部署 `Dockerfile`（让交付物能在内网构建，这是它原本就
+  有的缺陷）** · `DEPLOY.md` 新增 §3.1（写给手动在内网机器上构建的人）。
+- **变异 ① 的价值在「哪一个 job 红」**：同一次 run 里 `verify` 跑的是**同一份被改过的
+  build 脚本**却是绿的——出网对每一个联网的 job 都不可见，只有断网那个能抓到。
+- **推之前抓到一个会烧掉一轮 CI 的坑**：原设计用 `COPY . .` 造中间镜像，而 `.dockerignore`
+  排掉了 `node_modules`，造出来的镜像一个依赖都没有；断网构建会因为「没装依赖」而红，
+  **看起来像 C6 出了问题**。改成镜像只装 pnpm、源码与 `node_modules` 在 run 时挂载。
+- **`pnpm_config_fetch_retries=0` 让 job 从 24m52s 降到 38s**。可读的失败也是一种交付物：
+  24 分钟后超时的 job 什么都不告诉你，3 秒内报 `EAI_AGAIN` 的直接点名是谁在出网。
+- **交付偏差**（三处）：`Dockerfile`（T-221 独占，但那条缺陷只有断网环境能发现）·
+  `docs/DEPLOY.md`（T-221 独占，§3.1 新增）· `docs/MUTATIONS.md`。
+- **顺带登记一条与本卡无关的既有缺陷**：探针分支上 E2E 红在「规则应当把音频播起来」，
+  而同一份代码在 `main` 上连绿两次——**一条既有的 E2E 不稳定**，见 `MUTATIONS.md` 的 ⑤。
 - **独占** `.github/workflows/ci.yml`（新 job）· `.dockerignore` · `docs/IMPL_NOTES.md`（对应行，
   与 T-207 冲突 → 排其后）
 - **做** ① CI job `offline`：步骤 1 预热 pnpm store → `rm -rf node_modules` →

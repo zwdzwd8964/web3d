@@ -640,6 +640,12 @@ function verify(kind, raw) {
     if (command.pkg && !existsSync(join(ROOT, 'packages', command.pkg.replace('@w3/', '')))) {
       return { ok: false, why: `工作区里没有 ${command.pkg} 这个包` }
     }
+    // T-210 · pnpm 的内置子命令不是 package.json 里的脚本。规则 1 早就认识这批词
+    // （`PNPM_BUILTINS`，:144），规则 6 却自己又写了一遍查找逻辑、漏了这一步——于是
+    // 门槛表里一条完全合法的 `pnpm install --offline --frozen-lockfile` 被判成
+    // 「package.json 里没有 install 这个脚本」。**同一件事在这个文件里有两处实现，
+    // 漂移是时间问题**，这正是本仓反复在杀的形状；两处共用同一个集合是最小的修法。
+    if (PNPM_BUILTINS.has(command.script)) return { ok: true }
     if (!command.filter) {
       const manifest = command.pkg ? `packages/${command.pkg.replace('@w3/', '')}/package.json` : 'package.json'
       if (!existsSync(join(ROOT, manifest))) return { ok: false, why: `找不到 ${manifest}` }
