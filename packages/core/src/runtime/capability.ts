@@ -166,3 +166,53 @@ export function renderCapabilityNotice(host: HTMLElement, report: CapabilityRepo
 
   host.append(box)
 }
+
+/* -------------------------------------------------------------------------- */
+/* T-214 · what a capture is allowed to allocate                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The hardware and runtime numbers every capture clamp has to respect.
+ *
+ * `planCapture` (T-262) takes one of these and decides how big an export may actually be.
+ * The field that makes this card necessary is `pixelRatio`: an export is requested in CSS
+ * pixels and allocated in DEVICE pixels, so on a 2× screen a 4× export is really 8×.
+ *
+ * ⚠ **Why this could not wait for T-262.** The clamp's unit tests inject a stub `limits`,
+ * so a formula that ignores `pixelRatio` passes every one of them and fails only on a real
+ * high-DPI machine — with a `webglcontextlost` and a white page. The field and the formula
+ * therefore land in the same card as `setPixelRatio` itself (cross-check X-17); T-262 adds
+ * the probe fields (`maxRenderbufferSize`, `maxViewportDim`) and the request/plan types.
+ */
+export interface CaptureLimits {
+  /** The renderer's device pixel ratio, already capped by `MAX_PIXEL_RATIO`. */
+  readonly pixelRatio: number
+  /** `GL_MAX_TEXTURE_SIZE`, or 0 when the probe could not read it (treat as unknown). */
+  readonly maxTextureSize: number
+}
+
+/**
+ * Device pixels along one edge, for a capture of `cssPixels` at `scale`.
+ *
+ * The whole point of the function is that it is **not** `cssPixels * scale`. That is the
+ * formula the export dialog shows the user and the one that is wrong on every retina
+ * machine.
+ */
+export function captureDevicePixels(cssPixels: number, scale: number, limits: CaptureLimits): number {
+  return Math.max(1, Math.round(cssPixels * scale * limits.pixelRatio))
+}
+
+/**
+ * The largest scale that still fits inside the GPU's texture limit.
+ *
+ * Returns `ceiling` untouched when the probe reported 0 — an unknown limit must not silently
+ * clamp everything to 1×, because "unknown" is what an older browser reports for a GPU that
+ * is perfectly capable. The refusal for a genuinely impossible request belongs to
+ * `planCapture`, which has the request and can word the message.
+ */
+export function maxCaptureScale(cssLongEdge: number, limits: CaptureLimits, ceiling: number): number {
+  if (limits.maxTextureSize <= 0) return ceiling
+  const perScaleUnit = Math.max(1, cssLongEdge) * limits.pixelRatio
+  const fits = Math.floor(limits.maxTextureSize / perScaleUnit)
+  return Math.max(1, Math.min(ceiling, fits))
+}

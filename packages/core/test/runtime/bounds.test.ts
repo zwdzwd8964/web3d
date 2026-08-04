@@ -13,6 +13,7 @@ const fakeRenderer = () =>
     shadowMap: { enabled: false, type: -1 },
     render: () => {},
     setSize: () => {},
+    setPixelRatio: () => {},
     dispose: () => {},
     domElement: {} as HTMLCanvasElement,
   }) as never

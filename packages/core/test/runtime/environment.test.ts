@@ -378,6 +378,7 @@ describe('SceneRuntime wires the environment up (T-183)', () => {
       toneMappingExposure: 1,
       render: () => undefined,
       setSize: () => undefined,
+      setPixelRatio: () => undefined,
       dispose: () => undefined,
       domElement: {} as HTMLCanvasElement,
     }) as unknown as WebGLRenderer

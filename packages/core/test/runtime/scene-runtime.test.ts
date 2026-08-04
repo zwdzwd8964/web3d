@@ -52,7 +52,7 @@ function fakeMediaElement() {
 }
 
 function fakeRenderer() {
-  const calls = { render: 0, setSize: 0, dispose: 0 }
+  const calls = { render: 0, setSize: 0, setPixelRatio: 0, dispose: 0 }
   const shadowMap = { enabled: false, type: -1 }
   return {
     calls,
@@ -66,6 +66,11 @@ function fakeRenderer() {
       },
       setSize: () => {
         calls.setSize++
+      },
+      // T-214 · `RendererLike` has always required this; the `as never` cast below let the
+      // stub omit it, and nothing noticed until production started calling it.
+      setPixelRatio: () => {
+        calls.setPixelRatio++
       },
       dispose: () => {
         calls.dispose++

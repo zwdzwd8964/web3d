@@ -66,6 +66,7 @@ function makeRuntime(doc: SceneDocument, mode: 'edit' | 'play' = 'edit') {
         shadowMap: { enabled: false, type: -1 },
         render: () => undefined,
         setSize: () => undefined,
+        setPixelRatio: () => undefined,
         dispose: () => undefined,
         domElement: {} as HTMLCanvasElement,
       }) as never,

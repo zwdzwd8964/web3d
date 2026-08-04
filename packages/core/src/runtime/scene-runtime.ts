@@ -63,6 +63,15 @@ export interface SceneRuntimeOptions {
   readonly decodeTexture?: TextureDecoder
   /** T-163 · injected in tests; production creates real `<audio>` / `<video>` elements. */
   readonly createMediaElement?: MediaBusOptions['createElement']
+  /**
+   * T-214 · injected in tests; production reads `window.devicePixelRatio`.
+   *
+   * A function rather than a number because the value CHANGES at runtime — dragging a
+   * window between a laptop screen and an external monitor changes it, and so does browser
+   * zoom. Reading it once at construction would leave a 2× screen rendering at whatever the
+   * 1× screen happened to report when the runtime was built.
+   */
+  readonly devicePixelRatio?: () => number
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
@@ -388,6 +397,7 @@ export class SceneRuntime implements RuntimeContext {
     const create = this.options.createRenderer ?? defaultCreateRenderer
     const renderer = isRendererLike(target) ? target : create(target)
     this.renderer = renderer
+    renderer.setPixelRatio(this.pixelRatio())
     const canvas = renderer.domElement
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
     // Tone mapping and the prefilter both live on the renderer, so a document that was
@@ -421,7 +431,35 @@ export class SceneRuntime implements RuntimeContext {
     this.width = Math.max(1, width)
     this.height = Math.max(1, height)
     this.camera.setAspect(this.width / this.height)
+    // Re-applied on every resize, not only on attach: moving a window to a screen with a
+    // different DPI fires a resize and nothing else. Attach-only would leave the canvas on
+    // the old screen's ratio for the rest of the session.
+    this.renderer?.setPixelRatio(this.pixelRatio())
+    // `updateStyle = false` — the canvas is sized by CSS and three must not write inline
+    // width/height onto it. This is load-bearing next to `setPixelRatio`: with it true,
+    // three writes the DEVICE pixel count into the CSS size and a 2× screen shows a canvas
+    // twice the size of its container.
     this.renderer?.setSize(this.width, this.height, false)
+  }
+
+  /**
+   * The device pixel ratio actually used, capped at {@link MAX_PIXEL_RATIO}.
+   *
+   * `setPixelRatio` was called nowhere in this repository before T-214, which means every
+   * high-DPI screen rendered at 1× and let the browser upscale — the usual root cause of
+   * 「描边看起来毛糙」, and why a 3× phone screen could look worse than a 1× monitor.
+   *
+   * The cap is not timidity: cost is quadratic in the ratio, so 3× is 2.25× the pixels of
+   * 2× for a difference almost nobody can see. **The number 2 is not measured** — G0.5-8's
+   * target-machine benchmark is still open (ADR-0022), so it is a decision, not a finding,
+   * until that closes.
+   *
+   * The floor of 1 matters as much as the ceiling: a browser at 50% zoom reports 0.5, and
+   * rendering at half the CSS resolution is visibly blurry rather than merely cheap.
+   */
+  private pixelRatio(): number {
+    const raw = this.options.devicePixelRatio?.() ?? globalThis.devicePixelRatio ?? 1
+    return Math.min(Math.max(raw, 1), MAX_PIXEL_RATIO)
   }
 
   /** Builds the scene graph and loads every model asset the document references. */
@@ -1114,6 +1152,15 @@ export class SceneRuntime implements RuntimeContext {
 export function SEAM_NOT_WIRED(member: string, owner: string): string {
   return `SceneRuntime.${member} 未接线（由 ${owner} 交付）`
 }
+
+/**
+ * T-214 · the ceiling on `setPixelRatio`.
+ *
+ * Exported because the capture clamp has to reason about the same number: a user on a 2×
+ * screen choosing a 4× export is asking for 8× device pixels, which is the
+ * `webglcontextlost` (a white page) that both the runtime and `planCapture` exist to stop.
+ */
+export const MAX_PIXEL_RATIO = 2
 
 /** Production's renderer factory. The single default behind `options.createRenderer`. */
 function defaultCreateRenderer(canvas: HTMLCanvasElement): RendererLike {

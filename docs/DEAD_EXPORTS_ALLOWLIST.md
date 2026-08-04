@@ -27,6 +27,8 @@
 
 | symbol | reason | owner | expires |
 |---|---|---|---|
+| core:captureDevicePixels | 出图按 CSS 像素下单、按设备像素分配，T-262 的 planCapture 用它算真实分辨率；本卡先落公式是因为桩 limits 让缺了它的公式全绿 | T-262 | v1.2 |
+| core:maxCaptureScale | 纹理上限随像素比收紧倍率天花板，T-262 的钳位链调它；同上，本卡只落公式不落 planCapture | T-262 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |

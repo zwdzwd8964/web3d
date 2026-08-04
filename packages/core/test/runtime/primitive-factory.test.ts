@@ -197,6 +197,7 @@ describe('the factory is actually installed in SceneRuntime', () => {
           shadowMap: { enabled: false, type: -1 },
           render: () => undefined,
           setSize: () => undefined,
+          setPixelRatio: () => undefined,
           dispose: () => undefined,
           domElement: {} as HTMLCanvasElement,
         }) as never,

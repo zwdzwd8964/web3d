@@ -759,8 +759,20 @@
 - **变异检验** 不适用（状态卡）。**替代验收**：把 ADR-0014 的状态改回「需人工确认」→
   `check-docs.mjs` 与收尾脚本必须各报一次。
 
-### [ ] T-214 · 设备像素比封顶 2
-- **依赖** T-200（`scene-runtime.ts` 同文件，列 R）· **预估** 0.5d · **实际** —
+### [x] T-214 · 设备像素比封顶 2
+- **依赖** T-200（`scene-runtime.ts` 同文件，列 R）· **预估** 0.5d · **实际** 0.9h
+- **交付偏差**（六个文件，均为接线后的连带修复）：`packages/core/test/runtime/` 下
+  `bounds` · `default-rig` · `environment` · `light-helpers` · `primitive-factory` ·
+  `scene-runtime` 六份测试的渲染器桩各补一行 `setPixelRatio`。**加一行 `renderer.setPixelRatio(...)`
+  让 `pnpm -F @w3/core test runtime` 一次红了 94 条**：这六份桩都以 `as never` /
+  `as unknown as WebGLRenderer` 收尾，因此可以合法地少实现 `RendererLike` 的必填成员。
+  这正是 T-200 的 docstring 点名的形状，第一次被真实用例证实（登记在 `MUTATIONS.md` 的 ⑥）。
+- **卡面点名的那条过期注释不存在**：「出图领域的注释逐字写着『因为 pixelRatio 恒为 1』」——
+  全仓 grep 零命中。`planCapture` 由 T-262 交付，那句话是**将要被写下**的事实，本卡把字段与
+  公式先落地，等于让它永远没机会被写下来。
+- **`captureDevicePixels` / `maxCaptureScale` 进了豁免表**（owner T-262 · 到期 v1.2）：
+  公式今天没有生产调用者，而它必须先于 `planCapture` 存在——否则 T-262 的桩 `limits` 会让
+  一个漏掉像素比的公式在单测里全绿（X-17）。
 - **独占** `packages/core/src/runtime/scene-runtime.ts`（`attachRenderer` / `resize` 两处）·
   `packages/core/test/runtime/pixel-ratio.test.ts`（新）· `packages/core/src/runtime/capability.ts`
   （`CaptureLimits` 的 `pixelRatio` 字段）
