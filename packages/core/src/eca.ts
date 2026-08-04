@@ -15,3 +15,7 @@ export * from './eca/headless.js'
 export * from './eca/ref-kinds.js'
 export * from './eca/testgen.js'
 export * from './eca/types.js'
+// T-215 · the highlight preset table. Exported from the ECA entry point because the rule
+// editor's dropdown is generated from it and the rule editor imports `@w3/core`, not
+// `@w3/core/runtime`. Pure data — no `three` — so C8 still holds.
+export * from './highlight-presets.js'

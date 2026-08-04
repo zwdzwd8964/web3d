@@ -252,10 +252,7 @@ function RuleEditor({
                 set('改动作参数', (r) => {
                   const target = r.then[index]
                   if (!target) return
-                  const params = { ...target.params }
-                  if (value === undefined || value === '') delete params[key]
-                  else params[key] = value
-                  target.params = params
+                  target.params = applyParamChange(target.params, key, value)
                 })
               }
               onMove={(delta) =>
@@ -343,6 +340,31 @@ function ActionRow({
       />
     </li>
   )
+}
+
+/**
+ * One edit to one action parameter, as a pure function.
+ *
+ * Extracted by T-215 for a reason the card names precisely: **clearing a field DELETES the
+ * key**, which is the first of three defects that made 「留空取消高亮」 fail from v0 onwards
+ * (the other two were `preset` not being optional in zod, and the executor reporting
+ * `failed` for the resulting parse error). The behaviour is correct — an absent key is how
+ * a document says "not set", and writing `''` would put an invalid value in the document —
+ * but it can only be TESTED if it is reachable without a DOM, and the editor's tests run in
+ * plain Node.
+ *
+ * Inline, this rule could be described in a test and never actually exercised, which is
+ * exactly how it went unnoticed for two releases.
+ */
+export function applyParamChange(
+  params: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): Record<string, unknown> {
+  const next = { ...params }
+  if (value === undefined || value === '') delete next[key]
+  else next[key] = value
+  return next
 }
 
 function ConditionList({

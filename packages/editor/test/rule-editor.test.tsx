@@ -1,8 +1,9 @@
 import { createGoldenPathDocument, z } from '@w3/schema'
-import type { SceneDocument } from '@w3/schema'
-import { ActionRegistry, allActions, defaultRegistry, defineAction, getAction, registerBuiltinActions } from '@w3/core'
+import type { Rule, SceneDocument } from '@w3/schema'
+import { ActionRegistry, HIGHLIGHT_PRESETS, HeadlessRuntime, allActions, defaultRegistry, defineAction, execute, getAction, registerBuiltinActions } from '@w3/core'
 import type { FieldDescriptor } from '@w3/core'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { applyParamChange } from '../src/panels/RulePanel.jsx'
 import { refOptions } from '../src/rule-editor/ActionFields.jsx'
 import { validateVariableId } from '../src/panels/VariablePanel.jsx'
 
@@ -169,3 +170,49 @@ async function readSource(relative: string): Promise<string> {
   const root = fileURLToPath(new URL('..', import.meta.url))
   return readFile(`${root}${relative}`, 'utf8')
 }
+
+/**
+ * T-215 · the editor half of 「留空取消高亮」.
+ *
+ * The card asks for a test that goes through `RulePanel`'s own `onChange`, and this does —
+ * `applyParamChange` IS that handler, extracted so it can be reached without a DOM. Testing
+ * a re-implementation of the rule would prove nothing; that is how the bug survived two
+ * releases in the first place.
+ */
+describe('T-215 · 选「（未指定）」之后', () => {
+  it('drops the key rather than writing an empty string into the document', () => {
+    const next = applyParamChange({ nodeId: 'nd_00000001', preset: 'outline_amber' }, 'preset', '')
+    expect('preset' in next).toBe(false)
+    expect(next).toEqual({ nodeId: 'nd_00000001' })
+  })
+
+  it('and those params still execute — status is not `failed`', async () => {
+    const doc = createGoldenPathDocument()
+    const nodeId = doc.nodes[0]!.id
+    const params = applyParamChange({ nodeId, preset: 'outline_amber' }, 'preset', '')
+
+    const ctx = new HeadlessRuntime(doc)
+    const registry = registerBuiltinActions(new ActionRegistry())
+    const rule: Rule = {
+      id: 'rl_00000001',
+      name: '取消高亮',
+      enabled: true,
+      when: { event: 'click', target: { nodeId } },
+      if: [],
+      ifAny: [],
+      then: [{ action: 'highlight', params }],
+      mode: 'sequence',
+      reentry: 'restart',
+      onError: 'continue',
+    }
+    const result = await execute(rule, ctx, null, new AbortController().signal, { registry })
+    expect(result.status, JSON.stringify(result.steps)).not.toBe('failed')
+  })
+
+  it('offers every preset in the table, including the one that was unreachable', () => {
+    const field = getAction('highlight')!.ui.fields.find((f) => f.key === 'preset')
+    const options = field && field.type === 'enum' ? field.options : []
+    expect(options.map((o) => o.value)).toEqual(Object.keys(HIGHLIGHT_PRESETS))
+    expect(options.map((o) => o.value)).toContain('outline_white')
+  })
+})

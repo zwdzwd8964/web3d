@@ -793,8 +793,22 @@
   `pixelRatio: 2` 那两行必须红。
 - ⚠ **cross-check X-17**：本卡与出图的 `CaptureLimits` 必须同一张卡或强制串行且出图在后。本表已排在前。
 
-### [ ] T-215 · 高亮「留空取消」与预设表的机械对齐
-- **依赖** 无 · **预估** 0.5d · **实际** —
+### [x] T-215 · 高亮「留空取消」与预设表的机械对齐
+- **依赖** 无 · **预估** 0.5d · **实际** 1.0h
+- **交付偏差**（三处，都是「验收标准要求的东西在当前结构里够不着」）：
+  ① 新建 `packages/core/src/highlight-presets.ts`。预设表原本住在 `runtime/highlight.ts`，
+  而动作定义住在 `eca/actions/`——**core 内部的方向是 `runtime → eca`，从不反向**
+  （`camera-controller` / `environment` / `media-bus` / `playback-session` 四处都是这个方向，
+  `eca/` 里零处 import `runtime/`）。让 eca 去 runtime 取选项会把方向倒过来，而且
+  `runtime/highlight.ts` import 了 three，会把渲染器拖进 ECA 的纯 Node 单测（C8）。
+  表本身是纯数据，所以它该在两者之上。`HIGHLIGHT_PRESETS` 从 `runtime/highlight.ts` 转出，
+  外部导入路径不变；
+  ② `RulePanel.tsx` 把 onChange 的那段抽成导出的纯函数 `applyParamChange`。卡面要求
+  「一条**走 RulePanel onChange 路径**的编辑器测试」，而编辑器单测跑纯 Node、无 jsdom——
+  内联在事件处理器里的规则**可以被测试描述、但永远不会被执行**，这正是它藏了两个版本的原因；
+  ③ `packages/editor/test/{place,snap}.test.ts` 各补一行 `setPixelRatio`（同 T-214 的 ⑥）。
+- **`HighlightPreset` 多了一个 `label` 字段**：选项要从表机械生成，中文标签就必须在表里，
+  否则「机械生成」只搬了 key、标签还是手写的，drift 换个地方接着发生。
 - **独占** `packages/core/src/eca/actions/scene.ts` · `packages/core/src/eca/actions/scene.test.ts` ·
   `packages/editor/src/rule-editor/ActionFields.tsx`（highlight 选项段）
 - **做** ①「留空取消高亮」**从 v0 至今从未工作过**（缺陷横跨 editor 删键 / core zod 非 optional /

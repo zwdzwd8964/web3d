@@ -1,5 +1,6 @@
 import { MaterialIdSchema, NodeIdSchema } from '@w3/schema'
 import { z } from '@w3/schema'
+import { highlightPresetOptions } from '../../highlight-presets.js'
 import type { ActionDefinition } from '../types.js'
 import { defineAction, materialName, nodeName } from './define.js'
 
@@ -34,8 +35,16 @@ export const setVisible = defineAction<z.infer<typeof SetVisibleParams>>({
 
 const SetMaterialParams = z.object({
   nodeId: NodeIdSchema,
-  /** null restores the source asset's own material. */
-  materialId: MaterialIdSchema.nullable(),
+  /**
+   * null restores the source asset's own material.
+   *
+   * `.default(null)` is what makes 「留空还原」 work at all. The rule editor DELETES the key
+   * when the field is cleared (`RulePanel.tsx`: `if (value === '') delete params[key]`), so
+   * without a default the params arrive as `{nodeId}`, zod refuses them for a missing
+   * required field, and the executor reports `status: 'failed'` — for the one gesture the
+   * label tells the user to make.
+   */
+  materialId: MaterialIdSchema.nullable().default(null),
 })
 
 export const setMaterial = defineAction<z.infer<typeof SetMaterialParams>>({
@@ -65,8 +74,8 @@ export const setMaterial = defineAction<z.infer<typeof SetMaterialParams>>({
 
 const HighlightParams = z.object({
   nodeId: NodeIdSchema,
-  /** null clears the highlight. Preset names are semantic, never implementation names. */
-  preset: z.string().nullable(),
+  /** null clears the highlight. See `SetMaterialParams.materialId` for why `.default(null)`. */
+  preset: z.string().nullable().default(null),
   includeDescendants: z.boolean().default(false),
 })
 
@@ -86,12 +95,10 @@ export const highlight = defineAction<z.infer<typeof HighlightParams>>({
         key: 'preset',
         type: 'enum',
         label: '预设（留空取消）',
-        options: [
-          { value: 'outline_amber', label: '琥珀' },
-          { value: 'outline_cyan', label: '青' },
-          { value: 'outline_red', label: '红' },
-          { value: 'outline_green', label: '绿' },
-        ],
+        // Generated from HIGHLIGHT_PRESETS, never typed alongside it. The hand-written list
+        // that used to sit here had four entries against the table's five, which made
+        // `outline_white` a preset no user could select — for the whole of v0 and v0.5.
+        options: highlightPresetOptions(),
       },
       { key: 'includeDescendants', type: 'boolean', label: '包含子对象', default: false },
     ],

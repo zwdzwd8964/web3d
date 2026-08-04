@@ -1,5 +1,6 @@
 import { Color } from 'three'
 import type { Material, Mesh } from 'three'
+import { HIGHLIGHT_PRESETS } from '../highlight-presets.js'
 import type { MaterialRegistry } from './material-registry.js'
 import type { SceneGraph } from './scene-graph.js'
 
@@ -19,18 +20,11 @@ import type { SceneGraph } from './scene-graph.js'
  * never lights up its siblings (R08).
  */
 
-export interface HighlightPreset {
-  readonly emissive: string
-  readonly emissiveIntensity: number
-}
-
-export const HIGHLIGHT_PRESETS: Record<string, HighlightPreset> = {
-  outline_amber: { emissive: '#ffb020', emissiveIntensity: 0.55 },
-  outline_cyan: { emissive: '#4aa8c7', emissiveIntensity: 0.5 },
-  outline_red: { emissive: '#e2603f', emissiveIntensity: 0.55 },
-  outline_green: { emissive: '#63b37a', emissiveIntensity: 0.5 },
-  outline_white: { emissive: '#e6eaed', emissiveIntensity: 0.45 },
-}
+// T-215 · the table moved to `../highlight-presets.js` so the rule editor's dropdown can be
+// generated from it. Re-exported here because `HighlightLayer` is what everything else
+// imports, and a preset is meaningless without the layer that applies it.
+export { HIGHLIGHT_PRESETS } from '../highlight-presets.js'
+export type { HighlightPreset } from '../highlight-presets.js'
 
 /** Exactly what was there before, so clearing restores field by field. */
 interface Snapshot {
