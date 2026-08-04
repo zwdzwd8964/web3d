@@ -130,7 +130,11 @@ three 0.185 已删除 `WebGL1Renderer` 且只请求 `webgl2` 上下文，卡片�
 **商务影响**：只有 WebGL 1 的浏览器会看到说明页而不是内容。这是真实的商业损失，
 需要在签约前与客户确认部署环境。
 
-### 需人工确认的一项偏差
+**✅ 2026-08-04（T-213）· zwdzwd8964 确认：全部部署环境支持 WebGL 2。**
+确认记录写进 ADR-0013 的「商务确认记录」一节。**这条商务影响自此从「待确认风险」变成
+「变更项的触发条件」**——再出现一台只有 WebGL 1 的机器，按范围变更计价，不是本版缺陷。
+
+### 一项偏差，已销案
 
 T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放在
 `packages/core/src/runtime/playback-session.ts`。理由是播放器不能依赖编辑器
@@ -138,7 +142,13 @@ T-102 卡片指定 `packages/editor/src/preview/preview-session.ts`，实际放�
 
 按 CLAUDE.md「什么时候必须停下来问人」第 5 条，任务卡验收标准与 SPEC 冲突
 **应当停工问人**，而不是自行写 ADR 放行。已写 [ADR-0014](adr/0014-共用播放会话放在-core.md)
-记录选择与代价，但**未自行销案**，等人工确认。
+记录选择与代价。
+
+**✅ 2026-08-04（T-213）· zwdzwd8964 人工确认并销案。** 确认时复核了三条事实基础，
+今天全部仍然成立：`playback-session.ts` 在 · `editor/src/preview/controller.ts` 在 ·
+卡片指定的 `preview-session.ts` **仍然不存在**。
+**这两条「等人工确认」从 v0 挂到今天，靠的是没有任何机器在看它们**——
+`check-docs.mjs` 的规则 8（T-213 新建）现在逐份读 `docs/adr` 的状态行。
 
 ### 对抗式审查未修完的 11 条（人工审阅项）
 

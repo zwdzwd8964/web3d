@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * T-207 · 文档零漂移的七条规则。Gate G1.0-7 · A6 的 Q-1。
+ * T-207 · 文档零漂移的规则集（T-207 建七条，T-213 加第八条）。Gate G1.0-7 · A6 的 Q-1。
  *
  * 这个仓库已经实证过五处文档漂移，其中一处是**一条按字面执行会「命令不存在」的晋级门槛**
  * （`pnpm size-limit`，写在四份文档里，包括宪法的 G0.5-7）。一条执行即失败的门槛不是严格的
@@ -21,6 +21,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ACCEPTED, readAdrStatuses } from './lib/adr-status.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PLAN = 'docs/MVP_V1_进化规划.md'
@@ -673,6 +674,43 @@ function testFilesMatching(command) {
 }
 
 /* ========================================================================== */
+/* 规则 8 · 每一份 ADR 的状态都是 Accepted                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * T-213 · 遗留决议清零，作为一条机器规则。
+ *
+ * **这条规则本来不存在，而 T-213 的「替代验收」正是建立在它身上的**（「把 ADR-0014 的状态
+ * 改回『需人工确认』→ `check-docs.mjs` 必须报一次」）。实测证据是现状本身：本卡开工那一刻
+ * `docs/adr/0014-*.md:3` 正写着「已接受（**但需人工确认**，见下）」，而 `pnpm check:docs`
+ * 输出 PASS、exit 0。七条规则里唯一碰 `docs/adr` 的是规则 3，它**数文件个数**，不读内容。
+ *
+ * 规划 §7.2 的人工项 H4（遗留决议清零）此前只有人眼守着；现在它有一台机器。
+ */
+function ruleEightAdrStatus() {
+  const dir = join(ROOT, 'docs/adr')
+  const { rows, problems } = readAdrStatuses(dir)
+
+  for (const p of problems) fail('规则 8', `docs/adr/${p.file}  ${p.message}`)
+
+  for (const row of rows) {
+    if (row.status === ACCEPTED) continue
+    fail(
+      '规则 8',
+      `docs/adr/${row.file}:${row.line}  状态是「${row.raw}」而不是 ${ACCEPTED}。` +
+        `合并进仓的 ADR 只有这一个合法状态——待确认的决议要么去确认，要么带一个到期版本号（NORTH_STAR §8）`,
+    )
+  }
+
+  // 下限断在 ADR 文件数上，不是断在非 Accepted 的条数上：今天合法地是 0 条非 Accepted，
+  // 拿它当下限这条规则当天就无法通过；而 glob 写错时文件数会掉到 0，这条断言正为它准备。
+  if (rows.length < 25) {
+    fail('规则 8', `只读到 ${rows.length} 份 ADR 的状态行（下限 25）——多半是 docs/adr 的路径或文件名正则坏了，不是 ADR 变少了`)
+  }
+  note(`规则 8 · ${rows.length} 份 ADR 状态逐份比对，全部为 ${ACCEPTED}`)
+}
+
+/* -------------------------------------------------------------------------- */
 /* 规则 7 · 门槛编号区间在规划与台账里必须相等                                  */
 /* ========================================================================== */
 
@@ -721,12 +759,13 @@ ruleFourTotals()
 ruleFiveScopeCoverage()
 ruleSixGateCommands()
 ruleSevenGateRanges()
+ruleEightAdrStatus()
 
 console.log('')
 for (const n of notes) console.log(`  ${n}`)
 console.log('')
 if (failures.length === 0) {
-  console.log('PASS  G1.0-7 · 文档零漂移（七条规则）')
+  console.log('PASS  G1.0-7 · 文档零漂移（八条规则）')
   process.exit(0)
 }
 console.error(`FAIL  G1.0-7 · 文档零漂移  — ${failures.length} violation(s)`)

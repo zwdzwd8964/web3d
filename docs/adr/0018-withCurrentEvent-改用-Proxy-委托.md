@@ -1,6 +1,6 @@
 # ADR-0018 · `withCurrentEvent` 改用 Proxy 委托
 
-- **状态**：已采纳（2026-08-01，人工裁决）
+- **状态**：Accepted（人工裁决，2026-08-01）
 - **背景卡**：T-163（`playMedia` / `stopMedia` 与 MediaBus）
 - **相关**：ADR-0011、[IMPL_NOTES §4 · T-135 登记的一条](../IMPL_NOTES.md)、宪法 C5
 
