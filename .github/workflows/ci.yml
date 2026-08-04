@@ -201,15 +201,36 @@ jobs:
       # `--network none` 给容器一块**没有网卡**的网络命名空间。不是防火墙、不是代理，
       # 是物理上没有出口——任何 DNS 解析都会立刻失败。
       # 源码与步骤 1 装好的 node_modules 一起挂进去。
+      # ⚠ **两个环境变量是这个 job 的第一次真实发现，不是配置噪音。**
+      #
+      # 第一次跑这一步红了，日志里 431 个包在轮流重试 registry，卡了 24 分 30 秒。栈顶是
+      # `runDepsStatusCheck` —— **pnpm 11 在执行任何脚本之前会先核对 node_modules 与
+      # lockfile，那次核对会发起 `pnpm install`，install 里又带一次 supply-chain policy
+      # 校验，两者都要联网。** 也就是说 `pnpm build` 这条命令自己就会打电话回家。
+      #
+      # 本机看不见：本机 `~/.cache` 里有「1 小时前验过」的记录，直接走缓存。容器里 HOME 是
+      # 全新的 `/root`，没有那条记录，于是它去问 registry。**这正是内网客户的处境**——
+      # 他们的机器也没有那条记录。
+      #
+      #   pnpm_config_verify_deps_before_run=false  关掉那次核对（连带关掉它触发的 install）
+      #   pnpm_config_fetch_retries=0               让真的出网尝试**立刻**失败而不是重试 24 分钟
+      #
+      # 第二个尤其要紧：一个 24 分钟后超时的 job 什么都不告诉你，一个 3 秒内报出
+      # 「EAI_AGAIN registry.npmjs.org/xxx」的 job 直接点名是谁在出网。
       - name: 步骤 2 · 断网构建
         run: |
-          docker run --rm --network none             -v "$PWD":/src -w /src             web3d-offline:ci pnpm build
+          docker run --rm --network none \
+            -e pnpm_config_verify_deps_before_run=false \
+            -e pnpm_config_fetch_retries=0 \
+            -v "$PWD":/src -w /src \
+            web3d-offline:ci pnpm build
 
       # 反向证据：证明上一步的 `--network none` 真的生效，而不是命令根本没跑到那里。
       # 一个「跑了但什么都没做」的步骤与一个「跑了并且通过」的步骤，在日志里长得一样。
       - name: 反向证据 · 同一个容器里出网必须失败
         run: |
-          if docker run --rm --network none web3d-offline:ci                node -e "fetch('https://registry.npmjs.org/').then(()=>process.exit(0),()=>process.exit(3))"; then
+          if docker run --rm --network none web3d-offline:ci \
+               node -e "fetch('https://registry.npmjs.org/').then(()=>process.exit(0),()=>process.exit(3))"; then
             echo "::error::--network none 没有生效：容器在无网卡模式下仍然连上了 registry"
             exit 1
           fi

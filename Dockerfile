@@ -14,7 +14,14 @@
 FROM node:24-slim AS build
 
 # CI=1 让 corepack 不弹交互确认，同时 pnpm 默认 frozen-lockfile。
-ENV CI=1
+#
+# verify_deps_before_run=false 是 T-210 的断网 job 查出来的：**pnpm 11 在执行任何脚本
+# 之前会核对 node_modules 与 lockfile，那次核对会发起一次带 supply-chain 校验的
+# `pnpm install`，两者都要联网。** 联网构建时它只是慢；**在客户的内网机器上，
+# `pnpm build` 这一行会挂在 registry 重试上**，而那台机器永远等不到网。
+# 这一行让这份交付物本身能在断网环境里构建。
+ENV CI=1 \
+    pnpm_config_verify_deps_before_run=false
 RUN corepack enable
 
 WORKDIR /src

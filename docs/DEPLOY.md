@@ -65,6 +65,27 @@ railway domain                # 分配一个 *.up.railway.app 域名
 > 「唯一能证伪的」：播放器的 HTML 引用的是 `/player/assets/…`，`--base` 没有漏。
 > `/vendor/draco/gltf/draco_decoder.wasm` 的 `Content-Type` 实测是 `application/wasm`。
 
+### 3.1 ⚠ 内网 / 断网机器上构建，必须多设一个环境变量
+
+```bash
+export pnpm_config_verify_deps_before_run=false
+```
+
+**`Dockerfile` 里已经设了这一行**，所以走容器路径的人不用管。手动在一台内网机器上跑
+`pnpm build` 的人必须自己设，否则**会挂住**，且现象具有误导性。
+
+原因（T-210 的断网 job 第一次跑就撞上了）：**pnpm 11 在执行任何脚本之前，会先核对
+`node_modules` 与 lockfile 是否一致。那次核对会发起一次 `pnpm install`，install 里又带一次
+supply-chain policy 校验——两者都要联网。** 也就是说 `pnpm build` 这条命令自己会去问
+registry，跟你的代码一个字节都没关系。
+
+**它在联网机器上完全看不出来**：本机 `~/.cache` 里有「N 小时前验过」的记录，直接走缓存。
+一台全新的内网机器没有那条记录。实测现象是 431 个包轮流重试 registry，**卡 24 分 30 秒**
+之后才报错。
+
+顺手建议一起设 `pnpm_config_fetch_retries=0`：真的出网时**立刻**失败并点名是哪个包，
+而不是重试半小时之后给你一个超时。
+
 ## 4 · 自建容器
 
 ```bash
