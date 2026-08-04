@@ -12,6 +12,11 @@ coverage
 **/coverage
 *.tsbuildinfo
 
+# 发布包样例：`packages/player/public` 下躺着 golden.w3p（4,555 B）与 gp2.w3p（84,681 B），
+# 它们是 E2E 的夹具，不是要发出去的内容。`COPY . .` 会把它们带进镜像并被 nginx 从
+# /player/ 下服务出去——一份谁都能下载的示例文档，没人会注意到它在那里。
+**/public/*.w3p
+
 test-results
 playwright-report
 blob-report

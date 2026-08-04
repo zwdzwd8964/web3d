@@ -18,10 +18,16 @@
 #
 # So `build` runs first and everything else keeps the card's order behind it.
 #
-# Not here, on purpose: the offline build (C6). A real 断网 build needs a pre-seeded store
-# and a network-denied runner; approximating it with a warm pnpm cache would prove almost
-# nothing while looking like proof. It stays an IMPL_NOTES §2 unverified item and belongs
-# to T-173, which owns 断网构建 + 断网 dev 冒烟.
+# The offline build (C6) is the `offline` job below (T-210).
+#
+# This comment used to say the offline build "belongs to T-173" — while T-173's own card
+# said it had been swapped for a runtime-offline E2E and was marked `[x]`. **两边互指，
+# 事实上没人做**: C6's build half went unverified for two releases because each side
+# believed the other owned it. `IMPL_NOTES` U-17 recorded it as unverified the whole time.
+#
+# The reasoning that comment gave was right, and the job below is built on it: a warm pnpm
+# cache proves almost nothing while looking like proof. So `offline` denies the network
+# twice over, at two different layers — see its own notes.
 
 name: CI
 
@@ -132,3 +138,90 @@ jobs:
             e2e/playwright-report
             e2e/test-results
           retention-days: 7
+
+  # ── C6 · 断网能跑 ─────────────────────────────────────────────────────────
+  #
+  # 这个 job 是宪法 C6 的构建那一半。它防的不是「忘了自托管一个解码器」——那由
+  # `check-no-external.mjs` 扫构建产物拦住；它防的是**装不上**与**构建时去拉东西**：
+  # 客户在内网，一次 `pnpm install` 缺一个包，或者某个构建插件运行时去 CDN 取一份
+  # 配置，部署当天才会发现，而那天没有网可以给它。
+  #
+  # 两层断网，因为它们抓的是不同的东西：
+  #   步骤 1 · 依赖层  —— store 预热后删掉 node_modules，`--offline` 装。任何一个包
+  #                       不在 store 里就装不上。**遗漏的表现是安装步骤红，不是编译步骤红。**
+  #   步骤 2 · 构建层  —— 在一个**没有网卡**的容器里跑构建（`--network none`）。
+  #                       依赖都在了，但凡构建过程想拉一个字节，这里就红。
+  #
+  # 只做第 1 层是不够的：`--offline` 只管 pnpm 自己，管不住 vite 插件或 postinstall
+  # 脚本发起的请求。只做第 2 层也不够：镜像里 `pnpm install` 那一步是联网跑的。
+  offline:
+    name: offline（断网安装 · 断网构建）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 预热：这一步是**允许联网**的，它模拟的是「客户拿到一份完整的离线包」。
+      # 之后的每一步都不许再碰网。
+      - name: 预热 pnpm store（唯一允许联网的一步）
+        run: pnpm fetch
+
+      - name: 删掉 node_modules，模拟一台干净的内网机器
+        run: rm -rf node_modules packages/*/node_modules e2e/node_modules tools/*/node_modules
+
+      # `--offline` 让 pnpm 完全不发请求：store 里没有的包直接报错，而不是去下载。
+      # `--frozen-lockfile` 保证装的就是锁定的那一份。
+      - name: 步骤 1 · 断网安装
+        run: pnpm install --offline --frozen-lockfile
+
+      # ⚠ **不用 `COPY . .`。** `.dockerignore` 排掉了 `node_modules`（部署镜像不该带它们），
+      # 于是 `COPY . .` 造出来的镜像里一个依赖都没有——断网构建会因为「没装依赖」而红，
+      # 看起来像 C6 出了问题，实际是 dockerignore 的作用域搞错了。**这个坑在推之前被抓到，
+      # 没有烧掉一轮 CI。**
+      #
+      # 改成：镜像里只装 pnpm（这一步允许联网），源码与已装好的 node_modules 在 run 时挂进去。
+      - name: 造一个只带 pnpm 的镜像（允许联网的最后一步）
+        run: |
+          cat > Dockerfile.offline <<'DOCKERFILE'
+          # 只为断网构建服务，不参与部署（部署那份是根目录的 Dockerfile）。
+          # 刻意不 COPY 任何源码：源码在 run 时挂载，避免 .dockerignore 把 node_modules 排掉。
+          FROM node:24-slim
+          ENV CI=1
+          # corepack 取 pnpm 是要联网的，所以必须在镜像构建期做完 —— 之后容器里没有网。
+          RUN corepack enable && corepack prepare pnpm@11.12.0 --activate
+          DOCKERFILE
+          docker build -f Dockerfile.offline -t web3d-offline:ci .
+
+      # `--network none` 给容器一块**没有网卡**的网络命名空间。不是防火墙、不是代理，
+      # 是物理上没有出口——任何 DNS 解析都会立刻失败。
+      # 源码与步骤 1 装好的 node_modules 一起挂进去。
+      - name: 步骤 2 · 断网构建
+        run: |
+          docker run --rm --network none             -v "$PWD":/src -w /src             web3d-offline:ci pnpm build
+
+      # 反向证据：证明上一步的 `--network none` 真的生效，而不是命令根本没跑到那里。
+      # 一个「跑了但什么都没做」的步骤与一个「跑了并且通过」的步骤，在日志里长得一样。
+      - name: 反向证据 · 同一个容器里出网必须失败
+        run: |
+          if docker run --rm --network none web3d-offline:ci                node -e "fetch('https://registry.npmjs.org/').then(()=>process.exit(0),()=>process.exit(3))"; then
+            echo "::error::--network none 没有生效：容器在无网卡模式下仍然连上了 registry"
+            exit 1
+          fi
+          echo "确认：同一个容器里 fetch 出网失败，上一步的构建确实是在断网下完成的"
+
+      # 镜像里不许出现 .w3p —— 部署镜像那份由 .dockerignore 拦（本卡补的那一行），
+      # 这里顺手验证那条规则本身没写错。
+      - name: 部署镜像里不许有 .w3p 样例
+        run: |
+          docker build -t web3d-deploy:ci .
+          if docker run --rm --entrypoint sh web3d-deploy:ci -c "find /usr/share/nginx/html -name '*.w3p' | head -1" | grep -q w3p; then
+            echo "::error::部署镜像里带出了 .w3p 样例文档，.dockerignore 的那条规则没生效"
+            exit 1
+          fi
+          echo "确认：部署镜像里零个 .w3p"
