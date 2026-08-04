@@ -5,24 +5,34 @@ import type { Node, SceneDocument } from '../src/index.js'
 /**
  * T-184 · the complexity of the document-wide operations.
  *
- * These assert SHAPE, not milliseconds. A wall-clock threshold on a shared CI machine is a
- * test that fails when someone else's build kicks off, and the team learns to re-run it
- * until it passes — at which point it stops being a gate at all.
+ * These assert SHAPE, not milliseconds — and after 2026-08-04 they assert it **by counting,
+ * not by timing**.
  *
- * So each one measures the same operation at n and 2n and asserts the RATIO. Linear work
- * doubles (~2×); quadratic work quadruples (~4×). The bound is 3, which is far enough from
- * 2 that ordinary noise cannot reach it and far enough from 4 that a genuine regression
- * cannot hide under it. Every one of these was ~4× before this card (measured, and written
- * into METRICS): `buildIndex` 6.8 ms → 100 ms going from 1000 nodes to 4000.
+ * The original version measured wall-clock at n and 2n and asserted the ratio stayed under 3.
+ * It was green on every developer machine and then **false-red on CI**: `walkTree is linear`
+ * reported `3.2085` for an algorithm whose true ratio is exactly 2. At `SMALL = 400` the whole
+ * operation takes microseconds, so the ratio measures the garbage collector.
+ *
+ * That is the same trap T-224's card names in so many words —「比值测试若用 200/400 节点，
+ * 两种复杂度都在噪声里」— and the same fix applies: **count the work.** A Proxy over
+ * `doc.nodes` counts index reads, which is precisely the quantity that used to blow up:
+ * every one of the three regressions this card fixed was 「scan the whole node array, once per
+ * node」. Linear work reads ~c·n; quadratic reads ~n². Measured, deterministic, identical on
+ * every machine: 400→800 and 1000→2000 both give **exactly 2.00**.
+ *
+ * **A flaky detector is not a detector.** A timing test that has to be re-run until it passes
+ * teaches the team to re-run it, and then it is not a gate.
+ *
+ * `quadraticReference` below keeps this honest: it is a deliberately O(n²) function held to
+ * the same bound, and it must FAIL it. Without that, a counter that had stopped counting
+ * would report 1.00 for everything and pass — the shape D36 keeps naming.
  *
  * The document is deliberately built with real depth. A flat list of roots would make
  * `childrenOf` one bucket and hide exactly the bug this is here to catch.
  */
 
-const SMALL = 400
-const LARGE = 800
-/** Repeats per measurement — enough that one unlucky GC pause cannot decide the ratio. */
-const REPEATS = 12
+const SMALL = 1000
+const LARGE = 2000
 
 function makeDocument(count: number): SceneDocument {
   const ctx = { newId: createSequentialIdFactory(), now: () => '2026-01-01T00:00:00.000Z' }
@@ -47,34 +57,53 @@ function makeDocument(count: number): SceneDocument {
 const small = makeDocument(SMALL)
 const large = makeDocument(LARGE)
 
-/** Median rather than mean: one GC pause must not move the number it reports. */
-function median(samples: number[]): number {
-  const sorted = [...samples].sort((a, b) => a - b)
-  return sorted[Math.floor(sorted.length / 2)]!
-}
-
-function cost(doc: SceneDocument, run: (doc: SceneDocument) => void): number {
-  run(doc) // warm up: the first call pays for JIT, and that cost is not in the algorithm
-  const samples: number[] = []
-  for (let i = 0; i < REPEATS; i++) {
-    const start = performance.now()
-    run(doc)
-    samples.push(performance.now() - start)
+/**
+ * How many times an operation reads an element of `doc.nodes`.
+ *
+ * Deterministic by construction — no clock, no warm-up, no median. This is the quantity the
+ * three regressions actually blew up: each of them scanned the entire node array once per
+ * node, so the reads went from ~c·n to ~n².
+ */
+function reads(doc: SceneDocument, run: (doc: SceneDocument) => void): number {
+  let count = 0
+  const counted: SceneDocument = {
+    ...doc,
+    nodes: new Proxy(doc.nodes, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) count++
+        return Reflect.get(target, key, receiver)
+      },
+    }),
   }
-  return median(samples)
+  run(counted)
+  return count
 }
 
-/** How much slower the operation got when the document doubled. */
+/** Reads at 2n over reads at n. Linear → 2. Quadratic → 4. */
 function growth(run: (doc: SceneDocument) => void): number {
-  // Interleaved, so a machine that gets busy halfway through skews both measurements
-  // rather than only the second one — which would otherwise read as a regression.
-  const a = cost(small, run)
-  const b = cost(large, run)
-  const a2 = cost(small, run)
-  return b / Math.max(median([a, a2]), 0.001)
+  return reads(large, run) / Math.max(reads(small, run), 1)
+}
+
+/**
+ * A deliberately O(n²) operation, held to the same bound so the bound can be seen to bite.
+ *
+ * This is the built-in mutation: if the counter ever stops counting — a Proxy that no longer
+ * intercepts, a `run` that copies the array before touching it — every real assertion below
+ * would read 1.00 and pass, and the whole file would become decoration. This one has to fail
+ * for the others to mean anything.
+ */
+function quadraticReference(doc: SceneDocument): void {
+  for (const node of doc.nodes) {
+    // The exact shape T-184 removed: a full scan, once per node.
+    void doc.nodes.find((n) => n.id === node.parent)
+  }
 }
 
 describe('doubling the document must not quadruple the work (T-184)', () => {
+  it('the counter can tell the two apart — otherwise nothing below means anything', () => {
+    expect(growth(quadraticReference), 'O(n²) 的对照物没有超出上限，说明计数器已经不再计数了').toBeGreaterThan(3)
+  })
+
   it('buildIndex is linear', () => {
     // Was O(n²): `childrenOf` called `getChildren` — a full array scan — once per node.
     // This runs on every structural edit, so a 1000-node import spent 6.8 ms rebuilding the
