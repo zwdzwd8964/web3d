@@ -932,14 +932,45 @@
 - **变异检验** ① 三角面公式改成一律 `count/3` → 交叉校验红；② 去掉 `registerExtensions` →
   「Draco 不再抛异常」红；③ 分流条件写反 → 红；④ 不校验 magic → 「非 GLB 返回 null」红。
 
-### [ ] T-218 · Draco 解码真资产端到端
-- **依赖** T-217 · T-208 · **预估** 1.5d · **实际** —
+### [x] T-218 · Draco 解码真资产端到端
+- **依赖** T-217 · T-208 · **预估** 1.5d · **实际** 1.6h
 - ✅ **依赖审批已闭合**：`draco3dgltf`（Apache-2.0，emscripten WASM + JS 胶水，无 node-gyp）与
   `@gltf-transform/extensions`（MIT，纯 JS）**已由 [ADR-0030](adr/0030-批准-v1-新增第三方依赖.md) 批准**
   （拍板项 P-15）。**本卡不再需要停下来问人**。落地纪律照 ADR-0030：`draco3dgltf` 只进
   `devDependencies`（fixture 生成脚本人工执行，不在 build / CI / verify 路径上）· 版本精确锁定不许 caret ·
   许可证登记进 `docs/LICENSES_LIBRARY.md` 新增的「三方 npm 依赖」节并点名 Apache-2.0 的 NOTICE 义务 ·
   断网 job `offline` 的预热 store 同批更新（**遗漏的表现是安装步骤红，不是编译步骤红**）。
+- **✅ 债 H 的 Draco 那一半已清**：`IMPL_NOTES` U-15 由「未执行」改为「已真实执行」。
+  实测取回两条**同源** URL：`draco_wasm_wrapper.js`（276,778 字节 · `text/javascript`）
+  与 `draco_decoder.wasm`；体检报告 `tris 24`，与未压缩同源件逐项相等。
+- **卡面三处不成立，两处已由 [ADR-0032](adr/0032-draco-取证的第三层改挂-e2e.md) 就地更正**：
+  ① **第三层（`AssetLoader.parse` 的 `indexObjects` 键集合）在 Node 里不可能通过**——three 的
+  `DRACOLoader` 需要 `fetch(file://)` 与 `new Worker`，Node 两样都没有（实测
+  `TypeError: fetch failed` / `typeof Worker === 'undefined'`），而 core 的 vitest 是
+  `environment: 'node'`（C8 要求）。改挂 E2E，Node 侧换成用 `draco3dgltf` **真解一遍**
+  再比顶点数与三角面数——比比键名集合更强；
+  ② **变异 ① 的期望层数错了**——第 2 层是 `auditGlb`，对压缩容器走 `measureFromHeader`，
+  一行 three 都不碰。实测注掉 `setDRACOLoader` 之后 Node 侧 **6/6 全绿**、E2E 红；
+  ③ **做①「`glb.ts:51` 没有 indices，要补 `setIndices`」指错了文件**——本卡用的
+  `buildSamplePumpGlb()`（`sample.ts:22`）在 `:103` **已经** `setIndices`；`glb.ts:51`
+  是另一个函数，且它「没索引」是 T-217 刻意依赖的性质，`sample.ts` 还是 T-294 的独占。整条跳过。
+- **E2E 的 `status() === 200` 是恒真断言，已换掉。** vite dev 的 SPA 兜底对任何未命中路径
+  都回 `200 OK` + `index.html`（实测 751 字节 `<!doctype html>`）。现场证据见变异 ①′：
+  把 `dracoPath` 指向 `/nope/` 之后浏览器抛 `Uncaught SyntaxError: Unexpected token '<'`
+  ——它把兜底页当 JS 解析了。改成断 `content-type` 与前四字节（` asm`）。
+- **交付偏差**（五处，均在提交信息里点名）：`e2e/fixtures/requests.ts`（新，与 T-219 共用的
+  请求收集器，避免两份）· `docs/IMPL_NOTES.md`（U-15）· `docs/MUTATIONS.md` ·
+  `pnpm-lock.yaml` · `docs/V1_KICKOFF.md` + `README.md`（ADR 计数 31 → 32）。
+  **`e2e/package.json` 在独占清单里但无需改动**：收集器只用 `@playwright/test`，已是 devDep。
+- **依赖解析用 `createRequire` 锚在 `packages/core/package.json` 上。** pnpm 隔离布局下，
+  根目录脚本裸 import 解析不到 `draco3dgltf`——实测 `@gltf-transform/core` 与 `/extensions`
+  也一样。三者都有 CJS 入口，一个锚定 `require` 全覆盖。**不把它们提升为根 devDep**：
+  那会给这个仓库的每一次安装都塞一个 Draco 编码器。
+- **`draco3dgltf` 的 Apache-2.0 NOTICE 义务**登记进 `LICENSES_LIBRARY` 新增的「三方 npm 依赖」节：
+  它**不随任何分发产物出去**，所以义务当前不触发；哪天它进了 `dependencies`，那一格必须同批改。
+- **落地纪律欠一笔**：ADR-0030 要求「断网 job `offline` 的预热 store 同批更新」，而那个 job
+  今天不存在（由 T-210 交付，本批已跳过）。**T-210 落地时必须把 `draco3dgltf` 纳入预热**，
+  遗漏的表现是安装步骤红、不是编译步骤红。
 - **独占** `scripts/gen-draco-fixture.mjs`（新）· `e2e/fixtures/pump-draco.glb`（新，二进制）·
   `e2e/tests/decoders.spec.ts`（新）· `packages/core/test/assets/draco-fixture.test.ts`（新）·
   `packages/core/package.json`（devDep）· `e2e/package.json` · `docs/LICENSES_LIBRARY.md`

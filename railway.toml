@@ -1,0 +1,15 @@
+# Railway 部署配置（config-as-code）。
+#
+# 纯静态部署：没有数据库，没有 Volume，不需要任何环境变量 —— 宪法 C6 决定了
+# 运行时不会向外发请求，所以也没有密钥可配。$PORT 由 Railway 注入，nginx 模板
+# 在启动时用 envsubst 填。
+
+[build]
+builder        = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath         = "/healthz"
+healthcheckTimeout      = 60
+restartPolicyType       = "on_failure"
+restartPolicyMaxRetries = 3

@@ -72,6 +72,8 @@ export default tseslint.config(
         Buffer: 'readonly',
         performance: 'readonly',
         URL: 'readonly',
+        // T-218 · `gen-draco-fixture.mjs` decodes the GLB's JSON chunk to print what it wrote.
+        TextDecoder: 'readonly',
       },
     },
   },

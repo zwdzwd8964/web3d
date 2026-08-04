@@ -1,0 +1,22 @@
+# 注意：e2e/ 、tools/ 、test/ 都不能排除 —— pnpm-workspace.yaml 把它们列为
+# workspace 成员，目录缺失会让 --frozen-lockfile 判定 lockfile 不一致。
+node_modules
+**/node_modules
+.git
+.gitignore
+.github
+
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+
+test-results
+playwright-report
+blob-report
+.playwright
+
+.vscode
+.env
+.env.*

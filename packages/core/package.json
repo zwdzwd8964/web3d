@@ -36,6 +36,7 @@
     "three": "0.185.1"
   },
   "devDependencies": {
-    "@types/three": "0.185.1"
+    "@types/three": "0.185.1",
+    "draco3dgltf": "1.5.7"
   }
 }

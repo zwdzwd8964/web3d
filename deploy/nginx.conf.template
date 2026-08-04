@@ -1,0 +1,66 @@
+# 由 nginx 官方 entrypoint 的 envsubst 渲染（只替换 ${PORT}，见 Dockerfile）。
+server {
+    listen      ${PORT};
+    listen      [::]:${PORT};
+    server_name _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # types 块是「替换」而不是「追加」继承来的 mime.types，所以这里要把用到的
+    # 类型写全。.w3p / .hdr / .ktx2 / .bin / .drc 走 default_type，二进制读取
+    # 不看 Content-Type。
+    types {
+        text/html           html;
+        text/css            css;
+        text/javascript     js mjs;
+        application/json    json map webmanifest;
+        application/wasm    wasm;
+        image/png           png;
+        image/jpeg          jpg jpeg;
+        image/webp          webp;
+        image/svg+xml       svg;
+        image/x-icon        ico;
+        font/woff2          woff2;
+        model/gltf-binary   glb;
+        model/gltf+json     gltf;
+        text/plain          txt;
+    }
+    default_type application/octet-stream;
+
+    # 只压文本类。.glb / .w3p / .hdr 本身已经是压缩格式，再压一遍纯烧 CPU。
+    gzip            on;
+    gzip_comp_level 6;
+    gzip_min_length 1024;
+    gzip_types      text/css text/javascript application/json application/wasm image/svg+xml;
+
+    client_max_body_size 0;
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Vite 产物带内容哈希，可以永久缓存。
+    location ~* ^/(player/)?assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location /vendor/ {
+        expires 30d;
+        try_files $uri =404;
+    }
+
+    # 播放器（构建时 --base=/player/）。
+    location /player/ {
+        try_files $uri $uri/ /player/index.html;
+    }
+
+    # 编辑器。
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

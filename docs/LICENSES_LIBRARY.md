@@ -55,6 +55,31 @@
 
 ---
 
+## 1.2 三方 npm 依赖（ADR-0030 落地纪律 2）
+
+**这一节登记的不是内置库内容，是随构建产物再分发的第三方代码。** 与上面一节同一个理由：
+一个来源不明的字节在验收前没人会发现，在验收后是合同问题。
+
+| 包 | 版本 | 许可证 | 用途 | 引入卡 | 是否随分发再分发 |
+|---|---|---|---|---|---|
+| `draco3dgltf` | `1.5.7`（精确锁定，不许 caret） | **Apache-2.0** | **仅**用于人工一次性生成 `e2e/fixtures/pump-draco.glb`。`packages/core` 的 **devDependency**，不在 build / CI / `pnpm verify` 的任何路径上 | T-218 | **否** |
+| `@gltf-transform/core` | `4.4.2` | MIT | GLB 读写与体检测量 | T-141 / T-217 | 是（打包进 editor） |
+| `@gltf-transform/extensions` | `4.4.2` | MIT | 读 `KHR_draco_mesh_compression` 等扩展块 | T-217（由传递依赖提升为直接依赖） | 是（打包进 editor） |
+
+**`draco3dgltf` 的 Apache-2.0 NOTICE 义务**：Apache-2.0 §4(d) 要求再分发时保留 NOTICE 文件。
+**本包不随任何分发产物出去**（它只在开发机上被 `scripts/gen-draco-fixture.mjs` 调用一次），
+因此该义务当前不触发。**如果哪天它进了 `dependencies`，这一格必须同批改**——
+把「否」改成「是」而不补 NOTICE，就是一次真实的许可证违约。
+
+> ⚠ **ADR-0030 有一句关于 Draco 的话是错的，别照抄。** 它在「体积影响」那格写着
+> 「浏览器里的 Draco 解码走的是已自托管在 `vendor/` 的 decoder（铁律 7）」。实测不是：
+> ADR-0012 已撤销默认覆盖，`loader.ts` 的 `VENDOR_DRACO_PATH` / `VENDOR_KTX2_PATH`
+> **零生产调用者**，浏览器实际取的是打包器同源产出的那一份
+> （dev 是 `/@fs/…/three/examples/jsm/libs/draco/`，prod 是 `dist/assets/draco_decoder-*.wasm`）。
+> `vendor/` 的去留由 **T-220** 裁决，本卡只负责把证据摆出来。
+
+---
+
 ## 2. 接入真实内容时必须做的事
 
 按这个顺序，一条都不能省：

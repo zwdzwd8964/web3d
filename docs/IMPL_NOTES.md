@@ -67,7 +67,7 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | U-12 | v0.5 · 真实音频输出 | **未验证，且不打算验证** | CI 没有声卡。E2E 断言的是运行时播放状态（`isMediaPlaying`），不是声音。「真的响了」在无声卡环境里观测不到，硬测只会做出一个自信满满的 flaky 测试 | 人工戴耳机跑一次 |
 | U-13 | v0.5 · 真机 GPU 上的灯光/阴影帧率 | **未测量** | SwiftShader 的数字与真实 GPU 无可比性 | T-279 / T-280 / T-291（H1 = 原 G0.5-8，ADR-0022 改挂为 v1.0 出口门槛） |
 | U-14 | SceneRuntime 组装与生命周期 | ✅ **已真实执行** | 渲染器可注入（T-200 把注入缝做成 `RendererLike`，桩渲染器**零 cast**），除 GL 调用外全部跑到 | — |
-| U-15 | Draco 解码器实际加载 | **未执行** | E2E 用的 GLB 未压缩 | T-218（真 Draco fixture + 同源 URL 断言） |
+| U-15 | Draco 解码器实际加载 | **✅ 已真实执行**（2026-08-04 · T-218） | `e2e/tests/decoders.spec.ts` 导入 `pump-draco.glb`（`extensionsRequired` 含 Draco），实测取回两条同源 URL：`draco_wasm_wrapper.js`（276,778 字节 · `text/javascript`）与 `draco_decoder.wasm`，体检报告 `tris 24` 与未压缩同源件逐项相等 | — |
 | U-16 | KTX2 解码器实际创建 | **未执行，且与 U-15 不是同一回事** | Draco 是「装了没跑过」，KTX2 是**代码路径根本没进过**（`loader.ts` 的 `if (options.renderer)` 恒假，两个构造点都没传）。原表把两者写在同一行，**掩盖了这个差别** | T-219 |
 | U-17 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测；`ci.yml` 的注释与 T-173 卡面互指，事实上没人做 | T-210 的 CI job `offline` |
 | U-18 | benchmark 目标机器实测（原 G0-7 → G0.5-8 → H1） | **未执行** | 需目标机器。**同一条门槛已被推迟两次**，ADR-0022 第三次处置是改挂为 v1.0 **出口**门槛而不是再顺延 | T-291 |
