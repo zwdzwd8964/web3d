@@ -1,7 +1,7 @@
 import type { SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
 import { expect, it } from 'vitest'
-import type { RuntimeContext } from '../src/eca/types.js'
+import type { RuntimeContext, RuntimeEvent } from '../src/eca/types.js'
 import { IDS } from './helpers.js'
 
 /**
@@ -28,6 +28,15 @@ export interface ContractHarness {
    * which is what the contract is for.
    */
   lightOf(nodeId: string): { intensity: number; color: string } | null
+  /**
+   * T-216 · every event this runtime emitted, in order.
+   *
+   * Same reasoning as `lightOf`: `RuntimeContext` is frozen and this is a test seam, not a
+   * capability. Both sides happen to expose `onEvent`, but going through the harness keeps
+   * the assertions typed instead of casting through `unknown` the way the earlier probe in
+   * this file had to.
+   */
+  events(): readonly RuntimeEvent[]
 }
 
 /** A spot light node, so the light half of the contract has something to point at. */
@@ -35,6 +44,29 @@ const LIGHT_ID = 'nd_light001'
 
 /** A media record, so the media half has something to point at. */
 const MEDIA_ID = 'med_00000001'
+
+/** A looping tween, so 「停止循环动画」 has something to stop. T-216. */
+const LOOP_ANIMATION_ID = 'anm_loop0001'
+
+function loopDocument(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  return {
+    ...doc,
+    animations: [
+      ...doc.animations,
+      {
+        kind: 'tween',
+        id: LOOP_ANIMATION_ID,
+        name: '循环抬起',
+        duration: 1.2,
+        easing: 'linear',
+        loop: true,
+        yoyo: false,
+        targets: [{ nodeId: IDS.cover, to: { p: [0, 0.35, 0] } }],
+      },
+    ],
+  } as SceneDocument
+}
 
 /** The golden path plus one audio asset and its media record. */
 function mediaDocument(): SceneDocument {
@@ -81,10 +113,17 @@ function litDocument(): SceneDocument {
   }
 }
 
+/** `animationEnd` events only, narrowed so `completed` is reachable without a cast. */
+const animationEnds = (events: readonly RuntimeEvent[], animationId?: string) =>
+  events.filter((e): e is Extract<RuntimeEvent, { event: 'animationEnd' }> =>
+    e.event === 'animationEnd' && (animationId === undefined || e.animationId === animationId),
+  )
+
 export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocument) => ContractHarness) {
   const setup = () => makeCtx(createGoldenPathDocument())
   const setupLit = () => makeCtx(litDocument())
   const setupWithMedia = () => makeCtx(mediaDocument())
+  const setupLooping = () => makeCtx(loopDocument())
 
   it(`${label}: variables start at their document defaults`, () => {
     expect(setup().ctx.getVar('step')).toBe(1)
@@ -151,6 +190,53 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
     expect(h.ctx.isAnimationPlaying(IDS.animation)).toBe(true)
     await h.advance(1200)
     expect(h.ctx.isAnimationPlaying(IDS.animation)).toBe(false)
+  })
+
+  /**
+   * T-216 · overlapping playback, which is where the two runtimes had already diverged.
+   *
+   * Measured before the fix: headless emitted `[{completed:true},{completed:true}]` and
+   * resolved the first promise; the real runtime emitted
+   * `[{completed:false},{completed:true}]` and rejected it. Both were green, because
+   * **neither the contract suite nor `pnpm test:parity` had an overlapping case** — the
+   * exact shape ECA_SPEC §6 warns about, where the headless runtime drifts quietly and
+   * everything stays green until a customer clicks the same button twice.
+   */
+  it(`${label}: T-216 · a second play of the same animation ends the first one`, async () => {
+    const h = setup()
+    const first = h.ctx.playAnimation(IDS.animation, {}).then(
+      () => 'resolved',
+      () => 'rejected',
+    )
+    await h.advance(100)
+
+    void h.ctx.playAnimation(IDS.animation, {}).catch(() => undefined)
+    await h.advance(0)
+
+    // The interrupted run reports itself as UNfinished. Reporting `completed: true` would
+    // fire every 「动画播完之后」 rule for an animation that was cut off a tenth of the way in.
+    const ends = animationEnds(h.events())
+    expect(ends.map((e) => e.completed)).toEqual([false])
+    expect(await first, 'the interrupted promise is a cancellation, not a completion').toBe('rejected')
+
+    await h.advance(1200)
+    const after = animationEnds(h.events())
+    expect(after.map((e) => e.completed)).toEqual([false, true])
+  })
+
+  it(`${label}: T-216 · stopping a LOOPING animation still reports it ended`, async () => {
+    const h = setupLooping()
+    void h.ctx.playAnimation(LOOP_ANIMATION_ID, {}).catch(() => undefined)
+    await h.advance(100)
+    expect(h.ctx.isAnimationPlaying(LOOP_ANIMATION_ID)).toBe(true)
+
+    h.ctx.stopAnimation(LOOP_ANIMATION_ID)
+    await h.advance(0)
+
+    // A loop never ends by itself, so 「停止之后接着做别的」 has no other event to hang on.
+    // The old headless guard `if (!entry.loop)` swallowed it and the real runtime did not.
+    const ends = animationEnds(h.events(), LOOP_ANIMATION_ID)
+    expect(ends.map((e) => e.completed)).toEqual([false])
   })
 
   it(`${label}: an aborted animation rejects rather than resolving`, async () => {

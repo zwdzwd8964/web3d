@@ -824,8 +824,12 @@
   ③ **反向变异**：把断言写成 `expect(options.length).toBeGreaterThan(0)` → **必须证明它测不出东西**。
 - ⚠ 不先修，接了描边就变成「修好了一个没人知道存在的 bug」，T-240 的变异检验**测不出东西**。
 
-### [ ] T-216 · 两处 headless 与真实运行时的动画分叉
-- **依赖** 无 · **预估** 0.4d · **实际** —
+### [x] T-216 · 两处 headless 与真实运行时的动画分叉
+- **依赖** 无 · **预估** 0.4d · **实际** 0.7h
+- **两条变异都只在 headless 侧红，真实侧全绿**——这正是卡面要求「指定哪一侧」的意思：
+  契约测试最容易的假绿是**两侧一致地错**，那时两边都绿、分歧照旧。
+- **契约套件多了一个 `events()` 座**（`ContractHarness`，与 `lightOf` 同理由）：两侧都有
+  `onEvent`，但走 harness 才能让断言有类型，而不是像文件里早先那个 probe 一样 cast 穿 `unknown`。
 - **独占** `packages/core/src/eca/headless.ts` · `packages/core/test/runtime-contract.ts` ·
   `packages/core/test/eca/headless.test.ts`
 - **做** headless 与真实运行时在「重叠播放」上**已经分叉且可测量**：headless 发两次

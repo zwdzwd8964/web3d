@@ -1,6 +1,7 @@
 import { createGoldenPathDocument } from '@w3/schema'
 import { describe, expect, it } from 'vitest'
 import { FakeClock, HeadlessRuntime } from '../../src/eca/headless.js'
+import type { RuntimeEvent } from '../../src/eca/types.js'
 import { describeRuntimeContract } from '../runtime-contract.js'
 
 /** T-084. */
@@ -8,6 +9,9 @@ import { describeRuntimeContract } from '../runtime-contract.js'
 describe('HeadlessRuntime', () => {
   describeRuntimeContract('headless', (doc) => {
     const ctx = new HeadlessRuntime(doc)
+    // T-216 · the contract's event-sequence assertions read this.
+    const seen: RuntimeEvent[] = []
+    ctx.onEvent((event) => void seen.push(event))
     return {
       ctx,
       async advance(ms) {
@@ -15,6 +19,7 @@ describe('HeadlessRuntime', () => {
         for (let i = 0; i < 4; i++) await Promise.resolve()
       },
       lightOf: (nodeId) => ctx.lightOf(nodeId),
+      events: () => seen,
     }
   })
 })

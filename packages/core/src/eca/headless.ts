@@ -304,6 +304,7 @@ export class HeadlessRuntime implements RuntimeContext {
    * Racing this against `wait(durationS)` therefore always ends on the clock, which is what
    * D19 specifies for headless. Rejecting on abort matters: without it a cancelled sequence
    * would leave this promise attached to the signal for the life of the run.
+   *
    */
   waitForMediaEnd(_id: string, signal?: AbortSignal): Promise<void> {
     return neverEnds(signal)
@@ -386,6 +387,17 @@ export class HeadlessRuntime implements RuntimeContext {
     }
     if (options.signal?.aborted) return Promise.reject(new AbortError())
 
+    // T-216 · restarting replaces the previous run of the same animation, exactly as
+    // `TweenPlayer.play` (`tween.ts:73`) and `ClipPlayer.play` (`clip.ts:88`) do.
+    //
+    // Without this line the two runtimes diverged and it was **measurable**: overlapping
+    // playback produced `[{completed:true},{completed:true}]` here and
+    // `[{completed:false},{completed:true}]` on the real side, and the first promise
+    // resolved here where it rejects there. Neither the contract suite nor parity could see
+    // it — neither had an overlapping-playback case, which is the failure mode this whole
+    // architecture is most exposed to (ECA_SPEC §6: a headless runtime that slowly drifts).
+    this.stopAnimation(id)
+
     // MVP_V0 D6 / ECA_SPEC B2 · a looping animation resolves IMMEDIATELY even under
     // `await: true`. Anything else deadlocks every sequence that contains one, and it
     // is the single easiest边界 to miss.
@@ -423,7 +435,12 @@ export class HeadlessRuntime implements RuntimeContext {
     if (entry) {
       this.playing.delete(id)
       entry.cancel()
-      if (!entry.loop) this.emit({ event: 'animationEnd', animationId: id, completed: false })
+      // T-216 · a stopped loop ends too. `TweenPlayer.stop` notifies unconditionally
+      // (`tween.ts:154`) and only skips the promise REJECTION for a loop, because a loop's
+      // promise already settled when it started (`settleOnStart`). The `if (!entry.loop)`
+      // that used to guard this line conflated the two, so 「停止循环动画后接着做别的」 fired
+      // on the real runtime and never fired headless.
+      this.emit({ event: 'animationEnd', animationId: id, completed: false })
     }
     if (options?.reset) this.animationTime.set(id, 0)
   }

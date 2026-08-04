@@ -9,6 +9,7 @@ import { createMemoryResolver } from '../../src/runtime/loader.js'
 import { NullHotspotRenderer } from '../../src/runtime/hotspot-layer.js'
 import { SceneRuntime } from '../../src/runtime/scene-runtime.js'
 import type { LogLevel } from '../../src/eca/types.js'
+import type { RuntimeEvent } from '../../src/eca/types.js'
 import { describeRuntimeContract } from '../runtime-contract.js'
 import { IDS } from '../helpers.js'
 import { buildPumpGlb } from '../assets/glb.js'
@@ -457,6 +458,9 @@ describe('the shared RuntimeContext contract', () => {
     })
     runtime.graph.build(doc)
     runtime.resetScene()
+    // T-216 · the contract's event-sequence assertions read this.
+    const seen: RuntimeEvent[] = []
+    runtime.onEvent((event) => void seen.push(event))
     return {
       ctx: runtime,
       async advance(ms: number) {
@@ -466,6 +470,7 @@ describe('the shared RuntimeContext contract', () => {
         for (let i = 0; i < 6; i++) await Promise.resolve()
       },
       lightOf: (nodeId: string) => runtime.lightOf(nodeId),
+      events: () => seen,
     }
   })
 })
