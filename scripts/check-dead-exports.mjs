@@ -63,7 +63,7 @@ const MAX_EXEMPTIONS = 34
  *
  * 2026-08-03: 121 orphans total — 31 attributable (they go in the four-column table), 90 not.
  */
-const MAX_LEGACY = 90
+const MAX_LEGACY = 87
 
 /**
  * Floor on the size of the scanned export surface.

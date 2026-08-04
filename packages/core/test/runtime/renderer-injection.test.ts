@@ -35,8 +35,14 @@ const fakeCanvas = () => ({ clientWidth: 800, clientHeight: 600 }) as HTMLCanvas
  * If a member is missing or mistyped, this file does not compile. That is the point: the
  * seam is only worth having if the compiler can tell you what a stand-in still owes.
  */
-function makeStub(): { renderer: RendererLike; calls: { render: number; setSize: number; dispose: number } } {
-  const calls = { render: 0, setSize: 0, dispose: 0 }
+function makeStub(): {
+  renderer: RendererLike
+  calls: { render: number; setSize: number; dispose: number; extensionProbes: number }
+} {
+  // T-219 · `extensionProbes` is what proves `KTX2Loader.detectSupport` ran: it asks the
+  // registry about seven compressed-texture formats by name, and a stub that never gets
+  // asked is a stub whose renderer was never handed to the transcoder.
+  const calls = { render: 0, setSize: 0, dispose: 0, extensionProbes: 0 }
   const renderer: RendererLike = {
     render: () => {
       calls.render++
@@ -54,6 +60,15 @@ function makeStub(): { renderer: RendererLike; calls: { render: number; setSize:
       throw new Error('桩渲染器没有 GL 上下文')
     },
     capabilities: { maxTextureSize: 4096 },
+    extensions: {
+      has: () => {
+        calls.extensionProbes++
+        // `false` for everything: no GPU here, and refusing every compressed format is the
+        // honest answer. `detectSupport` handles it — it falls back to an uncompressed target.
+        return false
+      },
+      get: () => null,
+    },
     info: { memory: { geometries: 0, textures: 0 }, render: { triangles: 0, calls: 0 }, programs: null },
     shadowMap: { enabled: false, type: 0 },
     toneMapping: 0,

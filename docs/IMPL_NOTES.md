@@ -68,7 +68,7 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | U-13 | v0.5 · 真机 GPU 上的灯光/阴影帧率 | **未测量** | SwiftShader 的数字与真实 GPU 无可比性 | T-279 / T-280 / T-291（H1 = 原 G0.5-8，ADR-0022 改挂为 v1.0 出口门槛） |
 | U-14 | SceneRuntime 组装与生命周期 | ✅ **已真实执行** | 渲染器可注入（T-200 把注入缝做成 `RendererLike`，桩渲染器**零 cast**），除 GL 调用外全部跑到 | — |
 | U-15 | Draco 解码器实际加载 | **✅ 已真实执行**（2026-08-04 · T-218） | `e2e/tests/decoders.spec.ts` 导入 `pump-draco.glb`（`extensionsRequired` 含 Draco），实测取回两条同源 URL：`draco_wasm_wrapper.js`（276,778 字节 · `text/javascript`）与 `draco_decoder.wasm`，体检报告 `tris 24` 与未压缩同源件逐项相等 | — |
-| U-16 | KTX2 解码器实际创建 | **未执行，且与 U-15 不是同一回事** | Draco 是「装了没跑过」，KTX2 是**代码路径根本没进过**（`loader.ts` 的 `if (options.renderer)` 恒假，两个构造点都没传）。原表把两者写在同一行，**掩盖了这个差别** | T-219 |
+| U-16 | KTX2 解码器实际创建 | **✅ 已真实执行**（2026-08-04 · T-219） | `e2e/tests/compressed-assets.spec.ts` 导入 `checker-etc1s.ktx2`（真 ETC1S，`supercompressionScheme=1`）并挂上基础色槽，实测取回两条**同源** URL：`basis_transcoder.js`（253,964 字节 · `text/javascript`）与 `basis_transcoder.wasm`。**这是本项目历史上 transcoder 第一次被真的取过。** 缺陷不是「装了没跑过」而是「解码器从未被构造」——`AssetLoader` 把它建在 `if (options.renderer)` 里，而两个生产构造点都不传 renderer，条件恒假 | — |
 | U-17 | `--offline` 断网构建（C6 / T-006） | **未执行** | 未在断网环境实测；`ci.yml` 的注释与 T-173 卡面互指，事实上没人做 | T-210 的 CI job `offline` |
 | U-18 | benchmark 目标机器实测（原 G0-7 → G0.5-8 → H1） | **未执行** | 需目标机器。**同一条门槛已被推迟两次**，ADR-0022 第三次处置是改挂为 v1.0 **出口**门槛而不是再顺延 | T-291 |
 | U-19 | CI 工作流在 GitHub 上真跑一次 | ✅ **已真实执行** | 2026-07-31 推 main。前两轮红，第三轮两个 job 全绿（run 30660510375：verify 44s · E2E 2m1s） | — |

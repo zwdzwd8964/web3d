@@ -2,7 +2,7 @@ import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { neverEnds } from '../eca/types.js'
 import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
-import type { WebGLRenderer } from 'three'
+import type { Texture, WebGLRenderer } from 'three'
 import { createWebGLRenderer } from './renderer-like.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
@@ -149,6 +149,12 @@ export class SceneRuntime implements RuntimeContext {
       resolver: options.resolver,
       ...(decode ? { decode } : {}),
       log: (level, message, data) => this.log(level, message, data),
+      // T-219 · a stand-alone `.ktx2` texture goes through the transcoder, not through
+      // `createImageBitmap`. Read lazily off the loader because the transcoder does not
+      // exist until a renderer is attached — which is the whole ordering problem this card
+      // is about. Returns a rejected promise (not null) when there is none, so
+      // `decodeInto`'s catch prints WHICH thing was missing.
+      decodeKtx2: (bytes) => this.transcodeKtx2(bytes),
     })
     this.materials.setTextureSource(this.textures)
     // Injected like every other browser-only capability, so the bus's own logic — pooling,
@@ -398,6 +404,10 @@ export class SceneRuntime implements RuntimeContext {
     const renderer = isRendererLike(target) ? target : create(target)
     this.renderer = renderer
     renderer.setPixelRatio(this.pixelRatio())
+    // T-219 · the line the KTX2 transcoder had been waiting two releases for. The loader is
+    // built in the constructor, long before a canvas exists, so `AssetLoaderOptions.renderer`
+    // could never be set at that point — which is why the decoder was never constructed.
+    this.loader.attachRenderer(renderer)
     const canvas = renderer.domElement
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
     // Tone mapping and the prefilter both live on the renderer, so a document that was
@@ -418,8 +428,27 @@ export class SceneRuntime implements RuntimeContext {
    */
   detach(): void {
     if (!this.renderer) return
+    // T-219 · the transcoder's worker pool and WASM belong to the renderer going away.
+    this.loader.attachRenderer(null)
     this.renderer.dispose()
     this.renderer = null
+  }
+
+  /**
+   * Transcodes a stand-alone `.ktx2` texture, or rejects with a sentence a user can act on.
+   *
+   * `KTX2Loader.parse` is callback-shaped (`parse(buffer, onLoad, onError)`), so it is
+   * wrapped here rather than at the call site — 铁律 10: anything that can take time returns
+   * a Promise.
+   */
+  private transcodeKtx2(bytes: ArrayBuffer): Promise<Texture> {
+    const ktx2 = this.loader.ktx2Loader
+    if (!ktx2) {
+      return Promise.reject(new Error('当前环境未启用 GPU 纹理解码，无法读取 KTX2 压缩贴图'))
+    }
+    return new Promise<Texture>((resolve, reject) => {
+      ktx2.parse(bytes, resolve, reject)
+    })
   }
 
   /** The renderer currently installed, or null when running head-less. Read-only on purpose. */

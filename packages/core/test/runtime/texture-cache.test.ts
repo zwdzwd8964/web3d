@@ -1,6 +1,7 @@
 import { createGoldenPathDocument } from '@w3/schema'
 import type { Asset, SceneDocument } from '@w3/schema'
 import { describe, expect, it, vi } from 'vitest'
+import type { LogLevel } from '../../src/eca/types.js'
 import { TextureCache, referencedTextureIds } from '../../src/runtime/texture-cache.js'
 
 /**
@@ -224,5 +225,49 @@ describe('clearing a slot frees the texture (T-186)', () => {
 
     expect(cache.size, '还有一个材质在用，不许释放').toBe(1)
     expect(cache.refCount('ast_00000001')).toBe(1)
+  })
+})
+
+/**
+ * T-219 · the KTX2 branch, and **why it sits above `if (!decode) return null`**.
+ *
+ * A4/X-34 ruled that stand-alone `.ktx2` textures are supported rather than honestly refused
+ * — but the honesty still has to land somewhere, and the line it would otherwise sit under
+ * returns null without saying a word. Below it, the sentence never prints in any build with
+ * no `decode` injected (head-less, parity, every Node test), which is most of the places a
+ * reader would want it.
+ *
+ * Mutation ④ moved the branch down and **the whole suite stayed green** — 855/855 — because
+ * nothing asserted the message. That is class (a): the test did not test anything. These do.
+ */
+describe('T-219 · KTX2 贴图的诚实拒绝', () => {
+  const ktx2Asset = (): Asset => ({ ...asset('tex_ktx20001', 'checker.ktx2'), url: 'blob:tex_ktx20001' })
+
+  const cacheWithout = (log: (level: LogLevel, message: string, data?: unknown) => void) =>
+    new TextureCache({
+      // No `decode`, no `decodeKtx2` — a head-less build, which is where this must still speak.
+      resolver: { resolve: async () => new ArrayBuffer(8) },
+      log,
+    })
+
+  it('names KTX2 specifically instead of returning null in silence', async () => {
+    const log = vi.fn<(level: LogLevel, message: string, data?: unknown) => void>()
+    const texture = await cacheWithout(log).load(ktx2Asset())
+
+    expect(texture).toBeNull()
+    expect(log, '没有 decode 的构建里，这句话一次都没打出来 —— 那正是把分支写在 return null 之下的后果').toHaveBeenCalled()
+    const [level, message] = log.mock.calls[0]!
+    expect(level).toBe('warn')
+    expect(message).toContain('KTX2')
+    expect(message).toContain('未启用 GPU 纹理解码')
+    expect(message, '要说出是哪张贴图').toContain('checker.ktx2')
+  })
+
+  it('and does not hijack an ordinary PNG', async () => {
+    const log = vi.fn<(level: LogLevel, message: string, data?: unknown) => void>()
+    // The counter-example: without it, a branch that fired for everything would pass above.
+    const texture = await cacheWithout(log).load(asset('tex_png000001', 'concrete.png'))
+    expect(texture).toBeNull()
+    expect(log, 'PNG 走的是原来的静默路径，不该借用 KTX2 的措辞').not.toHaveBeenCalled()
   })
 })

@@ -3,6 +3,7 @@ import type { AnimationClip, Object3D, WebGLRenderer } from 'three'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
+import type { RendererLike } from './renderer-like.js'
 import type { AssetResolver, AssetSource, LoadedAsset } from './types.js'
 
 /**
@@ -44,8 +45,13 @@ export interface AssetLoaderOptions {
    * Required only for KTX2: the transcoder picks a GPU texture format from the
    * renderer's capabilities. Without one, KTX2 support is simply not registered, and a
    * GLB that needs it fails with a clear message rather than a corrupt texture.
+   *
+   * T-219 · typed `RendererLike`, not `WebGLRenderer`, so a stub with no GL satisfies it —
+   * and **preferably left unset**: `attachRenderer` is the wiring production uses, because
+   * the renderer usually does not exist yet when the loader is constructed. That ordering
+   * is exactly why this option was dead for two releases.
    */
-  readonly renderer?: WebGLRenderer
+  readonly renderer?: RendererLike
   readonly onWarn?: (message: string, data?: unknown) => void
 }
 
@@ -65,12 +71,57 @@ export class AssetLoader implements AssetSource {
     if (options.dracoPath) this.draco.setDecoderPath(options.dracoPath)
     this.gltf.setDRACOLoader(this.draco)
 
-    if (options.renderer) {
-      this.ktx2 = new KTX2Loader()
-      if (options.ktx2Path) this.ktx2.setTranscoderPath(options.ktx2Path)
-      this.ktx2.detectSupport(options.renderer)
-      this.gltf.setKTX2Loader(this.ktx2)
+    // Kept so existing callers behave identically; the real path is `attachRenderer`.
+    if (options.renderer) this.attachRenderer(options.renderer)
+  }
+
+  /**
+   * Installs (or removes) the renderer the KTX2 transcoder needs. Idempotent.
+   *
+   * **The KTX2 decoder had never been constructed — not once, in any build.** The old code
+   * created it inside `if (options.renderer)` in the constructor, and **neither production
+   * construction site passed a renderer** (`scene-runtime.ts` and the editor's
+   * `ProjectSession` both build the loader before a canvas exists). Every reference to KTX2
+   * in this repository, including the promise in 附件A that customers may ship `.ktx2`
+   * textures, rested on a branch whose condition was always false. That is 债 · U-16.
+   *
+   * The name matches `SceneRuntime.attachRenderer` deliberately: two designs originally
+   * wrote this as two cards with two different names for the same fix, and each estimated it
+   * separately (台账 C7).
+   *
+   * Passing `null` disposes the transcoder — its worker pool and WASM belong to the renderer
+   * that just went away.
+   */
+  attachRenderer(renderer: RendererLike | null): void {
+    if (renderer === null) {
+      this.ktx2?.dispose()
+      this.ktx2 = null
+      this.gltf.setKTX2Loader(null)
+      return
     }
+
+    // A capability probe, not a formality: `WebGPURenderer` and every head-less stub reach
+    // this line without an `extensions` registry, and `detectSupport` would throw reading it.
+    // Refusing here means a KTX2 texture reports 「未启用」 instead of crashing the import.
+    if (typeof renderer.extensions?.has !== 'function') {
+      this.options.onWarn?.('渲染器没有提供 WebGL 扩展信息，KTX2 压缩贴图将无法解码')
+      return
+    }
+
+    if (!this.ktx2) {
+      this.ktx2 = new KTX2Loader()
+      if (this.options.ktx2Path) this.ktx2.setTranscoderPath(this.options.ktx2Path)
+    }
+    // Re-probed on every attach: a new renderer can have different capabilities, and this is
+    // cheap — `detectSupport` reads flags and issues no request (the fetch is in `init()`,
+    // which only runs when a KTX2 file is actually parsed).
+    this.ktx2.detectSupport(renderer as unknown as WebGLRenderer)
+    this.gltf.setKTX2Loader(this.ktx2)
+  }
+
+  /** The transcoder currently installed, or null. Read by the wiring assertions (T-219). */
+  get ktx2Loader(): KTX2Loader | null {
+    return this.ktx2
   }
 
   get(assetId: string): LoadedAsset | undefined {

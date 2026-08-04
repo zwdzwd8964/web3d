@@ -995,8 +995,40 @@
 - ⚠ **债 H**：Draco 是「装了但没跑过」，KTX2 是「没装」——IMPL_NOTES 把两者写在同一行**掩盖了差别**。
   本卡与 T-219 分开取证，正是为了拆开这一行。
 
-### [ ] T-219 · KTX2 生产路径接通
-- **依赖** T-218 · **预估** 1.5d · **实际** —
+### [x] T-219 · KTX2 生产路径接通
+- **依赖** T-218 · **预估** 1.5d · **实际** 2.4h
+- **✅ 债 U-16 已清**：`IMPL_NOTES` U-16 由「未执行」改为「已真实执行」。E2E 实测取回两条
+  **同源** URL：`basis_transcoder.js`（253,964 字节 · `text/javascript`）与
+  `basis_transcoder.wasm`。**这是本项目历史上 transcoder 第一次被真的取过。**
+- **夹具 `checker-etc1s.ktx2` 是仓外一次性生成的真 ETC1S**（`supercompressionScheme = 1`，
+  128×128，8 级 mip，1,147 字节）。用 `ktx2-encoder@0.6.0`（**MIT · 纯 JS + WASM · 只依赖
+  `ktx-parse`**，底层是 BinomialLLC/basis_universal 的 WASM 编码器，**无 node-gyp**）在
+  scratchpad 里生成，**工具不进仓、不进 CI、不进 verify、不进 `package.json`**，只提交字节。
+  比 Khronos 的 `ktx` 原生二进制更符合 ADR-0030 的准入线「纯 WASM / 纯 JS 的进，需要编译的不进」。
+  来源、命令、SHA-256 与全部头部字段记在 `e2e/fixtures/ktx2/README.md`，
+  `ktx2-wiring.test.ts` 逐项断言那些字段——**未压缩 KTX2 与 UASTC/Zstd 都能被 `KTX2Loader`
+  打开却根本不调用 transcoder**，那才是这份夹具唯一要防的替换。
+- **交付偏差**（七处，均在提交信息里点名）：`renderer-like.ts`（加 `extensions` 成员）·
+  `material-registry.ts`（派生表）· `Viewport.tsx`（第二个 loader 的接线）·
+  `renderer-injection.test.ts` + `pixel-ratio.test.ts`（桩补 `extensions`）·
+  `material-registry.test.ts` 无需改（见变异 ③）· `check-dead-exports.mjs` + `DEAD_EXPORTS_ALLOWLIST.md`
+  （棘轮下调）· `e2e/fixtures/requests.ts`（T-218 已建，本卡复用）。
+- **`MAX_LEGACY` 90 → 88，这道棘轮第一次往下走。** `SRGB_TEXTURE_SLOTS` /
+  `LINEAR_TEXTURE_SLOTS` 从 v0 起零调用者，而 `material-registry` 一直手写着同一份知识的
+  第二份拷贝。派生之后两条清单有了生产调用者，守卫当场点名要求删基线行。
+- **`ktx2Loader` 必须是生产可达的，否则撞死豁免棘轮（34/34，只降不升）。** 它的生产消费端是
+  `SceneRuntime.transcodeKtx2`，接进 `TextureCache.decodeKtx2`——独立 `.ktx2` 贴图走 transcoder，
+  不走 `createImageBitmap`。
+- **卡面四处不成立**：
+  ① **做② 写的 `SceneRuntime.attach(canvas)` 这个方法不存在**（同一张卡上一句刚说「方法名统一为
+  `attachRenderer`」）；② **做② 的「`ProjectSession` 同样接线」在 `session.ts` 里做不到**——
+  它完全不知道渲染器的存在（无 renderer / canvas 字段），落点只能是 `Viewport.tsx`；
+  ③ **变异 ④ 逻辑上不可能红**（`detectSupport` 一个字节都不发，取货在 `init()`，只有真 parse
+  才走到）；④ **变异 ③ 要的那条测试已经存在**（`material-registry.test.ts:243-244`），
+  而它点名要扩的 `__w3DevMaterialOf` 钩子读不到 colorSpace 也不看 normalMap。
+- **自测命令 `pnpm -F @w3/core test texture-cache ktx2` 在本卡任何文件存在之前就是绿的**
+  （13 passed）——vitest 对匹配不到文件的过滤词不报错。**实现写完、忘了建 ktx2 测试文件，
+  自测照样绿、DoD 照样过。** 新建 `ktx2-wiring.test.ts` 让 `ktx2` 这个词第一次有落点。
 - **独占** `packages/core/src/runtime/loader.ts` · `packages/core/src/runtime/scene-runtime.ts`
   （`attachRenderer` 一行，列 R）· `packages/core/src/runtime/texture-cache.ts` ·
   `packages/editor/src/project/session.ts` · `e2e/fixtures/ktx2/**`（新）·

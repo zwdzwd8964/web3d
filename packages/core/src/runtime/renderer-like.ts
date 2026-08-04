@@ -43,6 +43,19 @@ export interface RendererLike {
   /** Narrowed to the one field consumed (T-262's capture clamp); not three's whole class. */
   capabilities: { readonly maxTextureSize: number }
   /**
+   * three's WebGL extension registry. **`KTX2Loader.detectSupport` is the only reader.**
+   *
+   * Adding a member here is a decision, not a formality (see the note at the top), and this
+   * one is forced: `detectSupport` probes seven compressed-texture extensions by name
+   * (`KTX2Loader.js:246-256`) to pick a transcode target. Without it on `RendererLike`, a
+   * hand-written stub throws `Cannot read properties of undefined (reading 'has')` the moment
+   * KTX2 is wired — which is not a test failure anyone can read.
+   *
+   * Shaped verbatim like `@types/three`'s `WebGLExtensions` so `createWebGLRenderer`'s return
+   * value still assigns to `RendererLike` with zero casts.
+   */
+  extensions: { has(name: string): boolean; get(name: string): unknown }
+  /**
    * Counters. `render.*` is reset by three at the start of every frame, so it has to be read
    * AFTER a tick — the single most common way to misread this API.
    */

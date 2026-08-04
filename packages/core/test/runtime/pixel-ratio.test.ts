@@ -43,6 +43,7 @@ function recordingRenderer(): RendererLike & { ratios: number[]; sizes: [number,
       throw new Error('桩渲染器没有 GL 上下文')
     },
     capabilities: { maxTextureSize: 8192 },
+    extensions: { has: () => false, get: () => null },
     info: { memory: { geometries: 0, textures: 0 }, render: { triangles: 0, calls: 0 }, programs: null },
     shadowMap: { enabled: false, type: 0 },
     toneMapping: 0,

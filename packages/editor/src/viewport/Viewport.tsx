@@ -122,6 +122,14 @@ export function Viewport() {
     })
     runtimeRef.current = runtime
     setActiveRuntime(runtime)
+
+    // T-219 · the editor holds TWO AssetLoaders: this runtime's, and `session.loader`, which
+    // the library panel, the texture picker and the import flow all parse GLBs through.
+    // `ProjectSession` is built long before a canvas exists and has no idea a renderer is a
+    // thing, so the only place the second one can be told about the transcoder is here —
+    // otherwise a GLB carrying KTX2 textures fails at import while the same file opens fine
+    // once it is in the scene. Idempotent, and the runtime owns disposal.
+    if (runtime.activeRenderer) session.loader.attachRenderer(runtime.activeRenderer)
     controllerRef.current = new PreviewController(runtime, previewStore)
 
     const gizmo = new Gizmo({

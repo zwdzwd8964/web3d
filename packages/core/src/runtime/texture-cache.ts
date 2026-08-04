@@ -29,6 +29,14 @@ export interface TextureCacheOptions {
   /** Injected; absent means this build cannot decode images (headless parity runs). */
   readonly decode?: TextureDecoder
   readonly log?: (level: LogLevel, message: string, data?: unknown) => void
+  /**
+   * T-219 · injected KTX2 decode, for stand-alone `.ktx2` textures.
+   *
+   * Separate from `decode` because they need different things: `decode` turns bytes into an
+   * `ImageBitmap` via `createImageBitmap`, which has never heard of KTX2; this one goes
+   * through the transcoder and yields a compressed `Texture` directly.
+   */
+  readonly decodeKtx2?: (bytes: ArrayBuffer) => Promise<Texture>
 }
 
 /**
@@ -121,6 +129,32 @@ export class TextureCache implements TextureSource {
   }
 
   private async decodeInto(asset: Asset): Promise<Texture | null> {
+    // T-219 · **before** the silent `return null` below, deliberately.
+    //
+    // A4/X-34 ruled that stand-alone `.ktx2` textures are supported rather than honestly
+    // refused — but the honesty still has to be somewhere, and the line under this one
+    // returns null without a word. Put this after it and the sentence never prints in any
+    // build that has no `decode` (head-less, parity), which is most of the ones where a
+    // reader would want it. 附件A promises customers KTX2 works; when it cannot, saying
+    // WHICH thing is missing is the whole difference from 「贴图加载失败」.
+    if (mimeOf(asset) === 'image/ktx2') {
+      const decodeKtx2 = this.options.decodeKtx2
+      if (!decodeKtx2) {
+        this.options.log?.('warn', `该贴图为 KTX2 格式，当前环境未启用 GPU 纹理解码：${asset.name}`)
+        return null
+      }
+      try {
+        const bytes = await this.options.resolver.resolve(asset.url)
+        const texture = await decodeKtx2(bytes)
+        texture.name = asset.name
+        this.entries.set(asset.id, { texture, count: 0 })
+        return texture
+      } catch (error) {
+        this.options.log?.('error', `KTX2 贴图解码失败：${asset.name}`, error)
+        return null
+      }
+    }
+
     const decode = this.options.decode
     if (!decode) return null
     try {

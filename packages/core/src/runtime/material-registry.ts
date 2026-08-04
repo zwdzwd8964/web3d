@@ -1,5 +1,5 @@
 import type { Material as MaterialDef, MaterialMaps, SceneDocument } from '@w3/schema'
-import { MATERIAL_BASES } from '@w3/schema'
+import { LINEAR_TEXTURE_SLOTS, MATERIAL_BASES, SRGB_TEXTURE_SLOTS } from '@w3/schema'
 import {
   BackSide,
   ClampToEdgeWrapping,
@@ -45,16 +45,27 @@ export type { TextureSource }
  * whole scene and is reliably misdiagnosed as an art problem, so the runtime decides it
  * and the user cannot.
  */
-export const TEXTURE_SLOT_COLOR_SPACE = {
-  map: SRGBColorSpace,
-  emissiveMap: SRGBColorSpace,
-  normalMap: LinearSRGBColorSpace,
-  roughnessMap: LinearSRGBColorSpace,
-  metalnessMap: LinearSRGBColorSpace,
-  aoMap: LinearSRGBColorSpace,
-} as const satisfies Record<keyof MaterialMaps, typeof SRGBColorSpace | typeof LinearSRGBColorSpace>
+/**
+ * T-219 · derived from `@w3/schema`'s plain-data lists, not typed out alongside them.
+ *
+ * The two lists (`SRGB_TEXTURE_SLOTS` / `LINEAR_TEXTURE_SLOTS`) have existed in the schema
+ * since v0 with **zero callers** — they sat in the dead-export baseline while this file kept
+ * a second, hand-written copy of the same knowledge. Two tables of the same facts drift; this
+ * one is now generated from the schema's, so a slot cannot be added there without appearing
+ * here, and the baseline shrinks by two.
+ */
+export const TEXTURE_SLOT_COLOR_SPACE = Object.freeze({
+  ...(Object.fromEntries(SRGB_TEXTURE_SLOTS.map((slot) => [slot, SRGBColorSpace])) as Record<
+    (typeof SRGB_TEXTURE_SLOTS)[number],
+    typeof SRGBColorSpace
+  >),
+  ...(Object.fromEntries(LINEAR_TEXTURE_SLOTS.map((slot) => [slot, LinearSRGBColorSpace])) as Record<
+    (typeof LINEAR_TEXTURE_SLOTS)[number],
+    typeof LinearSRGBColorSpace
+  >),
+}) satisfies Record<keyof MaterialMaps, typeof SRGBColorSpace | typeof LinearSRGBColorSpace>
 
-export type TextureSlot = keyof typeof TEXTURE_SLOT_COLOR_SPACE
+export type TextureSlot = keyof MaterialMaps
 
 const SIDES = { front: FrontSide, back: BackSide, double: DoubleSide } as const
 

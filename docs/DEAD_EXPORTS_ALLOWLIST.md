@@ -87,8 +87,6 @@
 - `schema:DocIndex.actionRefsResolved`
 - `schema:hasErrors`
 - `schema:formatIntegrityIssues`
-- `schema:SRGB_TEXTURE_SLOTS`
-- `schema:LINEAR_TEXTURE_SLOTS`
 - `schema:MEDIA_ASSET_TYPES`
 - `schema:MigrationFailure.validation`
 - `schema:needsMigration`
@@ -157,7 +155,6 @@
 - `core:sameRotation`
 - `core:IDENTITY_QUAT`
 - `core:SceneRuntime.defaultLightRig`
-- `core:SceneRuntime.activeRenderer`
 - `core:SceneRuntime.setCurrentEvent`
 - `core:SceneGraph.setPrimitiveFactory`
 - `core:SceneGraph.setLightFactory`
