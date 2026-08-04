@@ -1,0 +1,8 @@
+// 逐字复刻 ADR-0024:59 的实例，含版本号后的全角括号补语。
+// 那个补语是本文件存在的全部理由：贪婪的 /到期\s+(\S+)/ 会把它吞进版本号，
+// 得到 `v1.5（改走`，indexOf 为 -1，isExpired 静默返回 false——
+// **一条真的会到期的例外，被那个专为抓它而写的守卫放行**。
+export function readSource(src: string): string {
+  // CONSTITUTION-EXCEPTION: C7 · ADR-0024 · 到期 v1.5（改走 HttpApiProvider）
+  return src
+}

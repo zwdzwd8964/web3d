@@ -1,0 +1,5 @@
+// 缺到期版本号。**必须红，不是跳过**：一条解析不出来的例外与一条不存在的例外，
+// 在「静默跳过」的实现里是同一个结果。
+export function capture(): void {
+  // CONSTITUTION-EXCEPTION: 渲染出口 · ADR-0025 · 到期
+}

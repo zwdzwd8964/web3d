@@ -41,6 +41,11 @@ const GUARDS = [
   // bought this line. Coverage cannot see the shape (all fourteen had tests), and typecheck
   // and lint both count a reference from a test as a use — so it had to become a machine.
   { article: 'C5 + D36', script: 'check-dead-exports.mjs', args: [], what: 'every exported symbol and public member has a production caller, an owner, or a baseline row' },
+  // v1.0 · T-298. NORTH_STAR §8 step 4 says 「到期未清理，CI 转为失败」 and has said so since v0;
+  // the script that reads an expiry version did not exist, so three ADRs (0022 / 0024 / 0025)
+  // each wrote into their own 代价 column that their expiry promise was a blank cheque until
+  // this line existed.
+  { article: 'NORTH_STAR §8', script: 'check-expiry.mjs', args: [], what: 'every CONSTITUTION-EXCEPTION parses and none has expired' },
 ]
 
 /** Articles no script can prove. Printed on every run so the gap stays visible. */

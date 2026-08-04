@@ -1,0 +1,4 @@
+// 三段结构写坏了：缺 ADR 号那一段。
+export function stray(): void {
+  // CONSTITUTION-EXCEPTION: C5 · 到期 v2
+}
