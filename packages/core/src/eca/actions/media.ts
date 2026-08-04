@@ -7,7 +7,16 @@ import { defineAction } from './define.js'
 
 const PlayMediaParams = z.object({
   mediaId: MediaIdSchema,
-  /** Hold the sequence until the clip finishes. Default false — same as `playAnimation`. */
+  /**
+   * Hold the sequence until the clip finishes.
+   *
+   * **Default `false`, and `playAnimation` defaults to `true`.** The comment here used to
+   * claim they were the same; they never have been, and D19's 「媒体与动画语义对齐」 does not
+   * extend to this one value. T-211 ruled to keep the difference and fix the sentence:
+   * an animation is usually the step the next step waits for (「抬起阀盖之后弹面板」), while
+   * audio is usually narration playing UNDER what follows. Both defaults are frozen in
+   * ECA_SPEC §4.2 and changing either would change how existing documents behave.
+   */
   await: z.boolean().default(false),
   loop: z.boolean().default(false),
   volume: z.number().min(0).max(1).default(1),

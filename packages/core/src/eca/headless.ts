@@ -305,6 +305,11 @@ export class HeadlessRuntime implements RuntimeContext {
    * D19 specifies for headless. Rejecting on abort matters: without it a cancelled sequence
    * would leave this promise attached to the signal for the life of the run.
    *
+   * T-211 · ECA_SPEC §6 used to add 「未在播放（含 V3 自动播放被拒）立即 resolve」. **That
+   * sentence was wrong and the SPEC has been corrected**, not this code. Resolving for a clip
+   * that is not playing means a scene whose audio the browser blocked fires every following
+   * step at once — silent AND broken, instead of merely silent. T-186 tried it that way,
+   * wrote the reasoning into `media-bus.test.ts`, and the parity self-check is what caught it.
    */
   waitForMediaEnd(_id: string, signal?: AbortSignal): Promise<void> {
     return neverEnds(signal)

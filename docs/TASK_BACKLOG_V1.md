@@ -689,8 +689,23 @@
   （**证明 `--network none` 真的生效，而不是命令根本没跑到那里**）；
   ② 把一个依赖从 store 里删掉 → 步骤 1 红。
 
-### [ ] T-211 · `ECA_SPEC` 与实现的三处对拍
-- **依赖** T-216 · **预估** 0.5d · **实际** —
+### [x] T-211 · `ECA_SPEC` 与实现的三处对拍
+- **依赖** T-216 · **预估** 0.5d · **实际** 1.2h
+- **三处裁决没有走同一个方向**，这是本卡最值得记的一件事：
+  ① **改实现**（§5.1 的 `Promise.allSettled` 从 v0 起就写在规范里，代码写的是 `Promise.all`）；
+  ② **改规范**（§6 的「未在播放立即 resolve」是**规范错了**）；
+  ③ **规范补一句**（§4.2 从没写过 `playAnimation` 的 `await` 默认值，代码是对的）。
+- **② 的裁决被自己的测试推翻过一次。** 先按「规范优先」把两侧都改成立即 resolve，
+  结果同时红了三处：`media-bus.test.ts` 那条连名字带注释都写着这件事已在 T-186 算过账 ·
+  parity 的自检（`playMedia(await:true)` 必须真的挂起 ~0.4s，实测掉到 16ms）· 本卡自己的断言。
+  理由是实的：浏览器拒绝自动播放时什么都没在播，「响完」**没有发生**而不是「已经发生过」；
+  立即 resolve 会让作者编排的节奏整个塌掉，音频被拦的场景在静音之外再多坏一种。
+  **一条规范句子被三处独立证据否掉，就该改那句话。**
+- **① 的判据必须落在「抛错逃出 runStep」那条路径上。** `runStep` 看起来把一切都兜住了，
+  但 `registry.get` / `schema.safeParse` / `definition.refs` 三处都在 `try` **外面**——
+  其中一处抛出时 `Promise.all` 当场 reject，`execute` 直接抛异常，**兄弟步骤的结果一个都不剩**。
+  handler 自己抛错那条路（被 runStep 接住）两种实现完全不可区分，正是卡面警告的假绿形状，
+  本卡把它作为 counter-example 保留在文件里。
 - **独占** `docs/ECA_SPEC.md`（§5.1 · §6 · §4.2 三处）· `packages/core/test/eca/spec-parity.test.ts`（新）·
   `packages/core/src/eca/actions/media.ts`（注释）
 - **做** 三处「规范文本滞后于代码」逐条裁决并落地：

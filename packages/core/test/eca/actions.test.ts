@@ -435,6 +435,12 @@ describe('media actions (v0.5 · T-163)', () => {
     // `waitForMediaEnd` that resolved immediately would make `await: true` return at once,
     // and every 「响完再弹面板」 rule would fire its next step instantly — with the fake
     // clock making that indistinguishable from success in every other test.
+    //
+    // ⚠ T-211 · **this test used to skip the `playMedia` line below**, so it was proving the
+    // never-resolve behaviour through the NOT-PLAYING branch — the one ECA_SPEC §6 says must
+    // resolve immediately. It was green for the wrong precondition, and it went red the
+    // moment the spec's other half was implemented. That is the assertion doing its job.
+    await ctx.playMedia(MEDIA_ID, {})
     let ended = false
     void ctx.waitForMediaEnd(MEDIA_ID).then(() => void (ended = true))
     await ctx.clock.advance(60_000)

@@ -190,7 +190,7 @@ export function allActions(): ActionDefinition[]
 
 | `action` | 参数 | 语义 | await 行为 |
 |---|---|---|---|
-| `playAnimation` | `{ animationId, await?: boolean, restart?: boolean }` | 播放动画 | `await: true` 时挂起到播完；`loop` 动画即使 `await: true` 也**立即 resolve** |
+| `playAnimation` | `{ animationId, await?: true, restart?: boolean }` | 播放动画 | `await: true` 时挂起到播完；`loop` 动画即使 `await: true` 也**立即 resolve** |
 | `stopAnimation` | `{ animationId, reset?: boolean }` | 停止 | 立即 |
 | `seekAnimation` | `{ animationId, time }` | 跳到指定秒 | 立即 |
 | `setVisible` | `{ nodeId, value, includeDescendants?: boolean }` | 显隐 | 立即 |
@@ -210,6 +210,12 @@ export function allActions(): ActionDefinition[]
 `moveCamera` **只能飞到已保存的视点**（技术方案 §1.3 原文限定）。允许填任意坐标等于让用户在规则编辑器里手搓相机，UI 复杂度暴涨且几乎无人用对。
 
 `wait` 是技术方案没列但必需的：没有它，"高亮 → 停 1 秒 → 弹面板"这类最常见的编排做不出来，用户会被迫用假的 loop 动画去凑。
+
+**`playAnimation` 默认 `await: true`，`playMedia` 默认 `await: false`——这是有意的差别，不是笔误。**
+（T-211 裁决。此前本表只给 `playMedia` 写了默认值，`playAnimation` 那格写的是 `await?: boolean`，
+于是「D19 说媒体与动画语义对齐」被读成了「默认值也一样」，`media.ts` 里还留着一句
+「same as playAnimation」的错误注释。）动画通常**就是**下一步要等的那件事（「抬起阀盖之后弹面板」），
+而音频通常是**垫在后续动作底下**的旁白。两个默认值都已冻结，改任何一个都会改变既有文档的行为。
 
 **`setLight`（v0.5，进化规划 §4.3）只有强度与颜色两个参数**，这是刻意的：它们是场景**响应
 事件**时会变的量（"报警 → 聚光灯变亮变红"）。锥角、衰减、阴影质量是创作期决定，属于文档，
@@ -370,7 +376,7 @@ export interface RuntimeContext {
   stopMedia(id: string | 'all'): void
   isMediaPlaying(id: string): boolean
   /** v0.5 · 片段真的播完时 resolve；与 `wait(durationS)` 竞速构成 D19 的「先到者为准」。
-      未在播放（含 V3 自动播放被拒）立即 resolve；headless 永不 resolve，由时钟决定（ADR-0019） */
+      **未在播放（含 V3 自动播放被拒）永不 resolve，由时钟决定**；headless 同理（ADR-0019） */
   waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void>
 
   // ---- 动画 ----
@@ -519,3 +525,11 @@ type TestCase = {
 **结束。** 不改 `executor.ts`，不改 `engine.ts`，不改规则编辑器组件，不改 schema。
 
 如果你发现必须改上述任何一个文件，**停下来**——这说明抽象漏了一块，按北极星 §4 的分诊 Q4 处理：先写 ADR，不要直接动手。
+
+> **T-211 更正**：本节此前写的是「未在播放（含 V3 自动播放被拒）**立即 resolve**」，
+> 而两个运行时都返回 `neverEnds`。裁决**改规范、不改实现**，理由是实现那边已经有人算过账：
+> 浏览器拒绝自动播放时，什么都没在播，于是「响完」这件事**没有发生**，而不是「已经发生过了」。
+> 立即 resolve 会让 `await: true` 当场返回，规则的下一步立刻触发，作者编排的节奏整个塌掉——
+> 一个音频被拦的场景会在**静音之外**再多坏一种、且更难解释的方式。
+> T-186 试过那条路并把理由写进了 `media-bus.test.ts`，**是 parity 的自检把它抓出来的**
+> （当时两侧没有分叉，两侧一样错）。`spec-parity.test.ts` 的 ② 组钉住现在这条语义。

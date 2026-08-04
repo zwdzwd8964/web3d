@@ -863,6 +863,7 @@ export class SceneRuntime implements RuntimeContext {
    * suspending. Neither side diverged — both were equally wrong — which is exactly the
    * failure a two-sided comparison cannot see and that self-check exists for.
    */
+  /** Not playing → never resolves, so the clock decides. See `HeadlessRuntime` for why. */
   waitForMediaEnd(id: string, signal?: AbortSignal): Promise<void> {
     if (!this.media.isPlaying(id)) return neverEnds(signal)
     return this.media.waitForEnd(id, signal)

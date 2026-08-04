@@ -103,7 +103,15 @@ export async function execute(
     if (signal.aborted) group.abort()
     else signal.addEventListener('abort', onOuterAbort, { once: true })
 
-    const outcomes = await Promise.all(
+    // T-211 · `Promise.allSettled`, which is what ECA_SPEC §5.1 has always said. The code
+    // said `Promise.all`, and the two agreed only because `runStep` catches everything —
+    // an accident, not a design. Three things escape that catch (`registry.get`,
+    // `schema.safeParse` and `definition.refs`, all called before the `try`), and when one
+    // does, `Promise.all` rejects on the spot: `execute` throws instead of returning an
+    // `ExecResult`, and **every sibling step's outcome is thrown away** — including the
+    // ones that finished fine. A parallel group would report nothing at all because one
+    // action's `refs()` had a bug.
+    const settled = await Promise.allSettled(
       rule.then.map(async (action, index): Promise<ExecStep> => {
         const outcome = await runStep(action, index, rule, ctx, group.signal, options)
         if (outcome.status === 'failed' && rule.onError === 'abort') group.abort()
@@ -111,6 +119,13 @@ export async function execute(
       }),
     )
     signal.removeEventListener('abort', onOuterAbort)
+    const outcomes = settled.map((result, index): ExecStep => {
+      if (result.status === 'fulfilled') return result.value
+      // A step whose machinery threw is a failed step, not a failed engine.
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason)
+      ctx.log('error', `规则「${rule.name}」第 ${index + 1} 步执行失败：${message}`)
+      return { index, action: rule.then[index]!.action, status: 'failed', error: message }
+    })
     steps.push(...outcomes)
     failed = outcomes.some((s) => s.status === 'failed')
   } else {
