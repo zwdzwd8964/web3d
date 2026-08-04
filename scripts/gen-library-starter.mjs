@@ -17,15 +17,49 @@
  * `@gltf-transform/core` (it belongs to two packages, not to the root), and adding a root
  * dependency to generate a 4 KB cube would be the wrong trade.
  *
- * Run: node scripts/gen-library-starter.mjs
+ * T-223 · `--check` regenerates into a temp directory and compares byte for byte.
+ *
+ * Everything above is what makes that possible, and nothing was guarding it. The generated
+ * files are committed, this script is in no npm script, and no check read their CONTENT —
+ * `check-library-manifest.mjs` validates the manifest's fields and the files' sizes, and a
+ * single flipped byte changes neither. Editing a PNG by hand, or changing this generator and
+ * forgetting to re-run it, was green either way.
+ *
+ * Run: node scripts/gen-library-starter.mjs           # write into the repo
+ *      node scripts/gen-library-starter.mjs --check   # compare only, never writes there
  */
 import { deflateSync } from 'node:zlib'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative as relativePath, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const LIBRARY = join(ROOT, 'packages/editor/public/library')
+
+const CHECK_ONLY = process.argv.includes('--check')
+
+/**
+ * Where this run writes.
+ *
+ * **`--check` must never touch `LIBRARY`.** The one destructive line in this file was
+ * `rmSync(join(LIBRARY, 'manifest.json'))`; a `--check` that still ran it would delete a
+ * committed file while calling itself read-only. Routing every write through one constant is
+ * what makes that impossible rather than merely unlikely.
+ */
+const OUT = CHECK_ONLY ? mkdtempSync(join(tmpdir(), 'w3-library-check-')) : LIBRARY
+
+/**
+ * Below this the walk is broken rather than the library empty.
+ *
+ * The card says 「形态照抄 `sync-vendor.mjs --check`」 — and that one has **no floor at all**:
+ * its verdict is `srcFiles.length === dstFiles.length && every(...)`, which is `0 === 0` plus
+ * a vacuous `every` when both walks come back empty. Copying the shape verbatim would ship
+ * exactly the D36 M6 guard this version keeps deleting. 17 files today; the floor sits on the
+ * FILE count, on **both** sides, because the diff count is legitimately 0.
+ */
+const MIN_LIBRARY_FILES = 15
 
 /* ========================================================================== */
 /* PNG                                                                        */
@@ -346,7 +380,7 @@ const items = []
 const written = []
 
 function write(relative, buffer) {
-  const path = join(LIBRARY, relative)
+  const path = join(OUT, relative)
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, buffer)
   written.push({ relative, bytes: buffer.length })
@@ -562,14 +596,80 @@ const manifest = {
   items: items.sort((a, b) => a.id.localeCompare(b.id)),
 }
 
-rmSync(join(LIBRARY, 'manifest.json'), { force: true })
+rmSync(join(OUT, 'manifest.json'), { force: true })
 write('manifest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8'))
 
 const total = written.reduce((n, f) => n + f.bytes, 0)
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`
 
-console.log(`wrote ${written.length} file(s) into packages/editor/public/library`)
-for (const file of written.sort((a, b) => b.bytes - a.bytes).slice(0, 6)) {
-  console.log(`  ${kb(file.bytes).padStart(10)}  ${file.relative}`)
+if (!CHECK_ONLY) {
+  console.log(`wrote ${written.length} file(s) into packages/editor/public/library`)
+  for (const file of written.sort((a, b) => b.bytes - a.bytes).slice(0, 6)) {
+    console.log(`  ${kb(file.bytes).padStart(10)}  ${file.relative}`)
+  }
+  console.log(`  total ${kb(total)} across ${items.length} library item(s)`)
+  process.exit(0)
 }
-console.log(`  total ${kb(total)} across ${items.length} library item(s)`)
+
+/* ========================================================================== */
+/* --check                                                                    */
+/* ========================================================================== */
+
+/** Every file under `dir`, as repo-style relative paths. Sorted, so output is stable. */
+function walk(dir, base = dir, out = []) {
+  for (const entry of readdirSync(dir).sort()) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) walk(full, base, out)
+    else out.push(relativePath(base, full).split('\\').join('/'))
+  }
+  return out
+}
+
+const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')
+
+const generated = walk(OUT)
+const committed = walk(LIBRARY)
+const problems = []
+
+/**
+ * Both directions, deliberately.
+ *
+ * The generator only knows what it wrote. A one-way comparison cannot see a file somebody
+ * dropped into `library/` by hand — the immediate neighbour of the 「直接手改 png」 case this
+ * gate exists for. `sync-vendor.mjs` compares both sides; this follows it there.
+ */
+for (const file of generated) {
+  if (!committed.includes(file)) {
+    problems.push(`${file} —— 生成器会写它，仓库里却没有。生成物漏提交了`)
+    continue
+  }
+  if (sha1(join(OUT, file)) !== sha1(join(LIBRARY, file))) {
+    problems.push(`${file} —— 逐字节不一致。要么手改过它，要么改了生成器忘了重跑`)
+  }
+}
+for (const file of committed) {
+  if (!generated.includes(file)) {
+    problems.push(`${file} —— 仓库里有它，生成器却不会写它。手工塞进来的文件不受这道闸门保护`)
+  }
+}
+
+rmSync(OUT, { recursive: true, force: true })
+
+console.log(`  生成 ${generated.length} 个 / 已提交 ${committed.length} 个 / 不一致 ${problems.length} 处`)
+
+if (generated.length < MIN_LIBRARY_FILES || committed.length < MIN_LIBRARY_FILES) {
+  console.error(
+    `FAIL  C6 + D17 · 内置库逐字节一致  — 扫描面塌了：生成 ${generated.length} / 已提交 ${committed.length}，下限 ${MIN_LIBRARY_FILES}。` +
+      `多半是路径写错了，不是内置库变空了 —— 两侧同时为空时「逐字节全部相等」恒成立`,
+  )
+  process.exit(1)
+}
+
+if (problems.length === 0) {
+  console.log(`PASS  C6 + D17 · 内置库逐字节一致  (${committed.length} file(s))`)
+  process.exit(0)
+}
+console.error(`FAIL  C6 + D17 · 内置库逐字节一致  — ${problems.length} 处`)
+for (const p of problems) console.error(`      ${p}`)
+console.error('      重新生成：node scripts/gen-library-starter.mjs')
+process.exit(1)

@@ -31,6 +31,12 @@ const GUARDS = [
   // shows a broken tile. The licence field is enforced by the same script (D17 · 版权风险 V1),
   // because content nobody can account for is a legal problem, not a rendering one.
   { article: 'C6 + D17', script: 'check-library-manifest.mjs', args: [], what: 'built-in library manifest: no external URL, every item licensed, within budget' },
+  // v1.0 · T-223. The line above validates the manifest's FIELDS; nothing read the files'
+  // bytes. The starter content is generated and committed, the generator is in no npm
+  // script, and a hand-edited PNG changed neither a size nor a manifest field — so 「可逐字节
+  // 复现」 was an assertion nobody could check. This step regenerates into a temp directory
+  // and compares both ways.
+  { article: 'C6 + D17', script: 'gen-library-starter.mjs', args: ['--check'], what: 'built-in library regenerates byte for byte' },
   // v1.0 · T-205. The fourteenth recurrence of "written, unit-tested, never wired up" is what
   // bought this line. Coverage cannot see the shape (all fourteen had tests), and typecheck
   // and lint both count a reference from a test as a use — so it had to become a machine.

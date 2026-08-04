@@ -1037,8 +1037,25 @@
   ③ `SAMPLE_OBJECT_PATHS` 删一项 → 新补那条红（**证明它此前确实什么都没测**）；
   ④ 去掉「拆装」clip → `stats.animations` 断言红（**若只断言「有资产」则不会红**）。
 
-### [ ] T-223 · 内置库生成物一致性闸门
-- **依赖** 无 · **预估** 0.5d · **实际** —
+### [x] T-223 · 内置库生成物一致性闸门
+- **依赖** 无 · **预估** 0.5d · **实际** 0.7h
+- **交付偏差**（一处，提交信息已点名）：`.gitattributes` 加一行
+  `packages/editor/public/library/manifest.json text eol=lf`。实测 `git checkout-index` 取出的
+  manifest.json 是 **2783 字节 / 86 个 CR**，生成器写出 **2697 字节 / 0 个 CR**——系统级
+  `core.autocrlf=true` 是 Git-for-Windows 默认，而该路径此前无声明。不补这一行，
+  **这道新闸门在 CI 上永远绿、在每一台 Windows 克隆上永远红**，还会指着一个「重跑生成器也没用」
+  的文件。这正是 `.gitattributes` 头注释里记过的同一种失效，当时只推广到了二进制扩展名。
+- **没有照抄 `sync-vendor.mjs --check` 的全部形态。** 那份实现的判据是
+  `srcFiles.length === dstFiles.length && every(...)`，两侧同时为空时是 `0 === 0` 加一个空
+  `every`，恒真——**它没有任何扫描面下限**。逐字照抄等于交付一个 D36 M6 形状的守卫，
+  因此加了 `MIN_LIBRARY_FILES` 并**对生成侧与已提交侧两个计数都断**。
+- **比对是双向的。** 生成器只知道自己写了什么；单向比对看不见有人手工塞进 `library/` 的文件，
+  而那正是卡面「直接手改 png」的邻居场景。
+- **验收靶子钉死为 `previews/tex-noise.png`**：`manifest.json` 还原经 smudge filter 写回 CRLF
+  （还原后仍红），`display-stand.glb` 会打翻 `packages/editor/test/library.test.ts:175` 的
+  导入管线单测。卡面只写「手改一个字节（验后还原）」没指定靶子，随手挑会得到误导性的红。
+- **`--check` 一个字节都不写进 `library/`**：全部写入经 `OUT` 常量，`--check` 时它是临时目录。
+  此前那行 `rmSync(join(LIBRARY, 'manifest.json'))` 若漏改，「只读的 --check」会删掉一个已提交文件。
 - **独占** `scripts/gen-library-starter.mjs` · `scripts/check-constitution.mjs`
 - **做** starter 生成脚本不在 npm script 里，生成物已提交进 git，**无任何检查守「可逐字节复现」**——
   改了脚本忘了重跑，或直接手改 png，检查一样绿。给生成器加 `--check`（生成到临时目录 → 与

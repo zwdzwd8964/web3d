@@ -11,6 +11,15 @@
 # file, and it cannot happen in CI (Linux runners default to `autocrlf=false`), so both
 # "works on my machine" and "CI is green" hold while every Windows clone gets a corrupt
 # environment map. Declaring the types is the only thing that makes it impossible.
+# T-223 · the same failure, one file over. The byte-for-byte gate regenerates
+# `library/manifest.json` and compares it with the committed copy — and the generator writes
+# LF while a Windows checkout produces CRLF, because this path had no declaration here. The
+# note above stops at binaries; the gate needed it extended to the one TEXT file the
+# generator owns. Measured the same way: 2697 bytes generated, 2783 bytes / 86 CR checked out
+# via `git checkout-index`. CI (Linux) would have stayed green forever while every Windows
+# clone failed the gate and was told to re-run a generator that changes nothing.
+packages/editor/public/library/manifest.json text eol=lf
+
 *.png   binary
 *.jpg   binary
 *.jpeg  binary
