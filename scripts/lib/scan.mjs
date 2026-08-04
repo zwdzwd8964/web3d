@@ -4,7 +4,7 @@
  * Deliberately dependency-free plain Node: the guards must run before `pnpm install`
  * has finished doing anything interesting, and in an offline CI (C6).
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git', '.pnpm', 'vendor'])

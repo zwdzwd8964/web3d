@@ -588,9 +588,9 @@
   **⚠ 规则 3 的假绿陷阱**：若脚本数了目录却不和 README 比，三条变异都绿 → **必须另加
   「把 README 里的数字改成 99 → 红」**。
 
-### [ ] T-208 · 质量门槛的四处漏检收口
+### [x] T-208 · 质量门槛的四处漏检收口
 - **依赖** T-207（`package.json` 同文件）· T-203（`check-core-purity.mjs` 同文件，
-  **本卡只扩扫描范围，`EXECUTOR_SMELLS` 正则表归 T-203**）· **预估** 0.6d · **实际** —
+  **本卡只扩扫描范围，`EXECUTOR_SMELLS` 正则表归 T-203**）· **预估** 0.6d · **实际** 1.3h
 - **独占** `package.json`（lint / verify 段）· `packages/schema/package.json` · `e2e/package.json` ·
   `scripts/check-core-purity.mjs` · `scripts/check-size-budget.mjs` · `size-budget.json`（新）
 - **做** ① `lint` 扩到 `packages e2e scripts tools test`（今天只扫 packages）；
@@ -607,6 +607,27 @@
 - **验收** `pnpm lint` 绿且扫描目录 ≥ 5；schema test 打印覆盖率并在低于阈值时失败；
   `pnpm size` 计入文件数 8→7 且不再列 `.gitignore`。
 - **自测** `pnpm lint && pnpm -F @w3/schema test && pnpm size && node scripts/check-core-purity.mjs`
+- **③ 按卡面字面写会埋一颗地雷**：`/executor|dispatch|engine/i` 在本机匹配 **19/19** 个
+  `src/eca` 文件（`collectFiles` 返回绝对路径，而检出目录叫 `0729 3d engine`），CI 上只匹配 1 个。
+  照字面写会报两条 `headless.ts` 的假违规而 CI 全绿。已改成锚定 basename 的
+  `/(executor|dispatch|engine)\.ts$/`——同文件 :164 早就是这个写法，:160 是最后一条没锚的。
+- **④ 的 `embed` 目录今天不存在**（嵌入 SDK 是 T-271~T-276），因此只扩到 `src/runtime`，
+  并由创建它的那张卡负责把 `embed` 加进来。扩到 runtime 立刻会红 4 行 5 条，而**被红的正是
+  `ctx.now()` / `ctx.wait()` 的实现本体与渲染循环**——配了 6 行具名豁免，每条带理由。
+- **② 的前提属实但结论要修正**：阈值「从未执行」是真的（配置在 `vitest.config.ts` 里躺着，
+  test 脚本是裸 `vitest run`），但补上 `--coverage` **今天是绿的**（94.78 / 88.53 / 97.32 / 95.9）。
+  ⚠ branches 88.53% 距离 90 只有 1.5 个点。
+- **⑤ 钉的是 lockfile 解析出来的真实版本**：`@playwright/test` 钉 **1.62.0** 而不是卡面暗示的
+  `1.58.0`——写下界等于一次静默降级，还会连带改 CI 拉的浏览器版本。顺带把 `tools/lint`
+  那四条 caret 也钉了（lockfile 内容不变，零风险）。
+- **交付偏差（四处）**：`tools/lint/eslint.config.js`（扩面必须同时关掉 `.mjs`/`.js` 的类型感知
+  并补 5 个 Node global，否则 27 条 parse error 掩盖一切）· `tools/lint/package.json`
+  （`pnpm -r lint` 今天在干净仓库上 exit 2，改成 `pnpm -w run lint`）· `scripts/lib/scan.mjs`
+  与 `test/parity/parity.test.ts`（扩面后冒出的两条死导入，与 `scripts/check-docs.mjs` 里我自己
+  留下的一条一起，共 3 条，全是本卡扩面才第一次被看见的）。
+- **一次未复现的失败**：`pnpm install --offline` 之后紧接着那一次 `pnpm -F @w3/schema test`
+  报 1 条失败，随后连跑 4 次全绿。**登记而不销案**——它发生在 install 重链的同一秒，
+  但「跑一次红、再跑四次绿」这句话本身就该留痕。
 - **变异检验** ① 在 `engine.ts` 临时写 `if (action.type === 'x')` → `check-core-purity` 必须红。
   **⚠ 本卡唯一有实质风险的一条**：若 `engine.ts` 因 Proxy 委托而不含任何 action 变量，正则可能
   永远匹配不到 → 那守卫就是装饰品，**必须实测并把输出贴进提交信息**；

@@ -100,21 +100,80 @@ const ecaFiles = collectFiles(ecaDir, ['.ts', '.js'])
 if (ecaFiles.length === 0 && srcFiles.length > 0) {
   report.note('packages/core/src/eca is empty — determinism section had nothing to check')
 }
-for (const file of ecaFiles) {
+
+/**
+ * T-208 / A6 Q-5 · the determinism scan now covers `src/runtime` as well as `src/eca`.
+ *
+ * `src/embed` is named in the card and **does not exist yet** (the embed SDK is v1.0's
+ * T-271~T-276). Listing a directory that is not there would make the scan look wider than it
+ * is, so it is added by the card that creates it — not pre-registered here.
+ *
+ * The runtime legitimately needs real time: `SceneRuntime.now()` and `SceneRuntime.wait()`
+ * **are the implementations of `ctx.now()` / `ctx.wait()`**, and `start()` is the render
+ * loop. Widening the scan without an exemption would be asking the implementation to obey a
+ * rule that says "do not implement me". Each line is exempted by name, with its reason.
+ */
+const DETERMINISM_EXEMPTIONS = [
+  {
+    file: 'runtime/scene-runtime.ts',
+    members: ['now', 'wait', 'start'],
+    why: 'ctx.now() / ctx.wait() 的实现本体与渲染循环 —— ECA 那条禁令要求大家改道去用的就是它们',
+  },
+  {
+    file: 'assets/audit.ts',
+    members: ['grade'],
+    why: '体检报告的时间戳；`AuditOptions.now` 已经是可注入的，这里是它的默认实现',
+  },
+]
+
+/** Whether `line` inside `file` is covered by a written exemption. */
+function determinismExempt(file, source, lineNumber) {
+  const relative = file.split(/[\\/]/).slice(-2).join('/')
+  const exemption = DETERMINISM_EXEMPTIONS.find((e) => e.file.endsWith(relative))
+  if (!exemption) return null
+  // The member whose body the line falls in, found by walking back to the nearest
+  // declaration at class-member indentation.
+  const lines = source.split('\n')
+  for (let i = lineNumber - 1; i >= 0; i--) {
+    const line = lines[i] ?? ''
+    // A class member at two-space indent, or a top-level function. Both shapes occur:
+    // `SceneRuntime.now()` is the former, `grade()` in audit.ts is the latter.
+    const member = /^\s{2}(?:private\s+|readonly\s+|async\s+|get\s+|set\s+)*([a-zA-Z_$][\w$]*)\s*[(<]/.exec(line)
+    const fn = /^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][\w$]*)\s*[(<]/.exec(line)
+    const name = member?.[1] ?? fn?.[1]
+    if (name) return exemption.members.includes(name) ? exemption : null
+  }
+  return null
+}
+
+const runtimeDir = join(CORE, 'src/runtime')
+const determinismFiles = [...ecaFiles, ...collectFiles(runtimeDir, ['.ts', '.js']), join(CORE, 'src/assets/audit.ts')]
+let determinismExempted = 0
+for (const file of determinismFiles) {
   const source = readFileSync(file, 'utf8')
   const stripped = stripCommentsAndStrings(source)
-  for (const { spec, line } of extractImports(stripComments(source))) {
-    if (packageOf(spec) === 'three') {
-      report.add(file, line, 'the ECA engine imports three (C8: it must run in plain Node with no WebGL)')
+  const isEca = /[\\/]eca[\\/]/.test(file)
+  if (isEca) {
+    for (const { spec, line } of extractImports(stripComments(source))) {
+      if (packageOf(spec) === 'three') {
+        report.add(file, line, 'the ECA engine imports three (C8: it must run in plain Node with no WebGL)')
+      }
     }
   }
   for (const [re, why] of NON_DETERMINISTIC) {
     for (const hit of matchLines(stripped, re)) {
+      const exemption = isEca ? null : determinismExempt(file, source, hit.line)
+      if (exemption) {
+        determinismExempted++
+        continue
+      }
       report.add(file, hit.line, `non-deterministic: ${why}`)
     }
   }
 }
-report.filesScanned += ecaFiles.length
+report.filesScanned += determinismFiles.length
+report.note(`C8 determinism: ${determinismFiles.length} file(s) in src/eca + src/runtime; ${determinismExempted} line(s) exempted by name`)
+for (const e of DETERMINISM_EXEMPTIONS) report.note(`  exempt ${e.file} · ${e.members.join(' / ')} — ${e.why}`)
 
 // --- 4. the executor must not grow ------------------------------------------
 // Constitution C5 / anti-pattern A3: adding a capability means adding a registry
@@ -157,7 +216,19 @@ const EXECUTOR_ONLY_SMELLS = [
   ],
 ]
 
-for (const file of ecaFiles.filter((f) => /executor|dispatch/i.test(f))) {
+/**
+ * T-208 / A6 Q-5 · `engine.ts` joins the scan — **anchored to the basename**.
+ *
+ * The card says to write `/executor|dispatch|engine/i`. Measured, that matches **all 19**
+ * files in `src/eca` on this machine and exactly one on CI, because the checkout directory
+ * here is `…:9 3d engine\…` and `collectFiles` returns absolute paths. It would have
+ * been a local-red / CI-green split reporting two false violations in `headless.ts`
+ * (`animation.kind === 'tween'` and `light.kind === 'hemisphere'`, both legitimate).
+ *
+ * Anchoring costs one regex and removes the whole class. Line 164 in this same file already
+ * used `/executor\.ts$/`; this was the one unanchored filter left.
+ */
+for (const file of ecaFiles.filter((f) => /(executor|dispatch|engine)\.ts$/.test(f))) {
   const source = readFileSync(file, 'utf8')
   const stripped = stripCommentsAndStrings(source)
   const withStrings = stripComments(source)

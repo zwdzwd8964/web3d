@@ -1,4 +1,4 @@
-import { createGoldenPathDocument, validate } from '@w3/schema'
+import { createGoldenPathDocument } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { SceneRuntime, buildSamplePumpGlb, createMemoryResolver, registerBuiltinActions } from '@w3/core'
 import type { ExecResult } from '@w3/core'

@@ -21,7 +21,7 @@
     "check:deps-direction": "node scripts/check-deps-direction.mjs",
     "check:constitution": "node scripts/check-constitution.mjs --require-build",
     "verify": "pnpm build && pnpm lint && pnpm check:constitution && pnpm check:docs && pnpm typecheck && pnpm test && pnpm test:parity && pnpm size",
-    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js --config tools/lint/eslint.config.js packages",
+    "lint": "node tools/lint/node_modules/eslint/bin/eslint.js --config tools/lint/eslint.config.js packages e2e scripts tools test",
     "test:e2e": "pnpm -F @w3/e2e test:e2e",
     "dev": "pnpm dev:editor",
     "size": "node scripts/check-size-budget.mjs",

@@ -27,16 +27,13 @@ import tseslint from 'typescript-eslint'
  */
 
 export default tseslint.config(
-  // Everything below is resolved against the repo root, not against tools/lint. Without
-  // this, ESLint 9 treats every file outside the config's own directory as ignored.
-  { basePath: '../..' },
-
   {
     ignores: [
       '**/dist/**',
       '**/node_modules/**',
       '**/coverage/**',
       'vendor/**',
+      'e2e/test-results/**',
       // Generated or vendored; linting them reports on code we do not own.
       '**/*.d.ts',
     ],
@@ -45,7 +42,57 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
 
+  /**
+   * T-208 · the build-tooling tier: `.mjs` / `.js` under `scripts/`, `tools/`, `e2e/fixtures/`.
+   *
+   * Two things have to be switched off for them, and neither is a matter of taste:
+   *
+   *  - **Type-aware linting.** These files are not in any `tsconfig.json`, so
+   *    `projectService: true` reports `Parsing error: … was not found by the project service`
+   *    on every one of them — 27 files, 27 errors, and a parse failure means **no rule runs
+   *    at all**. Widening the scan without this would have added 27 files' worth of silence,
+   *    not 27 files' worth of checking.
+   *  - **Node globals.** `no-undef` is disabled for `.ts` by typescript-eslint's
+   *    `eslint-recommended`, whose `files` glob covers only `{ts,tsx,mts,cts}`. On `.mjs` it
+   *    is an error with no globals declared: 116 hits across 14 files, all of them `console`,
+   *    `process`, `Buffer`, `performance`, `URL`.
+   *
+   * The five globals are written out rather than pulled from the `globals` package: adding a
+   * dependency the plan does not list is a stop-and-ask (CLAUDE.md 第 3 条), and five names
+   * are cheaper than that conversation.
+   */
   {
+    files: ['**/*.mjs', '**/*.js'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: false, project: false },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        performance: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
+
+  /**
+   * T-208 · `e2e/` and `test/` TypeScript.
+   *
+   * Same parse problem, different cause: these directories have no `tsconfig.json` of their
+   * own, so the project service cannot type them either. Type-aware rules are switched off
+   * for them; the syntactic rules (unused vars, no-undef, react-hooks) still run. Giving
+   * them a real tsconfig is a better answer and belongs to whoever needs type-aware rules
+   * there — **doing it here would be a third card's work smuggled into this one.**
+   */
+  {
+    files: ['e2e/**/*.ts', 'test/**/*.ts'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { parserOptions: { projectService: false, project: false } },
+  },
+
+  {
+    files: ['packages/**/*.ts', 'packages/**/*.tsx'],
     languageOptions: {
       parserOptions: {
         projectService: true,

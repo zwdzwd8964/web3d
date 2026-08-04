@@ -18,7 +18,7 @@
  */
 
 import { gzipSync } from 'node:zlib'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -27,11 +27,31 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 /** gzip level 9, matching what a static file server serves precompressed. */
 const gzipOf = (bytes) => gzipSync(bytes, { level: 9 }).byteLength
 
+/**
+ * T-208 · the budget moved out of this file and into `size-budget.json`.
+ *
+ * **The guard around it is not optional.** A budget read from a file that has been deleted or
+ * renamed would leave `budgetBytes` undefined, and `total <= undefined` is `false`… which
+ * fails loudly. `total > undefined` is also false — so whether a missing budget file reads as
+ * pass or fail depends on which way the comparison happens to be written. That is exactly the
+ * kind of accident this file's own header warns about, so it is refused outright instead.
+ */
+const BUDGET_FILE = join(ROOT, 'size-budget.json')
+if (!existsSync(BUDGET_FILE)) {
+  console.error('FAIL  size budget — size-budget.json 不存在。预算文件缺失时本脚本拒绝给出结论。')
+  process.exit(1)
+}
+const BUDGET = JSON.parse(readFileSync(BUDGET_FILE, 'utf8'))
+if (typeof BUDGET.player !== 'number' || BUDGET.unit !== 'KB-gzip') {
+  console.error(`FAIL  size budget — size-budget.json 形状不对（要 { "player": <number>, "unit": "KB-gzip" }）`)
+  process.exit(1)
+}
+
 const TARGETS = [
   {
     name: '@w3/player',
     dist: 'packages/player/dist',
-    budgetBytes: 400 * 1024,
+    budgetBytes: BUDGET.player * 1024,
     /**
      * Excluded by what a file IS, never by which directory it landed in.
      *
@@ -50,6 +70,16 @@ const TARGETS = [
       /(^|\/)(draco|basis|ktx2)[\w.-]*\.(js|wasm)$/i,
       /\.map$/,
       /\.(w3p|glb|gltf|ktx2|bin)$/i,
+      /**
+       * T-208 · dot-files. Vite copies `public/` into `dist/` verbatim, dot-files included,
+       * so `packages/player/public/.gitignore` (133 gzip bytes, a note about where the E2E
+       * writes its `.w3p`) has been counted as part of the code budget all along.
+       *
+       * **By filename, not by directory** — the card says so and the reason is written above:
+       * an `^assets/` style rule would drop the main bundle and leave the check measuring
+       * `index.html`. A dot-file is not code in any directory.
+       */
+      /(^|\/)\.[\w.-]+$/,
     ],
   },
 ]
