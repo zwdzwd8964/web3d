@@ -1083,8 +1083,22 @@
 - **变异检验** 不适用（裁决卡）。**替代验收**：ADR 里必须写明——如果保留 `vendor/` 而没有任何测试
   指向它，它就是下一次「被部署、被检查、没人用」的候选，**撤销条件要写死到期版本号**。
 
-### [ ] T-221 · 云托管入库与部署文档
-- **依赖** T-210（`.dockerignore` 同文件）· **预估** 0.6d · **实际** —
+### [x] T-221 · 云托管入库与部署文档
+- **依赖** T-210（`.dockerignore` 同文件）· **预估** 0.6d · **实际** 1.0h
+- **验收③ 已实跑**：照 DEPLOY.md §3 部署到 Railway 项目 `0729 3d engine`，域名
+  `0729-3d-engine-production.up.railway.app`，§6 的五条验证命令全过。**第 5 条是唯一能证伪的**
+  ——`--base=/player/` 漏了的话前四条全部通过、页面一片空白。
+- **卡面自测命令在本卡主交付物完全没做的那天就是绿的**：`git ls-files <未跟踪路径>` 零匹配时
+  exit 0。改用 `--error-unmatch` 并逐个点名路径。
+- **`railway.toml` 两处枚举值实测不合 schema**：`dockerfile` / `on_failure` 应为
+  `DOCKERFILE` / `ON_FAILURE`，小写会被判无效并**静默回落默认**——重启策略「看起来配了、
+  实际没配」，只在第一次崩溃时暴露。
+- **交付偏差**（三处）：`.dockerignore`（T-210 独占，但不 add 它镜像上下文就不完整）·
+  `scripts/check-docs.mjs`（新增规则 9；顺带修好规则 1 把**路径型 filter** 误判成包名的缺陷——
+  `pnpm --filter "./packages/**"` 是 Dockerfile 真在用的写法）· `docs/MUTATIONS.md`。
+- **DEPLOY.md 明写了两句最容易被误解的**：① 镜像构建不跑任何检查（Dockerfile 全文只有
+  install + build），**构建成功 ≠ 通过验收**；② `docker build` 需要联网，**不能充当断网构建的
+  证据**——那由 T-210 的 `offline` job 覆盖（本文写作时该 job 尚不存在，已在文中标明）。
 - **独占** `Dockerfile` · `railway.toml` · `deploy/**` · `docs/DEPLOY.md`（新）
 - **做** ① **`git add` 这四个路径**——今天 `git status --porcelain` 显示它们全是 `??`，
   `git log -- Dockerfile deploy railway.toml` 无输出，**「云托管」在版本库里不存在**；

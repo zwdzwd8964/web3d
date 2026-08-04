@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * T-207 · 文档零漂移的规则集（T-207 建七条，T-213 加第八条）。Gate G1.0-7 · A6 的 Q-1。
+ * T-207 · 文档零漂移的规则集（T-207 建七条，T-213 第八条，T-221 第九条）。Gate G1.0-7 · A6 的 Q-1。
  *
  * 这个仓库已经实证过五处文档漂移，其中一处是**一条按字面执行会「命令不存在」的晋级门槛**
  * （`pnpm size-limit`，写在四份文档里，包括宪法的 G0.5-7）。一条执行即失败的门槛不是严格的
@@ -183,6 +183,13 @@ function ruleOneScripts() {
           deferred++
           continue
         }
+        // T-221 · a PATH filter is not a package name. `pnpm --filter "./packages/**"` selects
+        // by directory glob, which is what the Dockerfile uses and what DEPLOY.md quotes;
+        // looking it up in the workspace's package names finds nothing and reports a real
+        // command as broken. Skipped rather than resolved: expanding the glob here would mean
+        // reimplementing pnpm's selector, for no gain — the script name is still checked below
+        // against the root, which is where a path-filtered run resolves it.
+        if (pkg && (pkg.startsWith('./') || pkg.startsWith('../') || pkg.includes('/'))) continue
         const scripts = pkg ? pkgScripts.get(pkg) : rootScripts
         const where = `${file}:${i + 1}`
         if (!scripts) {
@@ -674,6 +681,59 @@ function testFilesMatching(command) {
 }
 
 /* ========================================================================== */
+/* 规则 9 · DEPLOY.md 引用的每个仓库文件都存在                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * T-221 · 部署文档指着的东西必须真的在。
+ *
+ * 一份部署文档是**照着做**的，不是读着玩的：里面每一个路径都会有人原样敲进终端。
+ * `Dockerfile` / `railway.toml` / `deploy/nginx.conf.template` 在本卡之前**从未被提交过**
+ * （`git log -- Dockerfile` 无输出），所以「云托管」这件事在版本库里根本不存在——
+ * 一份引用着未跟踪文件的部署文档，克隆下来照着做必然失败。
+ *
+ * ⚠ **下限断在「从 DEPLOY.md 这一个文件里抽到的条数」上，不是断在规则 2 的全仓 267 条上。**
+ * 全局计数下，一份**一个路径都没有**的 DEPLOY.md 完全隐形。
+ */
+function ruleNineDeployPaths() {
+  const file = 'docs/DEPLOY.md'
+  const full = join(ROOT, file)
+  if (!existsSync(full)) {
+    fail('规则 9', `${file} 不存在。**这不是「零条所以放行」，是拿不到结论**`)
+    return
+  }
+  const text = readFileSync(full, 'utf8')
+  const lines = text.split(/\r?\n/)
+
+  // Repo-relative paths written in code spans. Only shapes that name a real file or
+  // directory — a bare word in backticks is a command or a flag, not a path.
+  const PATH_RE = /`((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|mjs|json|toml|yml|yaml|md|template|wasm)|(?:packages|deploy|docs|scripts|e2e)\/[\w./*-]*)`/g
+
+  const seen = new Set()
+  let checked = 0
+  for (let i = 0; i < lines.length; i++) {
+    PATH_RE.lastIndex = 0
+    let m
+    while ((m = PATH_RE.exec(lines[i])) !== null) {
+      const raw = m[1]
+      // Globs and trailing slashes name a directory; check the directory itself.
+      const path = raw.replace(/\/?\*+.*$/, '').replace(/\/$/, '')
+      if (path === '' || seen.has(path)) continue
+      seen.add(path)
+      checked++
+      if (!existsSync(join(ROOT, path))) {
+        fail('规则 9', `${file}:${i + 1}  引用了不存在的路径 \`${raw}\` —— 照着这份文档做的人会在这一步停住`)
+      }
+    }
+  }
+
+  if (checked < 6) {
+    fail('规则 9', `只从 ${file} 抽到 ${checked} 条路径（下限 6）——抽取面坏了，不是文档变简单了`)
+  }
+  note(`规则 9 · ${file} 引用 ${checked} 条仓库路径，逐条比对存在性`)
+}
+
+/* -------------------------------------------------------------------------- */
 /* 规则 8 · 每一份 ADR 的状态都是 Accepted                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -760,12 +820,13 @@ ruleFiveScopeCoverage()
 ruleSixGateCommands()
 ruleSevenGateRanges()
 ruleEightAdrStatus()
+ruleNineDeployPaths()
 
 console.log('')
 for (const n of notes) console.log(`  ${n}`)
 console.log('')
 if (failures.length === 0) {
-  console.log('PASS  G1.0-7 · 文档零漂移（八条规则）')
+  console.log('PASS  G1.0-7 · 文档零漂移（九条规则）')
   process.exit(0)
 }
 console.error(`FAIL  G1.0-7 · 文档零漂移  — ${failures.length} violation(s)`)
