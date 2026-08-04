@@ -36,6 +36,7 @@
 | core:AuditResult.summary | T-260 的体检报告界面按中文标签与格式化数值渲染这一段 | T-260 | v1.2 |
 | core:suggestUnit | T-260 的导入报告要在单位可疑时给出建议值 | T-260 | v1.2 |
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
+| core:buildPumpDemoGlb | T-283 把泵组样板物化成一份可打开的项目，它是那条链上唯一的字节来源 | T-283 | v1.2 |
 | core:SAMPLE_OBJECT_PATHS | T-222 的泵组样板给它补断言，这是同一形状第三次零调用者 | T-222 | v1.2 |
 | core:ClipPlayer.activeCount | T-237 的 mixer 回收要靠它断言反复播放不再堆积 action | T-237 | v1.2 |
 | core:AssetLoader.evict | T-429 换场景时按新文档收窄已加载资产，届时它是清场的一环 | T-429 | v1.5 |

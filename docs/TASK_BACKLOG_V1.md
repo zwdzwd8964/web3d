@@ -939,8 +939,21 @@
 - **自测** `git ls-files Dockerfile railway.toml deploy/ && node scripts/check-docs.mjs`
 - **变异检验** 把 DEPLOY.md 里一个文件路径改错 → `check-docs` 必须红。
 
-### [ ] T-222 · 泵组资产生成器与对象路径契约
-- **依赖** 无 · **预估** 1.0d · **实际** —
+### [x] T-222 · 泵组资产生成器与对象路径契约
+- **依赖** 无 · **预估** 1.0d · **实际** 1.1h
+- ⚠ **卡面验收有一条今天写不出来**：`stats.clipDurations['拆装'] ≈ 2.0`。
+  该字段**不存在**——`AssetStatsSchema` 是 `.strict()` 的七个键，`clipDurations` 属 schema v3
+  冻结清单，由 **T-225**（W4 单卡波次，未开工）落地、**T-234**（W5）测量。本卡在 W0 且依赖为空，
+  写它只能是失败或说谎。**改为从 `AnimationClip.duration` 断同一个数**（实测 2.0），
+  并在测试里逐字写明这条移交，**T-234 负责把它挪回 `clipDurations`**。
+- **卡面另有两处笔误**：① 「注册表↔样板双向体检」记在 T-288 名下，实际是 **T-285**
+  （T-288 是崩溃恢复·编辑器侧），门槛编号 G1.0-19；② 转出点写成 `packages/core/src/index.ts`，
+  实际要加行的是 `packages/core/src/assets/index.ts`。
+- **本卡把 T-205 的守卫证伪了一次**（详见 MUTATIONS ⑤）：新增 `export async function` 之后
+  孤儿数纹丝不动——`check-dead-exports.mjs` 的两条正则都漏了 `async`。补上之后
+  `buildPumpDemoGlb` 才如实报成孤儿并进豁免表（owner T-283）。
+- **Player gzip 增量 0 KB**（卡面要求 ≤ 2 KB）：`pump-demo.ts` 与 `sample.ts` 同一条 barrel，
+  player 侧无人 import，被 tree-shake 掉。
 - **独占** `packages/core/src/assets/pump-demo.ts`（新）· `packages/core/test/assets/pump-demo.test.ts`（新）·
   `packages/core/src/index.ts`（转出）· `packages/core/test/assets/sample.test.ts` · `docs/LICENSES_LIBRARY.md`
 - **做** 两条黄金路径里的 `pump.glb` 都是**同一个单四边形夹具改了个文件名**——E2E 全绿并不代表

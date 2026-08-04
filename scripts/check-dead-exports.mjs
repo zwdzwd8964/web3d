@@ -92,7 +92,16 @@ const RUNTIME_KINDS = new Set(['function', 'function*', 'const', 'let', 'var', '
 /* -------------------------------------------------------------------------- */
 
 /** `export function foo` / `export const foo` / `export class Foo` / `export interface Foo`… */
-const DECL_RE = /^export\s+(?:declare\s+)?(?:abstract\s+)?(function\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm
+/**
+ * `async` was missing until T-222 tripped over it.
+ *
+ * `export async function buildPumpDemoGlb` matched nothing, so the symbol never entered the
+ * export surface and its zero callers were never counted. A guard whose declaration pattern
+ * misses a whole declaration form is under-reporting silently — the direction this script's
+ * header promises it errs in, but only because nobody had checked. Found by adding an
+ * `export async function` and watching the orphan count stay put.
+ */
+const DECL_RE = /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(function\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm
 /** `export { a, b as c }` — excluding `export … from`, which re-exports another file. */
 const NAMED_RE = /^export\s*\{([^}]*)\}\s*(?!from)/gm
 /** `export * from './x.js'` */
@@ -240,7 +249,10 @@ for (const entry of surface) {
   const declaration = entry.owner
     ? null
     : new RegExp(
-        `^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(?:function\\*?|const|let|var|class|interface|type|enum)\\s+${name}\\b` +
+        // `async` here too — without it, `export async function X` counts its own declaration
+        // line as a USE, so a brand-new zero-caller export reports as used. Two regexes, one
+        // blind spot, and only the second one was visible from the orphan count.
+        `^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var|class|interface|type|enum)\\s+${name}\\b` +
           `|^\\s*export\\s*\\{[^}]*\\b${name}\\b`,
         'gm',
       )
