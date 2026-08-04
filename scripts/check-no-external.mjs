@@ -22,8 +22,9 @@
  *   node scripts/check-no-external.mjs --allow-missing  # report SKIPPED instead
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readExemptions } from './lib/exemptions.mjs'
 import { makeReport, printReport } from './lib/scan.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -88,8 +89,47 @@ const INERT = [
   [/^https?:\/\/(www\.)?(threejs\.org|github\.com|opensource\.org|unlicense\.org|zod\.dev)\//, 'licence or homepage banner'],
 ]
 
-/** A template placeholder cannot be a literal address — it is URL-building code. */
-const isTemplateFragment = (url) => url.includes('${')
+/**
+ * T-209 · templated URLs, allowlisted by prefix instead of waved through.
+ *
+ * The rule this replaces was one line — `url.includes('${')` — and it meant **any external
+ * address assembled from a template passed C6 silently**. `` `https://${host}/telemetry` ``
+ * was, until this card, a compliant way to phone home. That is a hole exactly one line
+ * wide in the only machine guarantee behind 「内网部署不白屏」.
+ *
+ * The table is read through `readExemptions`, so these rows get the same four columns and
+ * the same expiry ladder as every other exemption in the repo — including a dependency's
+ * inert construct, whose expiry is a re-verification date rather than a cleanup deadline
+ * (dependencies get upgraded, and the reason can stop being true without anyone touching
+ * this repo).
+ */
+const ALLOWLIST_FILE = join(ROOT, 'docs/EXTERNAL_URL_ALLOWLIST.md')
+const CURRENT_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version.startsWith('1.')
+  ? 'v1.0'
+  : 'v0.5'
+
+const cardLedger = readFileSync(join(ROOT, 'docs/TASK_BACKLOG_V1.md'), 'utf8')
+const templateAllowlist = readExemptions(ALLOWLIST_FILE, {
+  current: CURRENT_VERSION,
+  cardExists: (card) => cardLedger.includes(card),
+})
+
+/**
+ * A templated URL is excused only by a declared prefix.
+ *
+ * Note what is NOT written here: `if (templateAllowlist.rows.length === 0) return true`.
+ * A missing or empty table has to mean "nothing is excused", not "everything is" — the
+ * failure mode where a guard reads the wrong path and turns permanently green is the one
+ * D36 named, and it has now cost this project three separate scripts.
+ */
+function templateAllowance(url) {
+  if (!url.includes('${')) return null
+  for (const row of templateAllowlist.rows) {
+    const prefix = row.symbol.replace(/^`|`$/g, '')
+    if (url.startsWith(prefix)) return row
+  }
+  return { symbol: null }
+}
 
 function inertReason(url) {
   for (const [pattern, reason] of INERT) if (pattern.test(url)) return reason
@@ -109,6 +149,11 @@ function walkDist(dir, out = []) {
 }
 
 const report = makeReport('no external runtime dependency', 'C6')
+
+for (const problem of templateAllowlist.problems) {
+  report.add(ALLOWLIST_FILE, problem.line, `模板地址豁免表：${problem.message}`)
+}
+report.note(`模板地址豁免表：${templateAllowlist.rows.length} 条（${relative(ROOT, ALLOWLIST_FILE).split(sep).join('/')}）`)
 
 const present = OUT_DIRS.filter((d) => existsSync(join(ROOT, d)) && statSync(join(ROOT, d)).isDirectory())
 
@@ -147,7 +192,15 @@ for (const dir of present) {
       let m
       while ((m = URL_RE.exec(line)) !== null) {
         const url = m[0]
-        if (isTemplateFragment(url)) continue
+        const templated = templateAllowance(url)
+        if (templated) {
+          if (templated.symbol === null) {
+            report.add(file, i + 1, `templated external URL with no allowlist row: ${url.slice(0, 120)} — 用模板拼出来的地址也要过 C6，进 docs/EXTERNAL_URL_ALLOWLIST.md`)
+          } else {
+            exempted.set(`templated: ${templated.reason}`, (exempted.get(`templated: ${templated.reason}`) ?? 0) + 1)
+          }
+          continue
+        }
         const reason = inertReason(url)
         if (reason) {
           exempted.set(reason, (exempted.get(reason) ?? 0) + 1)

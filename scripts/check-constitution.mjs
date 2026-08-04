@@ -18,6 +18,11 @@ const REQUIRE_BUILD = process.argv.includes('--require-build')
 const GUARDS = [
   { article: 'C2 + C8 + C5', script: 'check-core-purity.mjs', args: [], what: 'core is framework-agnostic; ECA is deterministic; executor has no type branches' },
   { article: 'C7', script: 'check-storage-abstraction.mjs', args: [], what: 'no concrete storage outside @w3/storage' },
+  // v1.0 · T-209 · 债 A. The line above forbids the NAMES of concrete stores; it never
+  // scanned for `fetch`, although C7 and 铁律 8 both name 「fetch 到固定端点」 verbatim. The
+  // network primitives are owned here and only here (X-29) — two scripts sharing one
+  // allowlist disagree the first time a row lands in only one of them.
+  { article: 'C7', script: 'check-provider-swap.mjs', args: [], what: 'provider construction and network primitives each have exactly the declared sites' },
   { article: 'MVP §3', script: 'check-deps-direction.mjs', args: [], what: 'package dependency graph has no reverse edges' },
   { article: 'C6', script: 'check-no-external.mjs', args: REQUIRE_BUILD ? [] : ['--allow-missing'], what: 'no external URL in build output' },
   { article: 'C6', script: 'sync-vendor.mjs', args: ['--check'], what: 'Draco / KTX2 decoders are vendored and match the locked three' },
