@@ -141,7 +141,7 @@ export const spinTo = defineAction<z.infer<typeof SpinToParams>>({
 
 然后把它加进同文件的 `BUILTIN_ACTIONS` 数组。
 
-> **为什么是数组而不是导入即注册**：见 [ADR-0008](adr/0008-actions-registered-as-data.md)。
+> **为什么是数组而不是导入即注册**：见 [ADR-0008](adr/0008-动作以数据导出集中注册.md)。
 > 宿主显式调用 `registerBuiltinActions()`，注册表内容不依赖 import 顺序。
 
 ### 第 2 步 · 如果需要新的运行时能力

@@ -543,7 +543,7 @@
 - **独占** `size-limit.config.js`, CI 配置
 - **做** 配 size-limit，阈值 gzip 400KB（不含资产与 vendor 解码器）
 - **验收** 超标 CI fail
-- **自测** `pnpm size-limit`
+- **自测** `pnpm size`（T-207 订正：原写 `pnpm size-limit`，该命令从来不存在）
 
 ---
 

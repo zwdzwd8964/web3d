@@ -641,7 +641,7 @@
 - **依赖** T-145, T-170 · **预估** 0.5d · **实际** 0.3h
 - **独占** `scripts/check-constitution.mjs`（挂新检查）, `size-limit.config.js`（如需）
 - **做** `check-library-manifest.mjs` 纳入 `pnpm check:constitution`；size-limit 复核（预算不变 gzip ≤ 400 KB——HDRI / 媒体 / 库内容全部走资产管线不进 bundle，本卡验证这一点）；断网构建 + 断网 `pnpm dev` 冒烟，结果记入 IMPL_NOTES §2。
-- **验收** `pnpm check:constitution` 全绿（含新项）；`pnpm size-limit` 通过并记录余量
+- **验收** `pnpm check:constitution` 全绿（含新项）；`pnpm size` 通过并记录余量（T-207 订正：原写 `pnpm size-limit`）
 - **自测** `pnpm check:constitution && pnpm size`
 - **实际情况**：体积 **gzip 243.0 KB / 400 KB，余量 157 KB**。HDRI、媒体、库内容全部走资产管线
   不进 bundle——这正是本卡要验证的那句话，实测数字支持它。

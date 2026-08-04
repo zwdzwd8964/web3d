@@ -17,7 +17,7 @@
 v1.0「地基与表现力」/ v1.2「编排与复用」/ v1.5「合同交付」。你现在做的是 v1.0。
 
 底座（v0）与表现力第一轮（v0.5）已完成：45 张卡、1308 条测试、Player gzip 243.8/400 KB、
-16 个注册动作、19 条 ADR。v1 全书 199 张卡 / 222.7 人日（v1.0 100 张 / 111.0 人日 / ≈129 小时
+16 个注册动作、31 条 ADR。v1 全书 199 张卡 / 222.7 人日（v1.0 100 张 / 111.0 人日 / ≈129 小时
 agent 时钟），排期真值以 TASK_BACKLOG_V1.md 附录 C 为准。
 
 【开工授权】产品负责人已于 2026-08-03 拍板 P-1 ~ P-20 二十项，全部批准，留痕在规划文末一节。
@@ -99,9 +99,10 @@ agent 时钟），排期真值以 TASK_BACKLOG_V1.md 附录 C 为准。
 【已核实为真的命令】pnpm install / dev / dev:player / build / typecheck / lint / test /
 test:parity / test:e2e / check:constitution / size / verify / verify:full 全部存在。
 `pnpm size-limit` 【不存在】，四份文档写错了，由 T-207 一次改完。
-scripts/ 下今天只有 9 个脚本；check-docs.mjs · check-dead-exports.mjs · check-expiry.mjs ·
-check-mutations.mjs · milestone-close.mjs · check-backlog-conflicts.mjs · apply-bench-report.mjs ·
-pack-offline.mjs · gen-appendix-c.mjs 全部尚未存在，各有交付卡，别假设它们能跑。
+scripts/ 下起草时只有 9 个脚本。**T-205 / T-207 落地后已增至 13 个**（含 scripts/lib/），
+其中 check-dead-exports.mjs 与 check-docs.mjs 已存在并已挂进 pnpm check:constitution / pnpm verify。
+check-expiry.mjs · check-mutations.mjs · milestone-close.mjs · check-backlog-conflicts.mjs ·
+apply-bench-report.mjs · pack-offline.mjs · gen-appendix-c.mjs 仍不存在，各有交付卡，别假设它们能跑。
 
 【工作方式：沿用 v0/v0.5，外加五条新纪律】
 - 一次一张卡地做，但【连着做完一整批再汇报】（见上文协作节奏一）。每张卡做完跑该卡的

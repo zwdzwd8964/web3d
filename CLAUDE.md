@@ -23,7 +23,7 @@ v1.0 的定义是三个词：**能演示、能卖、能被嵌进别人的系统*
 | [docs/V1_KICKOFF.md](docs/V1_KICKOFF.md) | **新会话第一件事**。v1 点火指令的唯一权威（规划 §9 的同名代码块已被它取代，别照那个执行）· 仓库现状与文档不一致的四处 · 批次报告模板 |
 | [docs/NORTH_STAR.md](docs/NORTH_STAR.md) | 开工前。九条宪法任何情况下不得违反 |
 | [docs/MVP_V1_进化规划.md](docs/MVP_V1_进化规划.md) | 开工前。v1.0/v1.2/v1.5 范围、Out of Scope §1.2、灰区裁决 §1.3、黄金路径 III–V、设计决策 D21 起、**规范增量 §4（已冻结的逐字 zod 清单）**、验收门槛 §7 |
-| [docs/TASK_BACKLOG_V1.md](docs/TASK_BACKLOG_V1.md) | 每次领新任务时。196 张卡 / 220.5 人日 / 36 个波次 |
+| [docs/TASK_BACKLOG_V1.md](docs/TASK_BACKLOG_V1.md) | 每次领新任务时。199 张卡 / 222.7 人日 / 36 个波次 |
 | [docs/SCHEMA_SPEC.md](docs/SCHEMA_SPEC.md) | 动 `@w3/schema` 或任何文档字段之前（**v1 增量以 v1 进化规划 §4 为准**，按 §4.5 的回写卡回写） |
 | [docs/ECA_SPEC.md](docs/ECA_SPEC.md) | 动 `packages/core/src/eca/` 之前 |
 | [docs/MVP_V0_5_进化规划.md](docs/MVP_V0_5_进化规划.md) | **历史参考**。v0.5 范围、黄金路径 II、设计决策 D11–D20 |
@@ -277,6 +277,19 @@ pnpm verify                        # 上面全部，提 PR 前跑
 | `RuntimeContext` 方法返回 `void` 但内部是异步的 | 铁律 10 |
 | ECA 代码里出现 `setTimeout` | 铁律 6 |
 | 先写完功能，测试"以后补" | v0 的晋级门槛全是自动化的，没测试等于没门槛 |
+| `packages/player/src` 里出现 `bench/` `embed/` 之外的 diff，且不在 `app.ts` 的装配段 | **C3 验收口径**（下方单列） |
+
+---
+
+## C3 的验收口径（v1 统一，台账 §0 新纪律 7）
+
+「`packages/player/src` diff 必须为空」这条规矩，**v1 有五份领域设计各自开了例外，加起来它什么都拦不住了**。
+统一收窄成一句可执行的：
+
+> **除 `bench/` 与 `embed/` 之外的文件，diff 只允许出现在 `app.ts` 的装配段，且必须逐行在提交信息里点名。**
+
+允许的改动行数记进 `docs/METRICS.md`，可趋势观察。**「逐行点名」不是仪式**：一条没被点名的
+装配行，与一份被悄悄分叉的播放器，在 diff 上长得一模一样——而 C3 分叉是验收时最丢人的缺陷类型（A2）。
 
 ---
 

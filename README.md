@@ -1,4 +1,4 @@
-# Web3D 工具引擎 · v0.5
+# Web3D 工具引擎 · v1.0
 
 把「三维资产 + 交互逻辑」表达为一份可版本化的 JSON 文档。**编辑器和播放器只是这份文档的两种视图。**
 
@@ -40,7 +40,7 @@ Ctrl+D 复制并网格吸附 → 套材质预设、挂贴图、调 UV → 建聚
 
 ```bash
 pnpm install
-pnpm dev                 # 编辑器 · http://127.0.0.1:5173
+pnpm dev                 # 编辑器 · http://127.0.0.1:5180
 pnpm dev:player          # 播放器 · http://127.0.0.1:5181
 pnpm verify              # 提 PR 前的总闸门
 ```
@@ -129,7 +129,7 @@ pnpm verify:full         # 含 e2e
 | [docs/METRICS.md](docs/METRICS.md) | 指标快照与趋势 |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | 在客户机器上出性能报告 |
 | [docs/附件A_数字资产规范_草案.md](docs/附件A_数字资产规范_草案.md) | 和客户谈资产交付标准 |
-| [docs/adr/](docs/adr/) | 14 条架构决策记录，每条都有代价与撤销条件 |
+| [docs/adr/](docs/adr/) | 31 条架构决策记录，每条都有代价与撤销条件 |
 
 ---
 

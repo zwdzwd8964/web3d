@@ -274,7 +274,7 @@ pnpm -r test              # 全部单测；@w3/core 的 ECA 部分在纯 Node �
 pnpm test:parity          # 编辑器预览 vs 播放器 状态轨迹一致性
 pnpm test:e2e             # 黄金路径 12 步
 pnpm build --offline      # 断网构建（C6）
-pnpm size-limit           # Player 体积预算
+pnpm size                 # Player 体积预算（T-207 订正：size-limit 从来不存在）
 ```
 
 门槛（对应北极星 §3 的 G0-1 ~ G0-7）：

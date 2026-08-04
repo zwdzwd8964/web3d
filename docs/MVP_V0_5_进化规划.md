@@ -456,7 +456,7 @@ pnpm -r test              # 全部单测；ECA（含新动作）纯 Node
 pnpm test:parity          # 轨迹含 setLight / playMedia 步骤
 pnpm test:e2e             # 黄金路径 I（回归）+ 黄金路径 II
 pnpm build --offline      # 断网构建
-pnpm size-limit           # Player gzip ≤ 400 KB 不变
+pnpm size                 # Player gzip ≤ 400 KB 不变（T-207 订正：size-limit 从来不存在）
 ```
 
 补充硬指标：
