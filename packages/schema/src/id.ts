@@ -22,6 +22,12 @@ export const PREFIXES = {
   flow: 'flw',
   step: 'st',
   media: 'med',
+  // v3 · 四个新前缀，全部来自四个新的**被引用对象**。十条能力零新增前缀——
+  // 前缀只在「有别的东西按 id 指向它」时才需要，不是每个新概念都配一个。
+  overlay: 'ov',
+  dataSource: 'ds',
+  scene: 'scn',
+  prefab: 'pfb',
 } as const
 
 export type Prefix = (typeof PREFIXES)[keyof typeof PREFIXES]
@@ -43,6 +49,24 @@ export const PageIdSchema = Id(PREFIXES.page)
 export const FlowIdSchema = Id(PREFIXES.flow)
 export const StepIdSchema = Id(PREFIXES.step)
 export const MediaIdSchema = Id(PREFIXES.media)
+export const OverlayIdSchema = Id(PREFIXES.overlay)
+export const DataSourceIdSchema = Id(PREFIXES.dataSource)
+export const SceneIdSchema = Id(PREFIXES.scene)
+export const PrefabIdSchema = Id(PREFIXES.prefab)
+
+/**
+ * v3 · 从 `projectId` 派生场景 id，**幂等**。
+ *
+ * 多场景是 v1.5 的能力，但 `sceneId` 必须在 v1.0 的这次 bump 里定下来。迁移不能铸随机 id：
+ * 同一份老文档在两台机器上迁移会得到两个不同的场景 id，而那要到 v1.5 做多场景那条线时
+ * 才会暴露出来——那时已经有一堆文档带着分叉的 id 了。
+ *
+ * 非法输入落 `scn_00000000`（而不是抛）：C4——一份能打开的文档永远要能打开。
+ */
+export function deriveSceneId(projectId: string): string {
+  const body = /^prj_([0-9a-z]{8})$/.exec(projectId)?.[1]
+  return body === undefined ? 'scn_00000000' : `${PREFIXES.scene}_${body}`
+}
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 const ID_LENGTH = 8

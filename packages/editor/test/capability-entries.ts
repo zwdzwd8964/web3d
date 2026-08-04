@@ -67,4 +67,25 @@ export const CAPABILITY_ENTRIES: readonly CapabilityEntry[] = [
   { capability: 'event:animationEnd', selector: '[data-testid="rule-event-type"] option[value="animationEnd"]' },
   { capability: 'event:variableChange', selector: '[data-testid="rule-event-type"] option[value="variableChange"]' },
   { capability: 'event:timer', selector: '[data-testid="rule-event-type"] option[value="timer"]' },
+  // v3 冻结形状、v1.2 才通电（T-225 · X-09/X-10）。三条都**故意没有入口**：
+  // `RulePanel` 的 `CREATABLE_EVENTS` 把它们挡在新建下拉框外，因为它们在 v1.0 一次都不会
+  // 被触发，摆出来只会让用户配一条永远不响的规则。
+  //
+  // 写成带 note 的行而不是从体检表里删掉：删掉会让「事件枚举有 11 个、入口只有 8 个」这件事
+  // 从这张表上消失，而这张表存在的理由正是让这种缺口可见（T-137 的教训）。
+  {
+    capability: 'event:pageEnter',
+    selector: null,
+    note: 'v1.2 接线。v1.0 的 CREATABLE_EVENTS 故意排除它——页面在 v1.0 不渲染，这个事件永不触发',
+  },
+  {
+    capability: 'event:flowStepEnter',
+    selector: null,
+    note: 'v1.2 接线。同上：流程在 v1.0 没有运行时',
+  },
+  {
+    capability: 'event:overlayClick',
+    selector: null,
+    note: 'v1.2 接线。同上：覆盖层在 v1.0 不渲染，点不到',
+  },
 ]

@@ -37,6 +37,10 @@ function docWithLight(light: Light, position: [number, number, number] = [0, 0, 
     nodes: [
       ...base.nodes,
       {
+        section: null,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         id: LIGHT_ID,
         name: '聚光灯',
         parent: null,

@@ -88,6 +88,10 @@ function litDocument(): SceneDocument {
     nodes: [
       ...doc.nodes,
       {
+        section: null,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         id: LIGHT_ID,
         name: '聚光灯',
         parent: null,

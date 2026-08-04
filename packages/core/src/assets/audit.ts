@@ -116,6 +116,9 @@ export function measure(document: Document, byteLength: number): AuditMeasuremen
     textureBytes,
     nodes: root.listNodes().length,
     animations: root.listAnimations().map((a) => a.getName()),
+    // v3 · 名字拿得到，时长拿不到 —— 时长要把每条 sampler 的 input accessor 读到底取 max。
+    // 如实留空，别拿 0 冒充「测过了」。
+    clipDurations: {},
     maxTextureSize,
   }
 }
@@ -176,6 +179,7 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
     textureBytes: measurements.textureBytes,
     nodes: measurements.nodes,
     animations: [...measurements.animations],
+    clipDurations: {},
   }
 
   return {
@@ -344,6 +348,7 @@ export function measureImage(info: ImageInfo, byteLength: number): ImageMeasurem
     textureBytes: estimateTextureBytes(info.width, info.height),
     nodes: 0,
     animations: [],
+    clipDurations: {},
     maxTextureSize: Math.max(info.width, info.height),
     imageBytes: byteLength,
     hdriBytes: byteLength,
@@ -385,6 +390,7 @@ export function measureMedia(byteLength: number): MediaMeasurements {
     textureBytes: 0,
     nodes: 0,
     animations: [],
+    clipDurations: {},
     maxTextureSize: 0,
     audioBytes: byteLength,
     videoBytes: byteLength,

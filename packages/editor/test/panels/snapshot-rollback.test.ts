@@ -37,8 +37,29 @@ function populatedDocument(): SceneDocument {
   return {
     ...doc,
     pages: [{ id: 'pg_11111111', name: '首页', overlays: [] }],
-    flows: [{ id: 'flw_11111111', name: '拆装', variableId: doc.variables[0]!.id, steps: [] }],
+    flows: [{ id: 'flw_11111111', name: '拆装', variableId: doc.variables[0]!.id, startStepId: null, steps: [] }],
     media: [{ id: 'med_11111111', type: 'audio', assetId: doc.assets[0]!.id, name: '提示音' }],
+    // v3 · 集合从 11 变成 13。上面那段注释说的是「每个集合都非空」，而这两个新的一旦留空，
+    // `applyRollback` 漏掉它们时的表现就和做对了一模一样 —— 正是这个文件当初写出来要防的那件事。
+    dataSources: [
+      {
+        id: 'ds_11111111',
+        name: '产线读数',
+        enabled: false,
+        mode: 'sample' as const,
+        url: '',
+        method: 'get' as const,
+        body: null,
+        auth: { kind: 'none' as const, secretRef: '', headerName: '' },
+        intervalMs: 30_000,
+        timeoutMs: 10_000,
+        startOn: 'sceneReady' as const,
+        onError: 'keep' as const,
+        map: [],
+        sample: [],
+      },
+    ],
+    prefabs: [{ id: 'pfb_11111111', name: '标准泵组', note: '', version: 1, nodes: [], materials: [] }],
   } as SceneDocument
 }
 

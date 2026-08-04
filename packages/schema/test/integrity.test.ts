@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SceneDocument } from '../src/document.js'
 import type { ActionRefResolver } from '../src/index-builder.js'
 import { checkIntegrity, errorsOf, formatIntegrityIssues, hasErrors, warningsOf } from '../src/integrity.js'
+import { applyMigrationChain } from '../src/migrate.js'
 import { createGoldenPathDocument } from '../src/samples.js'
 import goldenPathTwo from './fixtures/v2/golden-path-2.json' with { type: 'json' }
 
@@ -336,10 +337,25 @@ describe('I10 · unreachable nodes', () => {
 /* v2 增量 · I11 – I15（v0.5 进化规划 §4.2）                                    */
 /* ========================================================================== */
 
-/** The v2 fixture, as a mutable plain object: it is the only document with lights, */
-/** primitives, an environment, textures and media all present at once.             */
+/**
+ * The v2 fixture, **migrated to v3**, as a mutable plain object.
+ *
+ * It is the only document with lights, primitives, an environment, textures and media all
+ * present at once — which is why the I11–I15 cases are built on it rather than on the
+ * golden path.
+ *
+ * ⚠ **The migration is not optional and T-225 is where that became true.** Before v3 this
+ * cast a raw v2 document to `SceneDocument` and it happened to work, because every v2 key
+ * was also a v3 key. v3 adds two collections, and `checkIntegrity` walks `ID_COLLECTIONS`
+ * — so the raw fixture makes it read `doc.dataSources.map` on `undefined`. Casting a v2
+ * document to `SceneDocument` was always a lie; v3 is just the version where the lie
+ * stopped being free. The card's own acceptance says every fixture goes
+ * `migrate → validate → checkIntegrity`, and this is that.
+ */
 function v2Doc(mutate: (doc: any) => void = () => undefined): SceneDocument {
-  const doc = structuredClone(goldenPathTwo) as any
+  const migrated = applyMigrationChain(structuredClone(goldenPathTwo) as Record<string, unknown>)
+  if (!migrated.ok) throw new Error(`v2 fixture failed to migrate: ${JSON.stringify(migrated.error)}`)
+  const doc = migrated.value.raw as any
   mutate(doc)
   return doc as SceneDocument
 }

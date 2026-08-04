@@ -29,6 +29,10 @@ function extendedDocument(): SceneDocument {
       transform: blank,
       visible: true,
       locked: false,
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       overrides: {},
     },
     {
@@ -42,6 +46,10 @@ function extendedDocument(): SceneDocument {
       transform: blank,
       visible: true,
       locked: false,
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       overrides: {},
     },
     {
@@ -55,6 +63,10 @@ function extendedDocument(): SceneDocument {
       transform: blank,
       visible: true,
       locked: false,
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       overrides: {},
     },
   ]

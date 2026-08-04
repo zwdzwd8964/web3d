@@ -20,21 +20,58 @@ import { collectAllIds } from '../src/selectors.js'
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url))
 
-/** A page, a flow and a media record — the three collections the golden path leaves empty. */
+/**
+ * The collections the golden path leaves empty: a page, a flow, a media record — and,
+ * since T-225, a data source and a prefab.
+ *
+ * **This builder is the test's real subject.** The header above says the point is what
+ * happens when a twelfth collection appears; a builder that silently skips the new two
+ * would let the I1 assertion below pass on eleven of thirteen and call it derived.
+ */
 function fullDocument(): SceneDocument {
   const doc = createGoldenPathDocument()
   return {
     ...doc,
-    pages: [{ id: 'pg_11111111', name: '首页', overlays: [{ id: 'ov_aaaaaaaa', type: 'text', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl', props: {} }] }],
+    pages: [{ id: 'pg_11111111', name: '首页', overlays: [
+          {
+            id: 'ov_aaaaaaaa',
+            type: 'text',
+            rect: { x: 0, y: 0, w: 1, h: 1 },
+            anchor: 'tl',
+            props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: null },
+          },
+        ] }],
     flows: [
       {
         id: 'flw_11111111',
         name: '拆装',
         variableId: doc.variables[0]!.id,
+        startStepId: 'st_11111111',
         steps: [{ id: 'st_11111111', name: '第一步', next: null, onEnter: [] }],
       },
     ],
     media: [{ id: 'med_11111111', type: 'audio', assetId: doc.assets[0]!.id, name: '提示音' }],
+    // v3 · 两个新集合。`enabled: false` / `mode: 'sample'` 是刻意的：这份 fixture 会被
+    // 十几个测试读，没有一个该因为它而想到「发网络请求」。
+    dataSources: [
+      {
+        id: 'ds_11111111',
+        name: '产线读数',
+        enabled: false,
+        mode: 'sample',
+        url: '',
+        method: 'get',
+        body: null,
+        auth: { kind: 'none', secretRef: '', headerName: '' },
+        intervalMs: 30_000,
+        timeoutMs: 10_000,
+        startOn: 'sceneReady',
+        onError: 'keep',
+        map: [],
+        sample: [],
+      },
+    ],
+    prefabs: [{ id: 'pfb_11111111', name: '标准泵组', note: '', version: 1, nodes: [], materials: [] }],
   } as SceneDocument
 }
 
@@ -105,6 +142,60 @@ describe('collectAllIds 由注册表驱动', () => {
     // already in use, because `newId`'s taken-set is exactly this Set.
     expect(ids.has('st_11111111')).toBe(true)
     expect(ids.has('ov_aaaaaaaa')).toBe(true)
+  })
+
+  /**
+   * T-225 · **恰好多 3，不是「大于」。**
+   *
+   * `toBeGreaterThan` 在这里是没有内容的：文档里随便多一个 id 它都为真。而
+   * `pages: ['overlays']` 漏登记时的实际表现是**一个都不多**，所以 `=== +3` 是唯一能把
+   * 「登记了」和「没登记」分开的写法。
+   *
+   * 这个 Set 就是 `newId` 的 taken-set：漏登记的直接后果是 v1.2 的 `createOverlay` 会
+   * 重新发一个已经在用的 id，而重复 id 要到 I1 报出来才被人看见。
+   */
+  it('新加 3 个覆盖层，collectAllIds 恰好多 3', () => {
+    const doc = fullDocument()
+    const before = collectAllIds(doc).size
+
+    const rect = { x: 0, y: 0, w: 1, h: 1 }
+    const grown: SceneDocument = {
+      ...doc,
+      pages: [
+        {
+          ...doc.pages[0]!,
+          overlays: [
+            ...doc.pages[0]!.overlays,
+            { id: 'ov_bbbbbbbb', type: 'text', rect, anchor: 'tl', props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: null } },
+            { id: 'ov_cccccccc', type: 'button', rect, anchor: 'tl', props: { label: '按钮', variant: 'primary' } },
+            { id: 'ov_dddddddd', type: 'panel', rect, anchor: 'tl', props: { title: '', text: '', mediaId: null, flowId: null, progress: false } },
+          ],
+        },
+      ],
+    } as SceneDocument
+
+    expect(collectAllIds(grown).size - before).toBe(3)
+  })
+
+  /**
+   * 同一条规矩加在 `prefabs: ['nodes', 'materials']` 上。
+   *
+   * prefab 里的节点与材质**和文档主集合同一命名空间**（I42 保证不撞车），所以它们必须进
+   * taken-set。两条 nested 分别验，一条漏登记时另一条不会替它遮掩。
+   */
+  it('prefab 里的节点与材质也进 taken-set，各自恰好多 1', () => {
+    const doc = fullDocument()
+    const before = collectAllIds(doc).size
+    const base = doc.prefabs[0]!
+
+    const withNode = { ...doc, prefabs: [{ ...base, nodes: [...base.nodes, { ...doc.nodes[0]!, id: 'nd_inpfb001', parent: null }] }] } as SceneDocument
+    expect(collectAllIds(withNode).size - before, 'prefabs[].nodes 没进 taken-set').toBe(1)
+
+    const withMat = {
+      ...doc,
+      prefabs: [{ ...base, materials: [...base.materials, { id: 'mat_inpfb001', name: '预制材质', base: 'standard', preset: null, params: {} }] }],
+    } as unknown as SceneDocument
+    expect(collectAllIds(withMat).size - before, 'prefabs[].materials 没进 taken-set').toBe(1)
   })
 })
 

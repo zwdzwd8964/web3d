@@ -1,5 +1,15 @@
 import { z } from 'zod'
-import { AnimationIdSchema, HotspotIdSchema, NodeIdSchema, RuleIdSchema, VariableIdSchema } from './id.js'
+import {
+  AnimationIdSchema,
+  FlowIdSchema,
+  HotspotIdSchema,
+  NodeIdSchema,
+  OverlayIdSchema,
+  PageIdSchema,
+  RuleIdSchema,
+  StepIdSchema,
+  VariableIdSchema,
+} from './id.js'
 
 /**
  * The document shape of a rule. Semantics live in ECA_SPEC; this file only fixes the
@@ -56,10 +66,16 @@ export const EventDescriptorSchema = z.discriminatedUnion('event', [
       startOn: z.enum(TIMER_START_MODES).default('sceneReady'),
     })
     .strict(),
+  // v3 · 三个新事件（X-10）。**`overlay.onClick` 内联动作不进 schema**——按钮要做什么
+  // 用 `overlayClick` 规则表达，与 `hotspotClick` 同一条路。内联动作会让 overlay 变成
+  // 第二套 ECA，而那是 R13 明令要防的页面搭建器。
+  z.object({ event: z.literal('pageEnter'), pageId: PageIdSchema }).strict(),
+  z.object({ event: z.literal('flowStepEnter'), flowId: FlowIdSchema, stepId: StepIdSchema }).strict(),
+  z.object({ event: z.literal('overlayClick'), overlayId: OverlayIdSchema }).strict(),
 ])
 export type EventDescriptor = z.infer<typeof EventDescriptorSchema>
 
-/** Every event type a v0 rule may declare. `pageEnter` / `flowStepEnter` arrive in v1. */
+/** Every event type a rule may declare. v3 added the last three (8 → 11). */
 export const EVENT_TYPES = [
   'sceneReady',
   'click',
@@ -69,6 +85,9 @@ export const EVENT_TYPES = [
   'animationEnd',
   'variableChange',
   'timer',
+  'pageEnter',
+  'flowStepEnter',
+  'overlayClick',
 ] as const
 export type EventType = (typeof EVENT_TYPES)[number]
 
@@ -77,7 +96,11 @@ export type EventType = (typeof EVENT_TYPES)[number]
 /* -------------------------------------------------------------------------- */
 
 export const NODE_PROP_KEYS = ['visible', 'materialId', 'positionY'] as const
-export const EVENT_PAYLOAD_KEYS = ['nodeId', 'hotspotId', 'animationId'] as const
+// v3 · +2（X-13）。**不加 `overlayId`**：一条 `overlayClick` 规则已经知道自己挂在哪个
+// overlay 上（事件描述符里就有），再给表达式一个读它的口子只是多一条等价路径。
+export const EVENT_PAYLOAD_KEYS = ['nodeId', 'hotspotId', 'animationId', 'stepId', 'pageId'] as const
+/** 事件载荷里可被条件读取的键。core 的 `eventPayload` 用它，避免两边各抄一份键集。 */
+export type EventPayloadKey = (typeof EVENT_PAYLOAD_KEYS)[number]
 
 export const ValueExprSchema = z.union([
   z.object({ const: z.union([z.number().finite(), z.string(), z.boolean()]) }).strict(),
@@ -114,6 +137,9 @@ export const ConditionSchema = z.union([
   z.object({ op: z.literal('isVisible'), nodeId: NodeIdSchema, value: z.boolean() }).strict(),
   z.object({ op: z.literal('isPlaying'), animationId: AnimationIdSchema, value: z.boolean() }).strict(),
   z.object({ op: z.literal('isPanelOpen'), hotspotId: HotspotIdSchema, value: z.boolean() }).strict(),
+  // v3 · 与上一行逐字同形。页面可见性是条件，不是事件——「当第 2 页显示时才允许下一步」
+  // 这种编排靠它，而不是靠再加一个事件。
+  z.object({ op: z.literal('isPageVisible'), pageId: PageIdSchema, value: z.boolean() }).strict(),
 ])
 export type Condition = z.infer<typeof ConditionSchema>
 

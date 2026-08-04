@@ -1,4 +1,4 @@
-import { checkIntegrity, createGoldenPathDocument, errorsOf, validate } from '@w3/schema'
+import { checkIntegrity, createGoldenPathDocument, errorsOf, validate, AssetStatsSchema } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { buildSamplePumpGlb } from '@w3/core'
 import { Document, NodeIO } from '@gltf-transform/core'
@@ -570,8 +570,14 @@ describe('every import produces a PUBLISHABLE document (T-170 抓到的 blocker)
     const after = produce(before, (draft) => applyImport(draft, result))
 
     expect(validate(after).ok, `发布闸门会拦住它：${JSON.stringify(errorsOf(checkIntegrity(after)))} / schema 校验未通过`).toBe(true)
+    // 键集从 AssetStatsSchema 现读，不手抄——手抄那版在 T-225 加 clipDurations 时红了，
+    // 而它红得没有信息：被测代码是对的，过期的是名单。
+    const statKeys = Object.keys(
+      (AssetStatsSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape,
+    )
+    expect(statKeys, 'AssetStatsSchema 读不出字段了，这条断言已经空转').not.toHaveLength(0)
     expect(Object.keys(result.asset.stats).sort()).toEqual(
-      ['animations', 'bytes', 'materials', 'nodes', 'textureBytes', 'textures', 'tris'].sort(),
+      statKeys.sort(),
     )
   })
 

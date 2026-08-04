@@ -146,7 +146,8 @@ describe('the log', () => {
 
 describe('live variables', () => {
   it('mirrors runtime values into the store only while previewing', async () => {
-    const withVar = { ...doc(), variables: [{ id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
+    const withVar = { ...doc(), variables: [{
+      scope: 'scene' as const, id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
 
     controller.syncVariables(withVar)
     expect(store.getState().variables).toEqual({}) // not previewing
@@ -158,7 +159,8 @@ describe('live variables', () => {
   })
 
   it('does not hand out a new object when nothing changed', async () => {
-    const withVar = { ...doc(), variables: [{ id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
+    const withVar = { ...doc(), variables: [{
+      scope: 'scene' as const, id: 'step', name: '步骤', type: 'number' as const, default: 0, persist: false }] }
     await controller.enter(withVar)
     controller.syncVariables(withVar)
     const first = store.getState().variables

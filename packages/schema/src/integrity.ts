@@ -215,6 +215,23 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
           id: step.next,
         })
       }
+      // I49 · `onEnter` 配了动作但永不执行（ADR-0035）。
+      //
+      // **warn 不是 error**：C4 说一份能打开的文档永远要能打开，而这个字段自 v0 就在
+      // schema 里，报 error 等于让一份合法保存过的文档打不开。
+      //
+      // 文案必须写出替代路径。只说「不执行」是告诉用户他错了却不告诉他怎么办，而这条
+      // warn 的全部价值就在那半句上。
+      if (step.onEnter.length > 0) {
+        add(
+          'I49',
+          'warn',
+          `flows[${i}].steps[${j}].onEnter`,
+          `流程「${flow.name}」的步骤「${step.name}」配了 ${step.onEnter.length} 个进入动作，` +
+            `但 v1 不执行它们（ADR-0035）。请改用 flowStepEnter 规则表达同一件事`,
+          { kind: 'step', id: step.id },
+        )
+      }
     })
   })
 
@@ -461,6 +478,11 @@ function conditionRefs(cond: Condition): RefTarget[] {
       return [{ kind: 'animation', id: cond.animationId }]
     case 'isPanelOpen':
       return [{ kind: 'hotspot', id: cond.hotspotId }]
+    case 'isPageVisible':
+      // v3 · 页面今天不是引用目标（`ID_COLLECTIONS.pages.refKind === null`），所以这里没有
+      // 可登记的引用。**显式列出来而不是让它掉进 default**：default 那一支要读 `left`/`right`，
+      // 而本条件没有这两个字段。把 pages 变成引用目标是 T-227 的活。
+      return []
     case 'in':
       return valueExprRefs(cond.left)
     default:
@@ -531,6 +553,8 @@ function checkRuleConditionTypes(rule: Rule, base: string, doc: SceneDocument, a
         return
       }
       if (cond.op === 'isVisible' || cond.op === 'isPlaying' || cond.op === 'isPanelOpen') return
+      // v3 · 同上：本条件没有 left/right，下面那段读它们。
+      if (cond.op === 'isPageVisible') return
 
       for (const [a, b] of [
         [cond.left, cond.right],

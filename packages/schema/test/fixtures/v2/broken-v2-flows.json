@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 2,
+  "projectId": "prj_a1b2c3d4",
+  "name": "泵组拆装演示",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-08-01T02:10:00.000Z",
+    "updatedAt": "2026-08-01T03:42:11.000Z",
+    "background": {
+      "type": "color",
+      "color": "#1a1a1a"
+    },
+    "environment": {
+      "hdriAssetId": null,
+      "intensity": 1,
+      "exposure": 1
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_9k2m4p7q",
+      "type": "model",
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
+      "version": 1,
+      "lineageId": "ast_9k2m4p7q",
+      "stats": {
+        "tris": 128400,
+        "materials": 12,
+        "textures": 6,
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
+        ]
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_r5t8y1u3",
+      "name": "泵组",
+      "parent": null,
+      "order": 1000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {}
+    },
+    {
+      "id": "nd_v7w9x2z4",
+      "name": "泵体",
+      "parent": "nd_r5t8y1u3",
+      "order": 1000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {}
+    },
+    {
+      "id": "nd_b3n5m7k9",
+      "name": "阀盖",
+      "parent": "nd_r5t8y1u3",
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "overrides": {
+        "materialId": "mat_c4d6f8h1"
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_c4d6f8h1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.4,
+        "metalness": 0.9,
+        "maps": {}
+      }
+    }
+  ],
+  "animations": [
+    {
+      "kind": "tween",
+      "id": "anm_j2l4n6p8",
+      "name": "阀盖抬起",
+      "duration": 1.2,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": false,
+      "targets": [
+        {
+          "nodeId": "nd_b3n5m7k9",
+          "to": {
+            "p": [
+              0,
+              0.35,
+              0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "imported",
+      "id": "anm_v2clip01",
+      "name": "拆装（v2 形状）",
+      "assetId": "ast_9k2m4p7q",
+      "clipName": "Disassemble",
+      "speed": 1,
+      "loop": false,
+      "clampWhenFinished": true
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_q1s3u5w7",
+      "name": "拆卸提示",
+      "anchor": {
+        "nodeId": "nd_b3n5m7k9",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_e9g1i3k5",
+      "name": "拆解视角",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          2.4,
+          1.8,
+          3.2
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      },
+      "thumbnailUrl": "blob:legacy-thumb"
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1,
+      "persist": false
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_m8o2q4s6",
+      "name": "点击阀盖执行第一步",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_b3n5m7k9"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_j2l4n6p8",
+            "await": true
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_b3n5m7k9",
+            "preset": "outline_amber"
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_q1s3u5w7"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "id": "pg_00000001",
+      "name": "",
+      "overlays": [
+        {
+          "id": "BAD-ID",
+          "type": "text",
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "tl",
+          "props": {
+            "text": "你好",
+            "bogusKey": 1
+          }
+        },
+        {
+          "id": "ov_SHORT",
+          "type": "button",
+          "rect": {
+            "x": 0,
+            "y": 0.2,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "tl",
+          "props": {
+            "label": "确定"
+          }
+        },
+        {
+          "id": "ov_legal001",
+          "type": "panel",
+          "rect": {
+            "x": 0,
+            "y": 0.4,
+            "w": 0.3,
+            "h": 0.2
+          },
+          "anchor": "tl",
+          "props": {
+            "title": "说明"
+          }
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "flw_00000001",
+      "name": "坏流程",
+      "variableId": "不是合法变量名",
+      "steps": [
+        {
+          "id": "st_00000001",
+          "name": "第一步",
+          "next": "st_00000002",
+          "onEnter": []
+        },
+        {
+          "id": "st_00000002",
+          "name": "第二步",
+          "next": null,
+          "onEnter": []
+        }
+      ]
+    }
+  ],
+  "media": []
+}

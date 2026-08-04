@@ -99,6 +99,11 @@ function conditionRefs(cond: Condition): RefTarget[] {
       return [{ kind: 'animation', id: cond.animationId }]
     case 'isPanelOpen':
       return [{ kind: 'hotspot', id: cond.hotspotId }]
+    case 'isPageVisible':
+      // v3 · 页面今天不是引用目标（`ID_COLLECTIONS.pages.refKind === null`），所以这里没有
+      // 可登记的引用。**显式列出来而不是让它掉进 default**：default 那一支要读 `left`/`right`，
+      // 而本条件没有这两个字段。把 pages 变成引用目标是 T-227 的活。
+      return []
     case 'in':
       return valueExprRefs(cond.left)
     default:

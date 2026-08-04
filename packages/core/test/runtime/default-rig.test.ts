@@ -51,7 +51,8 @@ const hdriAsset: Asset = {
   url: 'assets/c1/d2/env.hdr',
   version: 1,
   lineageId: HDRI_ID,
-  stats: { tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 4096, nodes: 0, animations: [] },
+  stats: {
+    clipDurations: {}, tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 4096, nodes: 0, animations: [] },
 }
 
 const withLight = (doc: SceneDocument): SceneDocument => ({
@@ -59,6 +60,10 @@ const withLight = (doc: SceneDocument): SceneDocument => ({
   nodes: [
     ...doc.nodes,
     {
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       id: LIGHT_ID,
       name: '聚光灯',
       parent: null,

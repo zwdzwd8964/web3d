@@ -152,6 +152,24 @@
 
 ---
 
+### 1.8 签字**之后**补的两处逐字定义（T-225 · 2026-08-04）
+
+⚠ **这一节是签字之后加的，所以单列，不混进上面已签的表。**
+
+T-225 开工时发现 §1 有两处只给了**结构**没给**逐字 zod**，而卡面第一句要求「逐字实现，
+表格里没有的一个都不加」。触发 CLAUDE.md「必须停下来问人」第 8 条，已上交产品负责人，
+两处都授权由实现方按推荐取值补全。补的是什么、为什么这么补，逐条记在这里供事后否决。
+
+| 补的东西 | 逐字 zod | 为什么这么补 |
+|---|---|---|
+| `DataSourceAuthSchema` 的 `kind` 枚举成员 | `z.object({ kind: z.enum(['none','bearer','basic','header']).default('none'), secretRef: z.string().max(200).default(''), headerName: z.string().max(64).default('') }).strict()` | **决定性理由是 I69**：它写着「`auth.kind !== 'none'` 时 `secretRef` 非空且跨源不重名」——**只留 `none` 会让这条已签字的完整性规则变成死条**（条件恒假）。四支覆盖内网 HTTP 数据源的常见形态；`headerName` 只在 `kind === 'header'` 时有意义，由 I69 之外的 UI 层约束，schema 不做判别联合（与 `meta.fog` 的「字段全留、切回来值还在」同一条理由） |
+| `AssetOriginSchema` 的叶子类型与 `ops[]` / `skipped[]` 的元素形状 | `hash: z.string().min(1)` · `bytes: z.number().int().nonnegative()` · `stats: AssetStatsSchema` · `audit: AssetAuditSchema.optional()` · `transcode: z.object({ profileId, toolchain, ops, skipped, triangleRatio, finishedAt }).strict().optional()`；`ops` / `skipped` 均为 `z.array(z.object({ op: z.string().max(40), detail: z.string().max(200).default('') }).strict()).max(32).default([])` | **嵌套结构本身已经逐字签了字**（§1.7 那一行写着 `transcode{profileId,toolchain,ops[],skipped[],triangleRatio,finishedAt}`），拿掉整块等于推翻已签的 X-08 裁决。四个叶子全部复用仓内已有类型，**零发明**；真正新发明的只有 `ops[]` / `skipped[]` 的元素形状，取「操作名 + 中文说明」这个最小可用形状 |
+
+**这两处的撤销条件**：v1.5 的 T-424 / T-442 / T-445 开工时若发现形状不够用，**按 ADR-0020 决定第 1 条登记 v2，不追加**。
+本节存在的意义就是让那次登记有一份「当初是谁、按什么理由发明的」可查。
+
+---
+
 ## 2 · 计数汇总（T-225 反向比对的对照物）
 
 **这一节是本表唯一的机器落点。** T-225 的验收里那条反向比对读的就是这三个数。

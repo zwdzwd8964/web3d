@@ -170,6 +170,10 @@ describe('the factory is actually installed in SceneRuntime', () => {
       nodes: [
         ...base.nodes,
         {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
           id: NODE_ID,
           name: '展台',
           parent: null,

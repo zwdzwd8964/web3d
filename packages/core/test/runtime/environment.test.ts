@@ -46,7 +46,8 @@ const hdriAsset = (id = HDRI_ID, url = HDRI_URL, type: Asset['type'] = 'hdri'): 
   url,
   version: 1,
   lineageId: id,
-  stats: { tris: 0, materials: 0, textures: 1, bytes: 6291456, textureBytes: 11184811, nodes: 0, animations: [] },
+  stats: {
+    clipDurations: {}, tris: 0, materials: 0, textures: 1, bytes: 6291456, textureBytes: 11184811, nodes: 0, animations: [] },
 })
 
 /** The golden path document with an environment block and, optionally, an hdri asset. */

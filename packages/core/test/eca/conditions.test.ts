@@ -14,8 +14,10 @@ const docWithVars = (): SceneDocument => {
     ...doc,
     variables: [
       ...doc.variables,
-      { id: 'title', name: '标题', type: 'string', default: 'A', persist: false },
-      { id: 'done', name: '完成', type: 'boolean', default: false, persist: false },
+      {
+        scope: 'scene' as const, id: 'title', name: '标题', type: 'string', default: 'A', persist: false },
+      {
+        scope: 'scene' as const, id: 'done', name: '完成', type: 'boolean', default: false, persist: false },
     ],
   }
 }

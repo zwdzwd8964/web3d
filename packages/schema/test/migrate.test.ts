@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { CURRENT_VERSION } from '../src/document.js'
 import type { Migration } from '../src/migrate.js'
 import { MIGRATIONS, applyMigrationChain, migrate, needsMigration } from '../src/migrate.js'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { deriveSceneId } from '../src/id.js'
 import { createGoldenPathDocument } from '../src/samples.js'
 
 /**
@@ -224,11 +227,14 @@ describe('migrate()', () => {
     })
 
     it('produces a document that validates and equals what a second run produces', () => {
+      // v3 · 链条现在是 1 → 2 → 3，两步。这条测试的名字说的是「跑两次结果相同」，
+      // 而那件事与链条多长无关——改的是两个数字，不是它守的性质。
       const first = unwrap(migrate(v1Document()))
       expect(first.fromVersion).toBe(1)
-      expect(first.toVersion).toBe(2)
-      expect(first.applied).toHaveLength(1)
+      expect(first.toVersion).toBe(3)
+      expect(first.applied).toHaveLength(2)
       expect(first.applied[0]).toMatch(/^v1 -> v2: /)
+      expect(first.applied[1]).toMatch(/^v2 -> v3: /)
       expect(JSON.stringify(unwrap(migrate(v1Document())).document)).toBe(JSON.stringify(first.document))
     })
 
@@ -312,5 +318,164 @@ describe('migrate()', () => {
       const b = applyMigrationChain(doc, opts)
       expect(JSON.stringify(a)).toBe(JSON.stringify(b))
     })
+  })
+})
+
+/* ========================================================================== */
+/* T-225 · v2 → v3                                                            */
+/* ========================================================================== */
+
+const V2_BROKEN = fileURLToPath(new URL('./fixtures/v2/broken-v2-flows.json', import.meta.url))
+const V2_GOLDEN = fileURLToPath(new URL('./fixtures/v2/golden-path-2.json', import.meta.url))
+const loadRaw = (p: string) => JSON.parse(readFileSync(p, 'utf8')) as Record<string, any>
+
+/** 迁移函数的**原始输出**，没经过 zod。这是本节几乎每条断言的对象，理由见下。 */
+const rawOf = (p: string) => unwrap(applyMigrationChain(loadRaw(p))).raw as Record<string, any>
+
+describe('v2 -> v3 · 逐字段 raw 断言', () => {
+  /**
+   * **为什么断言 `raw` 而不是 `migrate().document`。**
+   *
+   * `SceneDocumentSchema` 的每个新字段都有 default，所以 `V2_TO_V3.up` 可以整个写成
+   * `d => d`，而 `migrate().document` 上的九条断言**一条都不会红**——zod 会把它们全部补上。
+   * 迁移函数于是变成一段没人验证的死代码，直到某天有人把它的输出直接喂给下一段迁移
+   * （链条的第二步收到的正是上一步的 raw），或者喂给一个不走 zod 的消费者。
+   *
+   * 这不是假想：`V1_TO_V2` 的注释里就写着同一件事的两个理由，而它比这条早两个版本。
+   */
+  /**
+   * 读的是 `broken-v2-flows.json` 而不是 `golden-path-2.json`：后者的 `variables` 与
+   * `animations` 都是空的，五个 for 里有两个跑零圈——那正是下面那四条下限断言存在的理由，
+   * 也是它们第一次跑就抓到的东西。
+   */
+  it('九个新字段在迁移函数的原始输出里就已经显式存在', () => {
+    const d = rawOf(V2_BROKEN)
+
+    expect(d.sceneId, 'sceneId').toBe(deriveSceneId(String(d.projectId)))
+    expect(d.meta.fog, 'meta.fog').toBeDefined()
+    expect(d.meta.effects, 'meta.effects').toBeDefined()
+    expect(d.dataSources, 'dataSources').toEqual([])
+    expect(d.prefabs, 'prefabs').toEqual([])
+    for (const n of d.nodes) {
+      expect(n.explode, `nodes[${n.id}].explode`).toBe(null)
+      expect(n.explodeOffset, `nodes[${n.id}].explodeOffset`).toBe(null)
+      expect(n.section, `nodes[${n.id}].section`).toBe(null)
+      expect(n.prefabRef, `nodes[${n.id}].prefabRef`).toBe(null)
+    }
+    for (const v of d.variables) expect(v.scope, `variables[${v.id}].scope`).toBe('scene')
+    for (const a of d.animations) {
+      if (a.kind !== 'imported') continue
+      expect(a.startS, `animations[${a.id}].startS`).toBe(0)
+      expect(a.endS, `animations[${a.id}].endS`).toBe(null)
+    }
+    for (const a of d.assets) expect(a.stats.clipDurations, `assets[${a.id}].stats.clipDurations`).toEqual({})
+
+    // 扫描面下限：上面五个 for 里任何一个跑零圈都会静默恒真
+    expect(d.nodes.length).toBeGreaterThan(0)
+    expect(d.variables.length).toBeGreaterThan(0)
+    expect(d.assets.length).toBeGreaterThan(0)
+    expect(d.animations.filter((a: { kind: string }) => a.kind === 'imported').length).toBeGreaterThan(0)
+  })
+
+  it('观感回归：老文档迁移后不会自己亮起来，也不会自己开始发网络请求', () => {
+    const d = unwrap(migrate(loadRaw(V2_GOLDEN))).document
+    expect(d.meta.fog.enabled, '雾自己开了').toBe(false)
+    expect(d.meta.effects.outline.enabled, '描边自己开了').toBe(false)
+    for (const n of d.nodes) expect(n.explode, '节点自己有了爆炸配置').toBe(null)
+    // C6 的保证：一份老文档升到 v3 之后，一个字节的网络请求都不会多出来
+    expect(d.dataSources, 'dataSources 不该被注入内容（D14 第二次执行）').toEqual([])
+    expect(d.prefabs).toEqual([])
+  })
+
+  it('sceneId 从 projectId 确定性派生，且迁两次逐字相同', () => {
+    const first = unwrap(migrate(loadRaw(V2_GOLDEN))).document
+    const second = unwrap(migrate(loadRaw(V2_GOLDEN))).document
+    expect(first.sceneId).toBe(deriveSceneId(first.projectId))
+    // 铸随机 id 的实现在这里红：同一份老文档在两台机器上会迁出两个不同的场景 id，
+    // 而那要等到 v1.5 做多场景时才暴露
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('origin 缺席的 v2 文档，迁移后仍然缺席 —— 不是 null，不是 {}', () => {
+    const d = rawOf(V2_GOLDEN)
+    const bare = d.assets.filter((a: Record<string, unknown>) => !('origin' in a))
+    expect(bare.length, '每份资产都带 origin，这条断言没有对象').toBeGreaterThan(0)
+    for (const a of bare) expect(Object.prototype.hasOwnProperty.call(a, 'origin')).toBe(false)
+  })
+})
+
+describe('v2 -> v3 · 六条改写路径各自被执行了一次', () => {
+  /**
+   * **逐条断言每一处改写，不是断言「没报错」。**
+   *
+   * 这六处是 v3 第一次打破「迁移只做加法」的规矩，也是唯一可能把用户数据改坏的地方。
+   * 一条 `expect(result.ok).toBe(true)` 对它们全部为真——包括六处全都没执行的那个版本。
+   *
+   * 断言的是**可观测的改写结果**而不是一条日志字符串：`Migration` 没有逐处改写的日志字段，
+   * 而给它加一个是这张卡之外的公共 API 变更。观测比日志强的地方在于，日志可以写了却没做，
+   * 观测不能。
+   */
+  const before = loadRaw(V2_BROKEN)
+  const after = rawOf(V2_BROKEN)
+
+  it('非增量-1 · sceneId 由 projectId 派生（v2 里根本没有这个键）', () => {
+    expect('sceneId' in before).toBe(false)
+    expect(after.sceneId).toBe(deriveSceneId(String(before.projectId)))
+  })
+
+  it('非增量-2 · thumbnailUrl 被删除，且没有变成 null 或空串', () => {
+    expect(before.viewpoints[0].thumbnailUrl).toBe('blob:legacy-thumb')
+    expect(Object.prototype.hasOwnProperty.call(after.viewpoints[0], 'thumbnailUrl')).toBe(false)
+  })
+
+  it('非增量-3 · 空的 page.name 被补成占位名', () => {
+    expect(before.pages[0].name).toBe('')
+    expect(after.pages[0].name).toBe('页面 1')
+  })
+
+  it('非增量-4 · 只有不合法的 overlay id 被重铸，合法的逐字保留', () => {
+    const oldIds = before.pages[0].overlays.map((o: { id: string }) => o.id)
+    const newIds = after.pages[0].overlays.map((o: { id: string }) => o.id)
+    expect(oldIds).toEqual(['BAD-ID', 'ov_SHORT', 'ov_legal001'])
+
+    // 两个非法的都被重铸，且**重铸后仍然互不相同**（返回常量的实现在这里红）
+    expect(newIds[0]).not.toBe(oldIds[0])
+    expect(newIds[1]).not.toBe(oldIds[1])
+    expect(newIds[0]).not.toBe(newIds[1])
+    for (const id of [newIds[0], newIds[1]]) expect(id).toMatch(/^ov_[0-9a-z]{8}$/)
+
+    // 已经合法的那个一个字节都没动。`ov_SHORT` 是 `ov_` 开头但形状不对的那一个：
+    // 把判定放宽成 /^ov_/ 会让它逃过重铸，于是上面第二条红。
+    expect(newIds[2]).toBe('ov_legal001')
+  })
+
+  it('更重-1 · 裸 variableId 被确定性 mint，并真的补出一个同 id 的 string 变量', () => {
+    expect(before.flows[0].variableId).toBe('不是合法变量名')
+    const minted = after.flows[0].variableId
+    expect(minted).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/)
+
+    const decl = after.variables.find((v: { id: string }) => v.id === minted)
+    expect(decl, `mint 了 ${minted} 却没有声明它 —— 规则引擎会读到一个不存在的变量`).toBeTruthy()
+    expect(decl.type).toBe('string')
+    expect(decl.scope).toBe('scene')
+    // 只为**真正被改写**的 flow 追加：老变量原样还在，没被顶掉
+    expect(after.variables.some((v: { id: string }) => v.id === 'step')).toBe(true)
+  })
+
+  it('更重-2 · overlay props 补齐已知键、丢弃野键', () => {
+    expect(before.pages[0].overlays[0].props).toEqual({ text: '你好', bogusKey: 1 })
+    const props = after.pages[0].overlays[0].props
+    expect(props.bogusKey, '野键没被丢掉 —— v3 的四支 props 都是 .strict()，它会让整份文档打不开').toBeUndefined()
+    expect(props.text, '已有值被默认值顶掉了').toBe('你好')
+    expect(props).toEqual({ text: '你好', size: 16, color: '#ffffff', align: 'left', flowId: null })
+  })
+
+  it('六条路径的输入在 fixture 里一条不缺', () => {
+    // 扫描面下限：上面六条各自依赖 fixture 里的一处「坏」输入。哪天有人把 fixture
+    // 「修好」了，六条会一起变成对着正常文档的空断言。
+    expect(before.schemaVersion).toBe(2)
+    expect(before.pages[0].overlays.length).toBe(3)
+    expect(before.flows.length).toBe(1)
+    expect(before.viewpoints.length).toBeGreaterThan(0)
   })
 })

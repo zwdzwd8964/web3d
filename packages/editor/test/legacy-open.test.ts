@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkIntegrity, errorsOf, migrate, needsDefaultLightRig, validate } from '@w3/schema'
+import { checkIntegrity, errorsOf, migrate, needsDefaultLightRig, validate, CURRENT_VERSION } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { describe, expect, it } from 'vitest'
 import { createDocumentStore } from '../src/store/document-store.js'
@@ -31,7 +31,9 @@ describe('opening a v1 project', () => {
     expect(result.ok, '老文件必须打得开（C4）').toBe(true)
     if (!result.ok) return
 
-    expect(result.value.document.schemaVersion).toBe(2)
+    // v3 · 迁移链现在是 1 → 2 → 3。这条测的是「老文件打得开且打开后是当前版本」，
+    // 所以读 CURRENT_VERSION 而不是再写死一个数字——下次 bump 时它不该是要改的地方之一。
+    expect(result.value.document.schemaVersion).toBe(CURRENT_VERSION)
     expect(validate(result.value.document).ok).toBe(true)
     expect(errorsOf(checkIntegrity(result.value.document))).toEqual([])
   })

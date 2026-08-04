@@ -739,7 +739,8 @@ describe('sharing one texture between disagreeing slots (T-181)', () => {
     url: `blob:${id}`,
     version: 1,
     lineageId: id,
-    stats: { tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 1024, nodes: 0, animations: [] },
+    stats: {
+      clipDurations: {}, tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 1024, nodes: 0, animations: [] },
   })
 
   const realCache = async (id: string) => {

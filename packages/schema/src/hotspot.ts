@@ -31,6 +31,13 @@ export const HotspotStyleSchema = z
   .object({
     marker: HotspotMarkerSchema.default('dot'),
     color: HexColorSchema.default('#ffb020'),
+    /**
+     * v3 · 作者写死的编号/短标签，缺省时按 1-based 序号显示（X-07）。
+     *
+     * **理由值钱**：编号取下标会让删掉一个热点使它后面**全部**改号——而热点编号是印在
+     * 客户的作业指导书上的。给它一个可写死的字段，删一个不动其余。
+     */
+    label: z.string().max(8).optional(),
   })
   .strict()
 export type HotspotStyle = z.infer<typeof HotspotStyleSchema>

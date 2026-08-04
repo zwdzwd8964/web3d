@@ -1362,8 +1362,8 @@
 > **A2：schema 只 bump 一次（2→3），在 v1.0 内完成，且必须同时冻结 v1.2 与 v1.5 才用的全部字段。**
 > 沿用 v0 对 flows/pages/media 的做法与 v0.5 的 D11。**开工后发现漏字段 → 登记 v2，不追加。**
 
-### [ ] T-225 ★★ · schema v3 主卡：全域字段形状 + 2→3 迁移 + v3 fixture
-- **依赖** T-201 · T-206 · **预估** 4.5d · **实际** —
+### [x] T-225 ★★ · schema v3 主卡：全域字段形状 + 2→3 迁移 + v3 fixture
+- **依赖** T-201 · T-206 · **预估** 4.5d · **实际** 6.0d
 - **独占** `packages/schema/src/` 全部字段文件 —— `effects.ts`(新) · `fog.ts`(新) · `explode.ts`(新) ·
   `section.ts`(新) · `page.ts`(新) · `flow.ts`(新) · `data-source.ts`(新) · `prefab.ts`(新) ·
   **`deferred.ts`(删)** · `document.ts` · `node.ts` · `id.ts` · `rule.ts` · `asset.ts` · `material.ts` ·

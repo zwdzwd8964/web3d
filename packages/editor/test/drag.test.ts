@@ -204,6 +204,10 @@ describe('dropping a library model', () => {
       audit: { level: 'ok', findings: [] },
       nodes: [
         {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
           id: 'nd_lib00001',
           name: '展示台',
           parent: null,

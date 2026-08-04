@@ -1,4 +1,4 @@
-import { CURRENT_VERSION, createSequentialIdFactory } from '@w3/schema'
+import { CURRENT_VERSION, createSequentialIdFactory, DEFAULT_FOG, DEFAULT_EFFECTS, AssetStatsSchema } from '@w3/schema'
 import { Box3, Matrix4, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 import { auditGlb, estimateTextureBytes, grade, measure, readGlb } from '../../src/assets/audit.js'
@@ -66,7 +66,8 @@ describe('T-032 · loading', () => {
       url: 'assets/ab/12/pump.glb',
       version: 1,
       lineageId: 'ast_9k2m4p7q',
-      stats: { tris: 0, materials: 0, textures: 0, bytes: 0, textureBytes: 0, nodes: 0, animations: [] },
+      stats: {
+        clipDurations: {}, tris: 0, materials: 0, textures: 0, bytes: 0, textureBytes: 0, nodes: 0, animations: [] },
     }
     const [a, b] = await Promise.all([l.load(asset), l.load(asset)])
     expect(a).toBe(b)
@@ -85,7 +86,8 @@ describe('T-032 · loading', () => {
         url: 'x',
         version: 1,
         lineageId: 'ast_00000001',
-        stats: { tris: 0, materials: 0, textures: 0, bytes: 0, textureBytes: 0, nodes: 0, animations: [] },
+        stats: {
+          clipDurations: {}, tris: 0, materials: 0, textures: 0, bytes: 0, textureBytes: 0, nodes: 0, animations: [] },
       }),
     ).rejects.toThrow(/albedo\.png/)
   })
@@ -146,6 +148,7 @@ describe('T-050 · audit', () => {
         textureBytes: 900 * 1024 * 1024,
         nodes: 34,
         animations: [],
+        clipDurations: {},
         maxTextureSize: 4096,
       },
       { now: at },
@@ -174,6 +177,7 @@ describe('T-050 · audit', () => {
         textureBytes: 0,
         nodes: 1,
         animations: [],
+        clipDurations: {},
         maxTextureSize: 0,
       },
       { now: at },
@@ -192,9 +196,17 @@ describe('T-050 · audit', () => {
 
   it('the stats it stores match the schema — maxTextureSize is a measurement, not a field', async () => {
     const result = await auditGlb(await buildPumpGlb(), { now: at })
-    expect(Object.keys(result.stats).sort()).toEqual(
-      ['animations', 'bytes', 'materials', 'nodes', 'textureBytes', 'textures', 'tris'].sort(),
+    // 键集从 `AssetStatsSchema` 现读，不再手抄一份。
+    //
+    // 手抄那版在 T-225 加 `clipDurations` 时红了，而它红得**没有信息**——被测代码是对的，
+    // 只是名单过期了。一条只会因为名单过期而红的断言，读它的人第二次就会直接改名单，
+    // 于是它真正要守的东西（`maxTextureSize` 是量出来的中间量，不该被存进文档）就没人守了。
+    const schemaKeys = Object.keys(
+      (AssetStatsSchema as unknown as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape,
     )
+    expect(schemaKeys, 'AssetStatsSchema 读不出字段了，这条断言已经空转').not.toHaveLength(0)
+    expect(Object.keys(result.stats).sort()).toEqual(schemaKeys.sort())
+    expect(schemaKeys, 'maxTextureSize 是量出来的中间量，不该进文档').not.toContain('maxTextureSize')
   })
 
   it('describePolicy renders the numbers Appendix A is written from', () => {
@@ -361,10 +373,15 @@ describe('the pipeline feeds the renderer', () => {
 
     const graph = new SceneGraph({ assets: { get: (id) => (id === 'ast_9k2m4p7q' ? loaded : undefined) } })
     graph.build({
+      sceneId: 'scn_a1b2c3d4',
+      dataSources: [],
+      prefabs: [],
       schemaVersion: CURRENT_VERSION,
       projectId: 'prj_a1b2c3d4',
       name: '导入结果',
       meta: {
+        fog: DEFAULT_FOG,
+        effects: DEFAULT_EFFECTS,
         unit: 'm',
         upAxis: 'Y',
         createdAt: at(),

@@ -23,6 +23,16 @@ export const ImportedAnimationSchema = z
     speed: z.number().positive().default(1),
     loop: z.boolean().default(false),
     clampWhenFinished: z.boolean().default(true),
+    /**
+     * v3 · 区间播放（X-06）。
+     *
+     * 「序列增强全在动作参数里、`animations[]` 不改」——那句话是错的，本卡就是它的更正：
+     * 区间是**作者对这条动画的定义**，不是某一次调用的参数。写在参数里意味着每一处
+     * 调用都要重复一遍同样的两个数字，而改一次要改 N 处。
+     */
+    startS: z.number().nonnegative().default(0),
+    /** `null` = 播到片段自然结束。 */
+    endS: z.number().positive().nullable().default(null),
   })
   .strict()
 export type ImportedAnimation = z.infer<typeof ImportedAnimationSchema>

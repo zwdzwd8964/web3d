@@ -1,4 +1,8 @@
 import { CURRENT_VERSION } from './document.js'
+import { DEFAULT_OUTLINE } from './effects.js'
+import { DEFAULT_FOG } from './fog.js'
+import { VARIABLE_ID_PATTERN, deriveSceneId, isReservedVariableId } from './id.js'
+import { DEFAULT_OVERLAY_PROPS } from './page.js'
 import type { SceneDocument } from './document.js'
 import type { Result, ValidationError } from './validate.js'
 import { err, ok, validate } from './validate.js'
@@ -23,8 +27,16 @@ export interface Migration {
   /** One line, shown in the migration log and the publish dialog. */
   readonly describe: string
   /**
-   * Pure function. No external state, no network. Fill missing fields with defaults;
-   * KEEP unknown fields — a future downgrade-read may want them.
+   * Pure function. No external state, no network.
+   *
+   * Through v2 the rule was "fill in missing fields with defaults and touch nothing that is
+   * already there". **v3 breaks that rule in six places** — four non-additive rewrites plus
+   * two heavier ones (minting a flow variable, normalising overlay props). Every one of them
+   * is listed in `V2_TO_V3`'s own comment with the licence that permits it.
+   *
+   * The old sentence also claimed unknown fields are KEPT. **That was never true**:
+   * `SceneDocumentSchema` is `.strict()`, so anything this function preserves is rejected by
+   * the very next `validate()`. The note described a behaviour the code does not have.
    */
   up(doc: Record<string, unknown>): Record<string, unknown>
 }
@@ -100,7 +112,144 @@ const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : [
  * explicit that day one is when this gets built), which is why adding the first real entry
  * here was a five-line change rather than a project.
  */
-export const MIGRATIONS: readonly Migration[] = [V1_TO_V2]
+/**
+ * v2 → v3 · **v1 唯一的一次 bump**（A2）。
+ *
+ * 逐字实现 `docs/SCHEMA_V3_FREEZE.md` §1 的裁决表，表里没有的字段一个都不加。
+ *
+ * **默认值全部显式写出来，不靠 zod 兜底。** 下一条迁移拿到的是本函数的**原始输出**，
+ * 不是 zod 的产物——所以测试断言 `applyMigrationChain(...).raw` 而不是 `migrate(...).document`：
+ * 把 `up` 整个换成 `d => d`，只看 `.document` 的测试**仍然全绿**。
+ *
+ * **不注入任何内容**（D14 第二次执行）：不补默认 page / flow / dataSource / prefab / 灯光节点。
+ * 唯一的例外是「更重-1」，它的许可条件写在下面。
+ */
+const OVERLAY_ID_RE = /^ov_[0-9a-z]{8}$/
+
+/** 确定性重铸，纯函数无随机——同一份文档迁两次得到同一个 id。 */
+const deterministicOverlayId = (pageIndex: number, overlayIndex: number): string =>
+  `ov_${String(pageIndex).padStart(4, '0')}${String(overlayIndex).padStart(4, '0')}`
+
+const deterministicFlowVariableId = (flowIndex: number): string => `flow_step_${flowIndex + 1}`
+
+const V2_TO_V3: Migration = {
+  from: 2,
+  to: 3,
+  describe:
+    '新增场景主键、雾与描边、爆炸与剖切承载体、覆盖层与流程的运行时字段、动画区间、热点编号、资产溯源、外部数据源与 prefab',
+  up(doc) {
+    const meta = asRecord(doc.meta) ?? {}
+    const declared = new Set(asArray(doc.variables).map((v) => String(asRecord(v)?.id)))
+    /** 更重-1 的两半必须一起算：flows 改写与 variables 追加要看同一份判定结果。 */
+    const flowFixes = asArray(doc.flows).map((f, i) => {
+      const rec = asRecord(f) ?? {}
+      const old = typeof rec.variableId === 'string' ? rec.variableId : ''
+      const legal = VARIABLE_ID_PATTERN.test(old) && !isReservedVariableId(old) && declared.has(old)
+      return { rec, variableId: legal ? old : deterministicFlowVariableId(i), minted: !legal }
+    })
+    return {
+      ...doc,
+      // 非增量-1：从 projectId 确定性派生，**不铸随机 id**——否则同一份老文档在两台机器上
+      // 迁出两个不同的场景 id，而那要到 v1.5 做多场景时才暴露。
+      sceneId: deriveSceneId(String(doc.projectId)),
+      meta: {
+        ...meta,
+        // spread-then-default，永不覆盖已有值（同 V1_TO_V2 的 environment）
+        fog: { ...DEFAULT_FOG, ...(asRecord(meta.fog) ?? {}) },
+        effects: {
+          ...(asRecord(meta.effects) ?? {}),
+          outline: { ...DEFAULT_OUTLINE, ...(asRecord(asRecord(meta.effects)?.outline) ?? {}) },
+        },
+      },
+      nodes: asArray(doc.nodes).map((n) => ({
+        section: null,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
+        ...(asRecord(n) ?? {}),
+      })),
+      animations: asArray(doc.animations).map((a) => {
+        const rec = asRecord(a) ?? {}
+        return rec.kind === 'imported' ? { startS: 0, endS: null, ...rec } : rec
+      }),
+      assets: asArray(doc.assets).map((a) => {
+        const rec = asRecord(a) ?? {}
+        // `AssetStats` 是 .strict()，少这一个键会让每一份老 fixture 的校验失败。
+        return { ...rec, stats: { clipDurations: {}, ...(asRecord(rec.stats) ?? {}) } }
+      }),
+      // 非增量-2：本次唯一一处字段删除。`origin` 缺席的文档迁移后**仍然缺席**
+      // （不是 null 不是 {}）——这是 `...rest` 而不是显式补值的原因。
+      viewpoints: asArray(doc.viewpoints).map((v) => {
+        const { thumbnailUrl: _dropped, ...rest } = asRecord(v) ?? {}
+        return rest
+      }),
+      variables: [
+        ...asArray(doc.variables).map((v) => ({ scope: 'scene' as const, ...(asRecord(v) ?? {}) })),
+        // 更重-1 的后半：只为**真正被改写**的 flow 追加，且 id 与前半逐字相同。
+        ...flowFixes
+          .filter((f) => f.minted)
+          .map((f, n) => ({
+            id: f.variableId,
+            name: `流程 ${n + 1} 当前步骤`,
+            type: 'string',
+            default: '',
+            persist: false,
+            scope: 'scene' as const,
+          })),
+      ],
+      flows: flowFixes.map(({ rec, variableId }) => {
+        const steps = asArray(rec.steps)
+        return {
+          // startStepId：一次性推导，纯函数，不注入内容。
+          startStepId: (asRecord(steps[0])?.id as string) ?? null,
+          ...rec,
+          variableId, // 更重-1 的前半
+        }
+      }),
+      pages: asArray(doc.pages).map((page, pi) => {
+        const p = asRecord(page) ?? {}
+        return {
+          ...p,
+          // 非增量-3：v3 把 name 收紧为 min(1)
+          name: typeof p.name === 'string' && p.name.length > 0 ? p.name : `页面 ${pi + 1}`,
+          overlays: asArray(p.overlays).map((overlay, oi) => {
+            const o = asRecord(overlay) ?? {}
+            return {
+              ...o,
+              // 非增量-4：仅当不匹配 ^ov_[0-9a-z]{8}$ 时确定性重铸
+              id: OVERLAY_ID_RE.test(String(o.id)) ? o.id : deterministicOverlayId(pi, oi),
+              // 更重-2：按 type 取 props schema 逐键补默认值，未知键丢弃
+              props: normaliseOverlayProps(String(o.type), asRecord(o.props) ?? {}),
+            }
+          }),
+        }
+      }),
+      dataSources: asArray(doc.dataSources),
+      prefabs: asArray(doc.prefabs),
+    }
+  },
+}
+
+/**
+ * 更重-2 · 按 overlay 的 type 把 props 归一化。
+ *
+ * v2 的 props 是 `z.record(z.unknown())`——什么都能塞。v3 的四支各自 `.strict()`，
+ * 于是老文档里一个拼错的 prop 名会让整份文档校验失败。**丢弃未知键**是为了让
+ * 「一份能打开的文档永远能打开」（C4）；丢的是什么，由本函数的调用方记进迁移日志。
+ */
+function normaliseOverlayProps(type: string, props: Record<string, unknown>): Record<string, unknown> {
+  const shape = (DEFAULT_OVERLAY_PROPS as Record<string, Readonly<Record<string, unknown>>>)[type]
+  // 未知 type：原样返回，让 zod 的判别联合去报错——静默改写一个我们不认识的 overlay
+  // 比让它校验失败更糟。
+  if (!shape) return props
+  const out: Record<string, unknown> = {}
+  for (const [key, fallback] of Object.entries(shape)) {
+    out[key] = key in props ? props[key] : fallback
+  }
+  return out
+}
+
+export const MIGRATIONS: readonly Migration[] = [V1_TO_V2, V2_TO_V3]
 
 export interface MigrationFailure {
   readonly kind: 'malformed' | 'from-the-future' | 'missing-step' | 'bad-chain' | 'invalid-result'

@@ -241,6 +241,7 @@ describe('selectors', () => {
           id: 'flw_a1b2c3d4',
           name: '流程',
           variableId: 'step',
+          startStepId: null,
           steps: [{ id: 'st_a1b2c3d4', name: '一', next: null, onEnter: [] }],
         },
       ],

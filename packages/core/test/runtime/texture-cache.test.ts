@@ -20,7 +20,8 @@ const asset = (id: string, name = 'concrete.png'): Asset => ({
   url: `blob:${id}`,
   version: 1,
   lineageId: id,
-  stats: { tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 1024, nodes: 0, animations: [] },
+  stats: {
+    clipDurations: {}, tris: 0, materials: 0, textures: 1, bytes: 1024, textureBytes: 1024, nodes: 0, animations: [] },
 })
 
 /** A document whose materials reference the given texture assets, one slot each. */

@@ -162,6 +162,8 @@ describe('HeadlessRuntime specifics', () => {
       animations: [
         ...doc.animations,
         {
+          startS: 0,
+          endS: null,
           kind: 'imported' as const,
           id: 'anm_22222222',
           name: '拆解',

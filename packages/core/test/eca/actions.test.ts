@@ -204,7 +204,8 @@ describe('state actions', () => {
     const doc = testDoc()
     ctx = new HeadlessRuntime({
       ...doc,
-      variables: [...doc.variables, { id: 'clicked', name: '点中的对象', type: 'string', default: '', persist: false }],
+      variables: [...doc.variables, {
+        scope: 'scene' as const, id: 'clicked', name: '点中的对象', type: 'string', default: '', persist: false }],
     })
     await run('setVariable', { variableId: 'clicked', value: { event: 'nodeId' } }, { event: 'click', nodeId: IDS.cover })
     expect(ctx.getVar('clicked')).toBe(IDS.cover)
@@ -247,6 +248,10 @@ describe('light actions', () => {
       nodes: [
         ...doc.nodes,
         {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
           id: LIGHT_ID,
           name: '聚光灯',
           parent: null,

@@ -122,6 +122,10 @@ describe('incremental paths (D1)', () => {
 
   it('adds and removes nodes without rebuilding', () => {
     const added = {
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       id: 'nd_11111111',
       name: '新增件',
       parent: IDS.pump,

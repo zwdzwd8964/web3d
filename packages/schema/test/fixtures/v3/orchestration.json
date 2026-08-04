@@ -1,0 +1,606 @@
+{
+  "schemaVersion": 3,
+  "projectId": "prj_a1b2c3d4",
+  "sceneId": "scn_a1b2c3d4",
+  "name": "泵组拆装演示",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-08-01T02:10:00.000Z",
+    "updatedAt": "2026-08-01T03:42:11.000Z",
+    "background": {
+      "type": "color",
+      "color": "#1a1a1a"
+    },
+    "environment": {
+      "hdriAssetId": null,
+      "intensity": 1,
+      "exposure": 1
+    },
+    "fog": {
+      "enabled": false,
+      "type": "linear",
+      "color": "#1a1a1a",
+      "near": 10,
+      "far": 100,
+      "density": 0.02
+    },
+    "effects": {
+      "outline": {
+        "enabled": false,
+        "color": "#ffb020",
+        "widthPx": 3,
+        "strength": 3,
+        "hiddenEdge": "dim"
+      }
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_9k2m4p7q",
+      "type": "model",
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
+      "version": 1,
+      "lineageId": "ast_9k2m4p7q",
+      "stats": {
+        "tris": 128400,
+        "materials": 12,
+        "textures": 6,
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
+        ],
+        "clipDurations": {}
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
+    },
+    {
+      "id": "ast_img00001",
+      "type": "image",
+      "name": "示意图.png",
+      "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "url": "blob:ast_img00001",
+      "version": 1,
+      "lineageId": "ast_img00001",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 1,
+        "bytes": 2048,
+        "textureBytes": 2048,
+        "nodes": 0,
+        "animations": [],
+        "clipDurations": {}
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_r5t8y1u3",
+      "name": "泵组",
+      "parent": null,
+      "order": 1000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_v7w9x2z4",
+      "name": "泵体",
+      "parent": "nd_r5t8y1u3",
+      "order": 1000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_b3n5m7k9",
+      "name": "阀盖",
+      "parent": "nd_r5t8y1u3",
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_c4d6f8h1"
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_c4d6f8h1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.4,
+        "metalness": 0.9,
+        "maps": {}
+      }
+    }
+  ],
+  "animations": [
+    {
+      "kind": "tween",
+      "id": "anm_j2l4n6p8",
+      "name": "阀盖抬起",
+      "duration": 1.2,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": false,
+      "targets": [
+        {
+          "nodeId": "nd_b3n5m7k9",
+          "to": {
+            "p": [
+              0,
+              0.35,
+              0
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_q1s3u5w7",
+      "name": "拆卸提示",
+      "anchor": {
+        "nodeId": "nd_b3n5m7k9",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_e9g1i3k5",
+      "name": "拆解视角",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          2.4,
+          1.8,
+          3.2
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      }
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1,
+      "persist": false,
+      "scope": "scene"
+    },
+    {
+      "id": "flow_step",
+      "name": "流程当前步骤",
+      "type": "string",
+      "default": "st_00000001",
+      "persist": false,
+      "scope": "scene"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_m8o2q4s6",
+      "name": "点击阀盖执行第一步",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_b3n5m7k9"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_j2l4n6p8",
+            "await": true
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_b3n5m7k9",
+            "preset": "outline_amber"
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_q1s3u5w7"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_page0001",
+      "name": "进入第一页",
+      "enabled": true,
+      "when": {
+        "event": "pageEnter",
+        "pageId": "pg_00000001"
+      },
+      "if": [],
+      "ifAny": [],
+      "then": [
+        {
+          "action": "setVisible",
+          "params": {
+            "nodeId": "nd_v7w9x2z4",
+            "value": true
+          }
+        }
+      ],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "continue"
+    },
+    {
+      "id": "rl_step0001",
+      "name": "进入第二步",
+      "enabled": true,
+      "when": {
+        "event": "flowStepEnter",
+        "flowId": "flw_00000001",
+        "stepId": "st_00000002"
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "event": "stepId"
+          },
+          "right": {
+            "const": "st_00000002"
+          }
+        }
+      ],
+      "ifAny": [],
+      "then": [
+        {
+          "action": "setVisible",
+          "params": {
+            "nodeId": "nd_v7w9x2z4",
+            "value": true
+          }
+        }
+      ],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "continue"
+    },
+    {
+      "id": "rl_ovcl0001",
+      "name": "点按钮",
+      "enabled": true,
+      "when": {
+        "event": "overlayClick",
+        "overlayId": "ov_00000003"
+      },
+      "if": [],
+      "ifAny": [],
+      "then": [
+        {
+          "action": "setVisible",
+          "params": {
+            "nodeId": "nd_v7w9x2z4",
+            "value": true
+          }
+        }
+      ],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "continue"
+    }
+  ],
+  "pages": [
+    {
+      "id": "pg_00000001",
+      "name": "第一页",
+      "overlays": [
+        {
+          "id": "ov_00000001",
+          "type": "text",
+          "rect": {
+            "x": 0.1,
+            "y": 0.1,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "tl",
+          "props": {
+            "text": "{stepName}",
+            "size": 18,
+            "color": "#ffffff",
+            "align": "left",
+            "flowId": "flw_00000001"
+          }
+        },
+        {
+          "id": "ov_00000002",
+          "type": "image",
+          "rect": {
+            "x": 0.1,
+            "y": 0.1,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "tr",
+          "props": {
+            "mediaId": "med_img00001",
+            "fit": "contain"
+          }
+        },
+        {
+          "id": "ov_00000003",
+          "type": "button",
+          "rect": {
+            "x": 0.1,
+            "y": 0.1,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "bl",
+          "props": {
+            "label": "下一步",
+            "variant": "primary"
+          }
+        },
+        {
+          "id": "ov_00000004",
+          "type": "panel",
+          "rect": {
+            "x": 0.1,
+            "y": 0.1,
+            "w": 0.2,
+            "h": 0.1
+          },
+          "anchor": "br",
+          "props": {
+            "title": "进度",
+            "text": "",
+            "mediaId": null,
+            "flowId": "flw_00000001",
+            "progress": true
+          }
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "flw_00000001",
+      "name": "拆装流程",
+      "variableId": "flow_step",
+      "startStepId": "st_00000001",
+      "steps": [
+        {
+          "id": "st_00000001",
+          "name": "第一步",
+          "next": "st_00000002",
+          "onEnter": []
+        },
+        {
+          "id": "st_00000002",
+          "name": "第二步",
+          "next": "st_00000003",
+          "onEnter": []
+        },
+        {
+          "id": "st_00000003",
+          "name": "第三步",
+          "next": null,
+          "onEnter": [
+            {
+              "action": "setVisible",
+              "params": {
+                "nodeId": "nd_v7w9x2z4",
+                "value": false
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "media": [
+    {
+      "id": "med_img00001",
+      "type": "image",
+      "assetId": "ast_img00001",
+      "name": "示意图",
+      "durationS": 1
+    }
+  ],
+  "dataSources": [],
+  "prefabs": []
+}

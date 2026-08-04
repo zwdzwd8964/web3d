@@ -49,6 +49,8 @@ export function describeCondition(cond: Condition, doc: SceneDocument): string {
       return `热点「${hotspotName(doc, cond.hotspotId)}」的面板${cond.value ? '已打开' : '未打开'}`
     case 'in':
       return `${describeValueExpr(cond.left, doc)} 属于 [${cond.right.join(', ')}]`
+    case 'isPageVisible':
+      return `页面「${cond.pageId}」${cond.value ? '可见' : '不可见'}`
     default:
       return `${describeValueExpr(cond.left, doc)} ${COMPARE_TEXT[cond.op] ?? cond.op} ${describeValueExpr(cond.right, doc)}`
   }

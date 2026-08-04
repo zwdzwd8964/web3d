@@ -29,7 +29,24 @@ const EVENT_LABELS: Record<EventType, string> = {
   animationEnd: '动画结束',
   variableChange: '变量变化',
   timer: '定时器',
+  // v3 冻结形状、v1.2 才通电（T-225 · X-09/X-10）。这三个在这里只为**显示**存在：
+  // 一份 v1.2 存过的文档在 v1.0 编辑器里打开时，规则列表必须读得出它是什么事件。
+  pageEnter: '进入页面',
+  flowStepEnter: '进入流程步骤',
+  overlayClick: '点击覆盖层',
 }
+
+/**
+ * 新建规则时可选的事件。
+ *
+ * **不是 `EVENT_TYPES`**：那三个 v1.2 的事件在 v1.0 一次都不会被触发，把它们摆进下拉框
+ * 等于让用户配一条永远不响的规则，然后自己去猜为什么。冻结形状与开放入口是两件事。
+ *
+ * v1.2 接线时删掉这个常量、把下拉框改回 `EVENT_TYPES` 即可。
+ */
+const CREATABLE_EVENTS = EVENT_TYPES.filter(
+  (t) => t !== 'pageEnter' && t !== 'flowStepEnter' && t !== 'overlayClick',
+)
 
 export function RulePanel() {
   const doc = useDocumentSelector((s) => s.doc)
@@ -150,7 +167,7 @@ function RuleEditor({
             value={rule.when.event}
             onChange={(event) => set('改规则触发事件', (r) => void (r.when = defaultEvent(event.target.value as EventType, doc)))}
           >
-            {EVENT_TYPES.map((type) => (
+            {CREATABLE_EVENTS.map((type) => (
               <option key={type} value={type}>
                 {EVENT_LABELS[type]}
               </option>
@@ -472,6 +489,18 @@ function EventTarget({ when, doc, onChange }: { when: EventDescriptor; doc: Scen
     )
   }
 
+  // v3 起 `when` 的判别联合里有三支没有 `target`（pageEnter / flowStepEnter /
+  // overlayClick）。它们在 v1.0 建不出来，但**打得开**——一份 v1.2 的文档进到这里时，
+  // 读 `when.target` 会是 undefined，而下面整段都建立在它存在之上。
+  if (!('target' in when)) {
+    return (
+      <label>
+        <span>目标</span>
+        <span className="hint">该事件在 v1.0 尚未接线，规则可保存但不会触发</span>
+      </label>
+    )
+  }
+
   // click / hoverEnter / hoverLeave — all carry a NodeTarget.
   const target = when.target
   const any = 'any' in target
@@ -526,7 +555,16 @@ function defaultEvent(type: EventType, doc: SceneDocument): EventDescriptor {
       return { event: 'animationEnd', animationId: doc.animations[0]?.id ?? '' }
     case 'variableChange':
       return { event: 'variableChange', variableId: doc.variables[0]?.id ?? '' }
+    case 'pageEnter':
+      return { event: 'pageEnter', pageId: doc.pages[0]?.id ?? '' }
+    case 'flowStepEnter':
+      return { event: 'flowStepEnter', flowId: doc.flows[0]?.id ?? '', stepId: doc.flows[0]?.steps[0]?.id ?? '' }
+    case 'overlayClick':
+      return { event: 'overlayClick', overlayId: doc.pages[0]?.overlays[0]?.id ?? '' }
     default:
+      // click / hoverEnter / hoverLeave —— 只剩这三支带 NodeTarget。
+      // 上面三个 case 在 v1.0 走不到（`CREATABLE_EVENTS` 把它们挡在下拉框外），写出来是为了
+      // 让编译器替我们守住「`when` 又多一支时这里必须跟着改」。
       return { event: type, target: { any: true } }
   }
 }

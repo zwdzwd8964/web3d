@@ -89,6 +89,8 @@ const withClip = (doc: SceneDocument): SceneDocument => ({
   animations: [
     ...doc.animations,
     {
+      startS: 0,
+      endS: null,
       kind: 'imported',
       id: 'anm_11111111',
       name: '拆解',
@@ -515,6 +517,10 @@ describe('shadows (T-132)', () => {
       nodes: [
         ...nodes,
         {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
           id: LIGHT_ID,
           name: '聚光灯',
           parent: null,

@@ -175,6 +175,10 @@ describe('incremental mutations', () => {
 
   it('addNode inserts under an existing parent', () => {
     const added = {
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       id: 'nd_11111111',
       name: '新增件',
       parent: IDS.pump,
@@ -217,6 +221,10 @@ describe('incremental mutations', () => {
 function carrierDoc(): SceneDocument {
   const base = createGoldenPathDocument()
   const node = (over: Partial<SceneDocument['nodes'][number]>): SceneDocument['nodes'][number] => ({
+    section: null,
+    explode: null,
+    explodeOffset: null,
+    prefabRef: null,
     id: 'nd_00000000',
     name: 'x',
     parent: null,

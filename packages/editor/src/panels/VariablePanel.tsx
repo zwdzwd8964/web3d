@@ -38,7 +38,8 @@ export function VariablePanel() {
   const add = () => {
     if (draftId === '' || idError) return
     commit(`新建变量 ${draftId}`, (draft) => {
-      draft.variables.push({ id: draftId, name: draftId, type: 'number', default: 0, persist: false })
+      draft.variables.push({
+        scope: 'scene' as const, id: draftId, name: draftId, type: 'number', default: 0, persist: false })
     })
     setDraftId('')
   }

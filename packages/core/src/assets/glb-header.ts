@@ -170,6 +170,9 @@ export function measureFromHeader(header: GlbHeader, bytes: ArrayBuffer, byteLen
     nodes: (json.nodes ?? []).length,
     // See note 4: `''` for an unnamed animation, matching `createAnimation(name = "")`.
     animations: (json.animations ?? []).map((a) => a.name ?? ''),
+    // v3 · 头部解析拿得到片段**名字**，拿不到**时长** —— 时长要把每条 sampler 的 input
+    // accessor 读到底取 max，而那要解 BIN chunk。这里如实留空，由真正加载完 GLB 的那一侧填。
+    clipDurations: {},
     maxTextureSize,
   }
 }

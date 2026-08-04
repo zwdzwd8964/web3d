@@ -1,9 +1,14 @@
 import { z } from 'zod'
 import { AnimationSchema } from './animation.js'
 import { AssetSchema } from './asset.js'
-import { FlowSchema, PageSchema } from './deferred.js'
+import { DataSourceSchema } from './data-source.js'
+import { DEFAULT_EFFECTS, EffectsSchema } from './effects.js'
+import { FlowSchema } from './flow.js'
+import { DEFAULT_FOG, FogSchema } from './fog.js'
+import { PageSchema } from './page.js'
+import { PrefabSchema } from './prefab.js'
 import { HotspotSchema } from './hotspot.js'
-import { AssetIdSchema, PREFIXES, ProjectIdSchema } from './id.js'
+import { AssetIdSchema, PREFIXES, ProjectIdSchema, SceneIdSchema } from './id.js'
 import type { IdKind, Prefix } from './id.js'
 import { MaterialSchema } from './material.js'
 import { MediaSchema } from './media.js'
@@ -30,7 +35,7 @@ import { ViewpointSchema } from './viewpoint.js'
  * never by changing the persisted shape.
  */
 
-export const CURRENT_VERSION = 2
+export const CURRENT_VERSION = 3
 
 export const SCENE_UNITS = ['m', 'cm', 'mm'] as const
 export const UP_AXES = ['Y', 'Z'] as const
@@ -86,6 +91,10 @@ export const MetaSchema = z
     updatedAt: TimestampSchema,
     background: BackgroundSchema.default({ type: 'color', color: '#1a1a1a' }),
     environment: EnvironmentSchema.default({ hdriAssetId: null, intensity: 1, exposure: 1 }),
+    /** v3 · 雾。**独立块，不并进 `effects`**（X-01 · D30）——它不是后处理。 */
+    fog: FogSchema.default(DEFAULT_FOG),
+    /** v3 · 后处理。**只有描边**，刻意不含 bloom / ssao 的占位字段（X-02 · D31）。 */
+    effects: EffectsSchema.default(DEFAULT_EFFECTS),
   })
   .strict()
 export type Meta = z.infer<typeof MetaSchema>
@@ -94,6 +103,16 @@ export const SceneDocumentSchema = z
   .object({
     schemaVersion: z.literal(CURRENT_VERSION),
     projectId: ProjectIdSchema,
+    /**
+     * v3 · 场景 id。**必填、无 default**（多场景，v1.5 才通电）。
+     *
+     * 无 default 是有意的：一份没有 sceneId 的文档不该被静默补一个，它该走迁移——
+     * 而迁移用 `deriveSceneId(projectId)` **确定性派生**，不铸随机 id。
+     *
+     * **`sceneRefs` 顶层集合不建**（A3(c) · D38）：场景之间的关系由项目层表达，
+     * 文档不该知道有别的文档存在。
+     */
+    sceneId: SceneIdSchema,
     name: z.string().min(1).max(120),
     meta: MetaSchema,
 
@@ -106,9 +125,13 @@ export const SceneDocumentSchema = z
     variables: z.array(VariableSchema),
     rules: z.array(RuleSchema),
 
-    // Defined in v0, no runtime until v1 — see deferred.ts and SCHEMA_SPEC §7.
+    // v3 · 从 deferred.ts 出列（该文件已删）。运行时在 v1.2。
     pages: z.array(PageSchema).default([]),
     flows: z.array(FlowSchema).default([]),
+    /** v3 · 外部数据源。形状冻死，运行时在 v1.5。默认 `[]` —— 老文档不会开始发请求（C6）。 */
+    dataSources: z.array(DataSourceSchema).default([]),
+    /** v3 · 预制体。形状冻死，运行时在 **v2**。本版最大的一块 placeholder（D22 已签字接受）。 */
+    prefabs: z.array(PrefabSchema).default([]),
     /** Defined in v0, given a runtime in v0.5 — see media.ts and SCHEMA_SPEC §6.7. */
     media: z.array(MediaSchema).default([]),
   })
@@ -226,6 +249,24 @@ const COLLECTION_SPECS = {
   pages: { key: 'pages', idPrefix: PREFIXES.page, label: '页面', refKind: null, nested: ['overlays'], patchPath: '/pages' },
   flows: { key: 'flows', idPrefix: PREFIXES.flow, label: '流程', refKind: null, nested: ['steps'], patchPath: '/flows' },
   media: { key: 'media', idPrefix: PREFIXES.media, label: '多媒体', refKind: 'media', nested: [], patchPath: '/media' },
+  // v3 · 顶层集合 11 → 13。五个遍历面由本注册表自动覆盖——这正是 T-201 把它从一个
+  // 零引用的字符串数组升格成真注册表所买到的东西：加一个集合改一处，不是改四处。
+  dataSources: {
+    key: 'dataSources',
+    idPrefix: PREFIXES.dataSource,
+    label: '数据源',
+    refKind: 'dataSource',
+    nested: [],
+    patchPath: '/dataSources',
+  },
+  prefabs: {
+    key: 'prefabs',
+    idPrefix: PREFIXES.prefab,
+    label: '预制体',
+    refKind: 'prefab',
+    nested: ['nodes', 'materials'],
+    patchPath: '/prefabs',
+  },
 } as const satisfies Record<string, CollectionSpec>
 
 export type IdCollection = keyof typeof COLLECTION_SPECS

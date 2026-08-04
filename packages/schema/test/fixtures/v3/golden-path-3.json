@@ -1,0 +1,791 @@
+{
+  "schemaVersion": 3,
+  "projectId": "prj_a1b2c3d4",
+  "sceneId": "scn_a1b2c3d4",
+  "name": "泵组拆装演示",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-08-01T02:10:00.000Z",
+    "updatedAt": "2026-08-01T03:42:11.000Z",
+    "background": {
+      "type": "color",
+      "color": "#1a1a1a"
+    },
+    "environment": {
+      "hdriAssetId": null,
+      "intensity": 1,
+      "exposure": 1
+    },
+    "fog": {
+      "enabled": true,
+      "type": "linear",
+      "color": "#1a1a1a",
+      "near": 10,
+      "far": 100,
+      "density": 0.02
+    },
+    "effects": {
+      "outline": {
+        "enabled": true,
+        "color": "#ffb020",
+        "widthPx": 3,
+        "strength": 3,
+        "hiddenEdge": "dim"
+      }
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_9k2m4p7q",
+      "type": "model",
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
+      "version": 1,
+      "lineageId": "ast_9k2m4p7q",
+      "stats": {
+        "tris": 128400,
+        "materials": 12,
+        "textures": 6,
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
+        ],
+        "clipDurations": {
+          "Disassemble": 2.4
+        }
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_r5t8y1u3",
+      "name": "泵组",
+      "parent": null,
+      "order": 1000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_v7w9x2z4",
+      "name": "泵体",
+      "parent": "nd_r5t8y1u3",
+      "order": 1000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_b3n5m7k9",
+      "name": "阀盖",
+      "parent": "nd_r5t8y1u3",
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_c4d6f8h1"
+      }
+    },
+    {
+      "id": "nd_grp0radi",
+      "name": "径向分组",
+      "parent": "nd_r5t8y1u3",
+      "order": 3000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": {
+        "mode": "radial",
+        "gain": 1.5,
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "spacing": 0.5,
+        "easing": "easeInOutCubic"
+      },
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_radial01",
+      "name": "径向件 1",
+      "parent": "nd_grp0radi",
+      "order": 100,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_radial02",
+      "name": "径向件 2",
+      "parent": "nd_grp0radi",
+      "order": 200,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": [
+        0.3,
+        0,
+        0
+      ],
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_radial03",
+      "name": "径向件 3",
+      "parent": "nd_grp0radi",
+      "order": 300,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_grp0axis",
+      "name": "轴向分组",
+      "parent": "nd_r5t8y1u3",
+      "order": 4000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": {
+        "mode": "axis",
+        "gain": 1,
+        "axis": [
+          1,
+          0,
+          0
+        ],
+        "spacing": 0.4,
+        "easing": "linear"
+      },
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_axis0003",
+      "name": "轴向件 3",
+      "parent": "nd_grp0axis",
+      "order": 300,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_axis0001",
+      "name": "轴向件 1",
+      "parent": "nd_grp0axis",
+      "order": 100,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_axis0002",
+      "name": "轴向件 2",
+      "parent": "nd_grp0axis",
+      "order": 200,
+      "assetRef": null,
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_sect0001",
+      "name": "剖切面",
+      "parent": null,
+      "order": 5000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": {
+        "scope": "scene",
+        "size": [
+          4,
+          4
+        ]
+      },
+      "transform": {
+        "p": [
+          0,
+          0.5,
+          0
+        ],
+        "r": [
+          0.2705981,
+          0,
+          0,
+          0.9627088
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_c4d6f8h1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.4,
+        "metalness": 0.9,
+        "maps": {}
+      }
+    }
+  ],
+  "animations": [
+    {
+      "kind": "tween",
+      "id": "anm_j2l4n6p8",
+      "name": "阀盖抬起",
+      "duration": 1.2,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": false,
+      "targets": [
+        {
+          "nodeId": "nd_b3n5m7k9",
+          "to": {
+            "p": [
+              0,
+              0.35,
+              0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "imported",
+      "id": "anm_clip0001",
+      "name": "拆装（片段）",
+      "assetId": "ast_9k2m4p7q",
+      "clipName": "Disassemble",
+      "speed": 1,
+      "loop": false,
+      "clampWhenFinished": true,
+      "startS": 0.5,
+      "endS": 1.8
+    },
+    {
+      "kind": "imported",
+      "id": "anm_clip0002",
+      "name": "拆装（整段）",
+      "assetId": "ast_9k2m4p7q",
+      "clipName": "Disassemble",
+      "speed": 1,
+      "loop": false,
+      "clampWhenFinished": true,
+      "startS": 0,
+      "endS": null
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_q1s3u5w7",
+      "name": "拆卸提示",
+      "anchor": {
+        "nodeId": "nd_b3n5m7k9",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "1"
+      }
+    },
+    {
+      "id": "hs_nolabel0",
+      "name": "无编号热点",
+      "anchor": {
+        "nodeId": "nd_b3n5m7k9",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "dot",
+        "color": "#4aa8c7"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_e9g1i3k5",
+      "name": "拆解视角",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          2.4,
+          1.8,
+          3.2
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      }
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1,
+      "persist": false,
+      "scope": "scene"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_m8o2q4s6",
+      "name": "点击阀盖执行第一步",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_b3n5m7k9"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_j2l4n6p8",
+            "await": true
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_b3n5m7k9",
+            "preset": "outline_amber"
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_q1s3u5w7"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [],
+  "flows": [],
+  "media": [],
+  "dataSources": [],
+  "prefabs": []
+}

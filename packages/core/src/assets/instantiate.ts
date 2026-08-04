@@ -110,6 +110,12 @@ export function instantiate(scene: Object3D, options: InstantiateOptions): Insta
         objectName: object.name === '' ? object.type : object.name,
         missing: false,
       },
+      // v3 carriers. 全部为 null：导入的节点既不是剖切面、也不属于任何爆炸分组、更不是
+      // prefab 实例 —— 这三件事只能由用户在编辑器里显式建立。
+      section: null,
+      explode: null,
+      explodeOffset: null,
+      prefabRef: null,
       // v2 carriers. An imported node is an asset instance, never a primitive or a light
       // (I11 makes that mutual exclusion an integrity rule, not a convention).
       primitive: null,

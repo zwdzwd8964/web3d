@@ -44,8 +44,10 @@ function loopDocument(withWait: boolean) {
     ...doc,
     variables: [
       ...doc.variables,
-      { id: 'a', name: 'A', type: 'number', default: 0, persist: false },
-      { id: 'b', name: 'B', type: 'number', default: 0, persist: false },
+      {
+        scope: 'scene' as const, id: 'a', name: 'A', type: 'number', default: 0, persist: false },
+      {
+        scope: 'scene' as const, id: 'b', name: 'B', type: 'number', default: 0, persist: false },
     ],
   }))
 }
@@ -112,7 +114,8 @@ describe('跨 await 的变量环', () => {
     const counts = { a: 0, b: 0 }
     const doc = docWithRules(
       [makeRule({ when: { event: 'timer', delay: 16, repeat: true, startOn: 'sceneReady' }, then: [{ action: 'bump', params: { variableId: 'a' } }] })],
-      (d) => ({ ...d, variables: [...d.variables, { id: 'a', name: 'A', type: 'number', default: 0, persist: false }] }),
+      (d) => ({ ...d, variables: [...d.variables, {
+        scope: 'scene' as const, id: 'a', name: 'A', type: 'number', default: 0, persist: false }] }),
     )
     const h = harness(doc, { registry: makeCounterRegistry(counts) })
 

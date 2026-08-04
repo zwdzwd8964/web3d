@@ -1,8 +1,11 @@
 import { z } from 'zod'
+import { ExplodeSchema } from './explode.js'
 import { AssetIdSchema, MaterialIdSchema, NodeIdSchema } from './id.js'
 import { LightSchema } from './light.js'
+import { PrefabRefSchema } from './prefab-ref.js'
 import { PrimitiveSchema } from './primitive.js'
-import { TransformSchema } from './primitives.js'
+import { TransformSchema, Vec3Schema } from './primitives.js'
+import { SectionSchema } from './section.js'
 
 /**
  * SCHEMA_SPEC §4 · a scene node is an instance that stores only the delta against its
@@ -74,10 +77,18 @@ export const NodeSchema = z
     primitive: PrimitiveSchema.nullable().default(null),
     /** v2 · a light. D12: a light is a node, so it inherits everything nodes already have. */
     light: LightSchema.nullable().default(null),
+    /** v3 · 第四种承载体：剖切平面。位置与法向就是本节点的 transform。 */
+    section: SectionSchema.nullable().default(null),
     transform: TransformSchema,
     visible: z.boolean().default(true),
     /** Editor-only: blocks picking and gizmo. Still rendered, still scriptable. */
     locked: z.boolean().default(false),
+    /** v3 · 非空表示「本节点是爆炸分组」，成员是它的**直接**子节点。 */
+    explode: ExplodeSchema.nullable().default(null),
+    /** v3 · 父为爆炸分组时，本件在 factor=1 的位移（父的局部空间）。null = 由算法派生。 */
+    explodeOffset: Vec3Schema.nullable().default(null),
+    /** v3 · 本节点由哪个 prefab 实例化而来。v2 才有写入路径（T-232 是纯占位面）。 */
+    prefabRef: PrefabRefSchema.nullable().default(null),
     overrides: NodeOverridesSchema.default({}),
   })
   .strict()

@@ -247,7 +247,8 @@ describe('B14 · the { event: … } value expression', () => {
     const doc = createGoldenPathDocument()
     const wildcard: SceneDocument = {
       ...doc,
-      variables: [...doc.variables, { id: 'clicked', name: '点中的对象', type: 'string', default: '', persist: false }],
+      variables: [...doc.variables, {
+        scope: 'scene' as const, id: 'clicked', name: '点中的对象', type: 'string', default: '', persist: false }],
       rules: [
         makeRule({
           name: '记录点中的对象',

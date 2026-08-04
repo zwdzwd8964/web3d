@@ -75,6 +75,19 @@ export function evaluateCondition(cond: Condition, ctx: RuntimeContext, event: R
       return ctx.isAnimationPlaying(cond.animationId) === cond.value
     case 'isPanelOpen':
       return ctx.isPanelOpen(cond.hotspotId) === cond.value
+    case 'isPageVisible':
+      // v1.0 冻结形状、v1.2 才通电（T-225 · X-09/X-10）。**页面在 v1.0 从不渲染**，所以
+      // 「页面 X 可见吗」在这一级的答案恒为否 —— 于是 `value: false` 的规则为真，
+      // `value: true` 的为假。
+      //
+      // 不写成恒 `false`：那会让两种写法都得到 false，把一条「当页面没显示时」的规则
+      // 静默变成永不触发。也不抛异常：一份配了 v1.2 规则的文档必须仍然能在 v1.0 播放器里
+      // 打开并运行（C4），只是那条规则不生效。
+      ctx.log('warn', '条件求值：isPageVisible 在 v1.0 尚未接线，按「页面不可见」处理', {
+        op: cond.op,
+        pageId: cond.pageId,
+      })
+      return cond.value === false
     case 'in': {
       const left = evaluateValueExpr(cond.left, ctx, event)
       if (left === undefined) {

@@ -1,4 +1,4 @@
-import type { DocIndex, EventDescriptor, NodeTarget, Rule } from '@w3/schema'
+import type { DocIndex, EventDescriptor, EventPayloadKey, NodeTarget, Rule } from '@w3/schema'
 import type { RuntimeEvent, RuntimeEventType } from './types.js'
 
 /**
@@ -102,7 +102,7 @@ export function candidateRules(index: DocIndex, event: RuntimeEvent): Rule[] {
 }
 
 /** Payload lookup for the `{ event: … }` value expression (ECA_SPEC §3.1). */
-export function eventPayload(event: RuntimeEvent, key: 'nodeId' | 'hotspotId' | 'animationId'): string | undefined {
+export function eventPayload(event: RuntimeEvent, key: EventPayloadKey): string | undefined {
   const value = (event as unknown as Record<string, unknown>)[key]
   return typeof value === 'string' ? value : undefined
 }

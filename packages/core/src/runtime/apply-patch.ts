@@ -121,6 +121,10 @@ export class PatchApplier {
         return true
       // Collections with no renderer-side representation: the ECA engine and the hotspot
       // projector read them straight from the document, so there is nothing to mirror.
+      //
+      // v3 的 `dataSources` / `prefabs` 也在这一组。**认领它们、什么都不做，是正确行为而不是
+      // 偷懒**：掉进 default 会让「改一个数据源的轮询间隔」触发一次整图重建（1000 节点实测
+      // 97 ms，IMPL_NOTES T-176），而数据源和 prefab 库跟场景图没有任何关系。
       case 'media':
         // The hotspot layer and the media bus read `doc.media` directly; the pool of
         // <audio> elements is the only thing that mirrors it (T-163).
@@ -133,6 +137,8 @@ export class PatchApplier {
       case 'hotspots':
       case 'pages':
       case 'flows':
+      case 'dataSources':
+      case 'prefabs':
       case 'name':
       case 'schemaVersion':
       case 'id':

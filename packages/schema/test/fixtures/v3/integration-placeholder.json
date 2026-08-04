@@ -1,0 +1,565 @@
+{
+  "schemaVersion": 3,
+  "projectId": "prj_a1b2c3d4",
+  "sceneId": "scn_a1b2c3d4",
+  "name": "泵组拆装演示",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-08-01T02:10:00.000Z",
+    "updatedAt": "2026-08-01T03:42:11.000Z",
+    "background": {
+      "type": "color",
+      "color": "#1a1a1a"
+    },
+    "environment": {
+      "hdriAssetId": null,
+      "intensity": 1,
+      "exposure": 1
+    },
+    "fog": {
+      "enabled": false,
+      "type": "linear",
+      "color": "#1a1a1a",
+      "near": 10,
+      "far": 100,
+      "density": 0.02
+    },
+    "effects": {
+      "outline": {
+        "enabled": false,
+        "color": "#ffb020",
+        "widthPx": 3,
+        "strength": 3,
+        "hiddenEdge": "dim"
+      }
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_9k2m4p7q",
+      "type": "model",
+      "name": "pump.glb",
+      "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+      "url": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.glb",
+      "version": 1,
+      "lineageId": "ast_9k2m4p7q",
+      "stats": {
+        "tris": 128400,
+        "materials": 12,
+        "textures": 6,
+        "bytes": 8412300,
+        "textureBytes": 220200960,
+        "nodes": 34,
+        "animations": [
+          "Disassemble"
+        ],
+        "clipDurations": {}
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png",
+      "origin": {
+        "hash": "sha256:ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+        "bytes": 1048576,
+        "stats": {
+          "tris": 128400,
+          "materials": 12,
+          "textures": 6,
+          "bytes": 8412300,
+          "textureBytes": 220200960,
+          "nodes": 34,
+          "animations": [
+            "Disassemble"
+          ],
+          "clipDurations": {}
+        },
+        "transcode": {
+          "profileId": "default-v1",
+          "toolchain": "draco3dgltf@1.5.7",
+          "ops": [
+            {
+              "op": "draco",
+              "detail": "几何压缩，EDGEBREAKER"
+            }
+          ],
+          "skipped": [
+            {
+              "op": "decimate",
+              "detail": "减面默认关闭，未执行"
+            }
+          ],
+          "triangleRatio": 1,
+          "finishedAt": "2026-08-04T00:00:00.000Z"
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_r5t8y1u3",
+      "name": "泵组",
+      "parent": null,
+      "order": 1000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_v7w9x2z4",
+      "name": "泵体",
+      "parent": "nd_r5t8y1u3",
+      "order": 1000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/Body",
+        "objectName": "Body",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_b3n5m7k9",
+      "name": "阀盖",
+      "parent": "nd_r5t8y1u3",
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_9k2m4p7q",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_c4d6f8h1"
+      }
+    },
+    {
+      "id": "nd_pfbinst1",
+      "name": "法兰实例",
+      "parent": "nd_r5t8y1u3",
+      "order": 6000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          1,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": {
+        "prefabId": "pfb_00000001",
+        "overridden": []
+      },
+      "overrides": {}
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_c4d6f8h1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.4,
+        "metalness": 0.9,
+        "maps": {}
+      }
+    }
+  ],
+  "animations": [
+    {
+      "kind": "tween",
+      "id": "anm_j2l4n6p8",
+      "name": "阀盖抬起",
+      "duration": 1.2,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": false,
+      "targets": [
+        {
+          "nodeId": "nd_b3n5m7k9",
+          "to": {
+            "p": [
+              0,
+              0.35,
+              0
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_q1s3u5w7",
+      "name": "拆卸提示",
+      "anchor": {
+        "nodeId": "nd_b3n5m7k9",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "松开六颗固定螺栓后抬起阀盖。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_e9g1i3k5",
+      "name": "拆解视角",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          2.4,
+          1.8,
+          3.2
+        ],
+        "target": [
+          0,
+          0.4,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      },
+      "thumbnailAssetId": "ast_9k2m4p7q"
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1,
+      "persist": false,
+      "scope": "scene"
+    },
+    {
+      "id": "temp_c",
+      "name": "温度",
+      "type": "number",
+      "default": 0,
+      "persist": false,
+      "scope": "project"
+    },
+    {
+      "id": "status_t",
+      "name": "状态",
+      "type": "string",
+      "default": "",
+      "persist": false,
+      "scope": "scene"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_m8o2q4s6",
+      "name": "点击阀盖执行第一步",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_b3n5m7k9"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_j2l4n6p8",
+            "await": true
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_b3n5m7k9",
+            "preset": "outline_amber"
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_q1s3u5w7"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [],
+  "flows": [],
+  "media": [],
+  "dataSources": [
+    {
+      "id": "ds_00000001",
+      "name": "停用的源",
+      "enabled": false,
+      "mode": "live",
+      "url": "http://mes.internal/api/line1",
+      "method": "get",
+      "body": null,
+      "auth": {
+        "kind": "bearer",
+        "secretRef": "MES_TOKEN",
+        "headerName": ""
+      },
+      "intervalMs": 30000,
+      "timeoutMs": 10000,
+      "startOn": "sceneReady",
+      "onError": "keep",
+      "map": [],
+      "sample": []
+    },
+    {
+      "id": "ds_00000002",
+      "name": "样例数据源",
+      "enabled": true,
+      "mode": "sample",
+      "url": "",
+      "method": "get",
+      "body": null,
+      "auth": {
+        "kind": "none",
+        "secretRef": "",
+        "headerName": ""
+      },
+      "intervalMs": 60000,
+      "timeoutMs": 10000,
+      "startOn": "manual",
+      "onError": "default",
+      "map": [
+        {
+          "path": "line.temp",
+          "variableId": "temp_c",
+          "cast": "number"
+        },
+        {
+          "path": "line.state[0].text",
+          "variableId": "status_t",
+          "cast": "string"
+        }
+      ],
+      "sample": [
+        "{\"line\":{\"temp\":42,\"state\":[{\"text\":\"运行\"}]}}"
+      ]
+    }
+  ],
+  "prefabs": [
+    {
+      "id": "pfb_00000001",
+      "name": "标准法兰",
+      "note": "",
+      "version": 1,
+      "nodes": [
+        {
+          "id": "nd_pfbnode1",
+          "name": "法兰盘",
+          "parent": null,
+          "order": 1000,
+          "assetRef": null,
+          "primitive": {
+            "kind": "cylinder",
+            "radiusTop": 0.2,
+            "radiusBottom": 0.2,
+            "height": 0.05
+          },
+          "light": null,
+          "section": null,
+          "transform": {
+            "p": [
+              0,
+              0,
+              0
+            ],
+            "r": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "s": [
+              1,
+              1,
+              1
+            ]
+          },
+          "visible": true,
+          "locked": false,
+          "explode": null,
+          "explodeOffset": null,
+          "prefabRef": null,
+          "overrides": {}
+        }
+      ],
+      "materials": [
+        {
+          "id": "mat_pfbmat01",
+          "name": "铸铁",
+          "base": "standard",
+          "preset": "custom",
+          "params": {
+            "roughness": 0.8,
+            "metalness": 0.6,
+            "maps": {}
+          }
+        }
+      ]
+    }
+  ]
+}

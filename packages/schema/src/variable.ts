@@ -13,6 +13,11 @@ import { VariableIdSchema } from './id.js'
 
 export const VARIABLE_TYPES = ['number', 'string', 'boolean', 'enum'] as const
 export const VariableTypeSchema = z.enum(VARIABLE_TYPES)
+
+/** v3 · 多场景（v1.5 才通电）。`project` 作用域的变量跳场景后还在。 */
+export const VARIABLE_SCOPES = ['scene', 'project'] as const
+export const VariableScopeSchema = z.enum(VARIABLE_SCOPES)
+export type VariableScope = z.infer<typeof VariableScopeSchema>
 export type VariableType = z.infer<typeof VariableTypeSchema>
 
 export const VariableValueSchema = z.union([z.number().finite(), z.string(), z.boolean()])
@@ -29,6 +34,13 @@ export const VariableSchema = z
     options: z.array(z.string()).optional(),
     /** Persist across sessions. v0 ignores it; the field lands now to avoid a migration. */
     persist: z.boolean().default(false),
+    /**
+     * v3 · 变量的作用域（多场景，v1.5 才通电）。
+     *
+     * `'scene'` = 每个场景一份；`'project'` = 整个项目共享，跳场景后还在。默认 `'scene'`
+     * 让所有老文档的观感一个字节不变。
+     */
+    scope: z.enum(VARIABLE_SCOPES).default('scene'),
   })
   .strict()
 export type Variable = z.infer<typeof VariableSchema>

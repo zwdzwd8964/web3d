@@ -80,6 +80,10 @@ export function ConditionRow({
           doc={doc}
           onChange={(_, value) => onChange({ ...condition, right: value as never })}
         />
+      ) : condition.op === 'isPageVisible' ? (
+        // v3 冻结形状、v1.2 才通电。v1.0 建不出这条条件，但一份 v1.2 的文档打得开，
+        // 所以这里必须有一支——否则它会掉进 StateCondition，在 `condition.nodeId` 上炸掉。
+        <span className="hint">页面「{condition.pageId}」{condition.value ? '可见' : '不可见'}（v1.0 尚未接线）</span>
       ) : (
         <StateCondition condition={condition} doc={doc} onChange={onChange} />
       )}

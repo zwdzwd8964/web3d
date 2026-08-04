@@ -135,6 +135,10 @@ describe('pasteNodes', () => {
       nodes: [
         ...base.nodes,
         {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
           id: 'nd_light001',
           name: '聚光灯',
           parent: null,

@@ -31,6 +31,8 @@ let warnings: string[]
 function docWithClip(overrides: Partial<ImportedAnimation> = {}): SceneDocument {
   const base = createGoldenPathDocument()
   const animation: ImportedAnimation = {
+    startS: 0,
+    endS: null,
     kind: 'imported',
     id: 'anm_11111111',
     name: '拆解',

@@ -25,6 +25,14 @@ export const AssetStatsSchema = z
     nodes: z.number().int().nonnegative(),
     /** Clip names, not a count — the animation panel needs the list. */
     animations: z.array(z.string()),
+    /**
+     * v3 · 每条 clip 的时长，秒（X-06）。
+     *
+     * ⚠ **高危**：`AssetStats` 是 `.strict()`，而 `checkIntegrity` 不重跑 schema 校验。
+     * 加这一个键意味着**每一份老 fixture 的校验都会失败**，除非迁移显式补上 `{}`。
+     * 这是四处非增量迁移里最容易漏的一处。
+     */
+    clipDurations: z.record(z.string(), z.number().nonnegative()).default({}),
   })
   .strict()
 export type AssetStats = z.infer<typeof AssetStatsSchema>
@@ -68,6 +76,44 @@ export const AssetNormalizedSchema = z
   .strict()
 export type AssetNormalized = z.infer<typeof AssetNormalizedSchema>
 
+/** 一次转码操作的留痕。`op` 是机器读的操作名，`detail` 是给人看的中文说明。 */
+export const TranscodeOpSchema = z
+  .object({
+    op: z.string().max(40),
+    detail: z.string().max(200).default(''),
+  })
+  .strict()
+export type TranscodeOp = z.infer<typeof TranscodeOpSchema>
+
+/** 一次**被跳过**的转码操作，以及为什么。与 `TranscodeOpSchema` 同形，区别只在语义。 */
+export const TranscodeSkipSchema = TranscodeOpSchema
+export type TranscodeSkip = z.infer<typeof TranscodeSkipSchema>
+
+export const AssetTranscodeSchema = z
+  .object({
+    profileId: z.string().max(60).default(''),
+    /** 工具链版本串，用来回答「这份产物是哪个版本压的」。 */
+    toolchain: z.string().max(120).default(''),
+    ops: z.array(TranscodeOpSchema).max(32).default([]),
+    skipped: z.array(TranscodeSkipSchema).max(32).default([]),
+    /** 减面后三角面数 / 原始三角面数。1 = 没减面。 */
+    triangleRatio: z.number().min(0).max(1).default(1),
+    finishedAt: TimestampSchema,
+  })
+  .strict()
+export type AssetTranscode = z.infer<typeof AssetTranscodeSchema>
+
+export const AssetOriginSchema = z
+  .object({
+    hash: z.string().min(1),
+    bytes: z.number().int().nonnegative(),
+    stats: AssetStatsSchema,
+    audit: AssetAuditSchema.optional(),
+    transcode: AssetTranscodeSchema.optional(),
+  })
+  .strict()
+export type AssetOrigin = z.infer<typeof AssetOriginSchema>
+
 export const AssetSchema = z
   .object({
     id: AssetIdSchema,
@@ -90,6 +136,14 @@ export const AssetSchema = z
     audit: AssetAuditSchema.optional(),
     normalized: AssetNormalizedSchema.optional(),
     thumbnailUrl: z.string().optional(),
+    /**
+     * v3 · 这份资产是从哪来的、被怎么处理过（X-08）。**optional**——老文档缺席就是缺席，
+     * 迁移不给它补 `null` 也不补 `{}`（那会让「从没处理过」与「处理过但没记」不可分）。
+     *
+     * ⚠ **叶子类型是签字之后补的**（SCHEMA_V3_FREEZE §1.8）。嵌套结构本身已经逐字签了字，
+     * 四个叶子全部复用仓内已有类型；真正新发明的只有 `ops[]` / `skipped[]` 的元素形状。
+     */
+    origin: AssetOriginSchema.optional(),
   })
   .strict()
 export type Asset = z.infer<typeof AssetSchema>

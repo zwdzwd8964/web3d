@@ -43,8 +43,10 @@ export const GOLDEN_PATH_IDS = {
 /** Builds the SCHEMA_SPEC §12 document. Pure — returns a fresh object every call. */
 export function createGoldenPathDocument(): SceneDocument {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     projectId: GOLDEN_PATH_IDS.project,
+    // v3 · 由 projectId 确定性派生（deriveSceneId），不是随便写的。
+    sceneId: 'scn_a1b2c3d4',
     name: '泵组拆装演示',
     meta: {
       unit: 'm',
@@ -53,6 +55,8 @@ export function createGoldenPathDocument(): SceneDocument {
       updatedAt: '2026-08-01T03:42:11.000Z',
       background: { type: 'color', color: '#1a1a1a' },
       environment: { hdriAssetId: null, intensity: 1, exposure: 1 },
+      fog: { enabled: false, type: 'linear', color: '#1a1a1a', near: 10, far: 100, density: 0.02 },
+      effects: { outline: { enabled: false, color: '#ffb020', widthPx: 3, strength: 3, hiddenEdge: 'dim' } },
     },
 
     assets: [
@@ -72,6 +76,7 @@ export function createGoldenPathDocument(): SceneDocument {
           textureBytes: 220200960,
           nodes: 34,
           animations: ['Disassemble'],
+          clipDurations: {},
         },
         audit: {
           checkedAt: '2026-08-01T02:11:03.000Z',
@@ -100,9 +105,13 @@ export function createGoldenPathDocument(): SceneDocument {
         assetRef: null,
         primitive: null,
         light: null,
+        section: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         overrides: {},
       },
       {
@@ -118,9 +127,13 @@ export function createGoldenPathDocument(): SceneDocument {
         },
         primitive: null,
         light: null,
+        section: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         overrides: {},
       },
       {
@@ -136,9 +149,13 @@ export function createGoldenPathDocument(): SceneDocument {
         },
         primitive: null,
         light: null,
+        section: null,
         transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
         visible: true,
         locked: false,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         overrides: { materialId: GOLDEN_PATH_IDS.material },
       },
     ],
@@ -196,7 +213,9 @@ export function createGoldenPathDocument(): SceneDocument {
       },
     ],
 
-    variables: [{ id: GOLDEN_PATH_IDS.variable, name: '当前步骤', type: 'number', default: 1, persist: false }],
+    variables: [
+      { id: GOLDEN_PATH_IDS.variable, name: '当前步骤', type: 'number', default: 1, persist: false, scope: 'scene' },
+    ],
 
     rules: [
       {
@@ -221,6 +240,9 @@ export function createGoldenPathDocument(): SceneDocument {
     pages: [],
     flows: [],
     media: [],
+    // v3 · 两个新集合。样例文档里都是空的——这正是「升级到 v3 观感一个字节不变」的样子。
+    dataSources: [],
+    prefabs: [],
   }
 }
 

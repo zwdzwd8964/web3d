@@ -48,6 +48,10 @@ function docWithStage(): SceneDocument {
     nodes: [
       ...base.nodes,
       {
+        section: null,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
         id: 'nd_stage001',
         name: '展台',
         parent: null,

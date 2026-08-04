@@ -3,7 +3,13 @@ import { CURRENT_VERSION, DEFAULT_ENVIRONMENT } from './document.js'
 import type { SceneDocument } from './document.js'
 import type { Hotspot } from './hotspot.js'
 import type { IdFactory } from './id.js'
-import { defaultIdFactory } from './id.js'
+import { defaultIdFactory, deriveSceneId } from './id.js'
+import type { Explode } from './explode.js'
+import { DEFAULT_OUTLINE } from './effects.js'
+import { DEFAULT_FOG } from './fog.js'
+import type { PrefabRef } from './prefab-ref.js'
+import type { Section } from './section.js'
+import type { VariableScope } from './variable.js'
 import type { Light } from './light.js'
 import type { Material, MaterialParams } from './material.js'
 import type { Media, MediaType } from './media.js'
@@ -46,9 +52,13 @@ export interface CreateDocumentOptions {
 export function createEmptyDocument(options: CreateDocumentOptions): SceneDocument {
   const ctx = ctxOf(options.ctx)
   const stamp = ctx.now()
+  const projectId = ctx.newId('project')
   return {
     schemaVersion: CURRENT_VERSION,
-    projectId: ctx.newId('project'),
+    projectId,
+    // v3 · 从 projectId 确定性派生，与迁移走同一个函数——**三处调用点共用一份实现**，
+    // 否则「新建的文档」与「迁移上来的文档」会得到两套 sceneId 规则。
+    sceneId: deriveSceneId(projectId),
     name: options.name,
     meta: {
       unit: options.unit ?? 'm',
@@ -57,6 +67,8 @@ export function createEmptyDocument(options: CreateDocumentOptions): SceneDocume
       updatedAt: stamp,
       background: { type: 'color', color: '#1a1a1a' },
       environment: { ...DEFAULT_ENVIRONMENT },
+      fog: { ...DEFAULT_FOG },
+      effects: { outline: { ...DEFAULT_OUTLINE } },
     },
     assets: [],
     nodes: [],
@@ -69,10 +81,20 @@ export function createEmptyDocument(options: CreateDocumentOptions): SceneDocume
     pages: [],
     flows: [],
     media: [],
+    dataSources: [],
+    prefabs: [],
   }
 }
 
 export interface CreateNodeOptions {
+  /** v3 · 剖切平面（第四种承载体）。 */
+  section?: Section | null
+  /** v3 · 非空表示本节点是爆炸分组。 */
+  explode?: Explode | null
+  /** v3 · 本件在 factor=1 的位移；null = 由算法派生。 */
+  explodeOffset?: Vec3 | null
+  /** v3 · 由哪个 prefab 实例化而来。v2 才有写入路径。 */
+  prefabRef?: PrefabRef | null
   readonly name: string
   readonly parent?: string | null
   readonly order?: number
@@ -97,9 +119,13 @@ export function createNode(options: CreateNodeOptions): Node {
     assetRef: options.assetRef ?? null,
     primitive: options.primitive ?? null,
     light: options.light ?? null,
+    section: options.section ?? null,
     transform: options.transform ?? identityTransform(),
     visible: options.visible ?? true,
     locked: options.locked ?? false,
+    explode: options.explode ?? null,
+    explodeOffset: options.explodeOffset ?? null,
+    prefabRef: options.prefabRef ?? null,
     overrides: options.overrides ?? {},
   }
 }
@@ -251,6 +277,9 @@ export function createImportedAnimation(options: {
   speed?: number
   loop?: boolean
   clampWhenFinished?: boolean
+  /** v3 · 区间播放。 */
+  startS?: number
+  endS?: number | null
   ctx?: FactoryContext
 }): Animation {
   const ctx = ctxOf(options.ctx)
@@ -263,6 +292,8 @@ export function createImportedAnimation(options: {
     speed: options.speed ?? 1,
     loop: options.loop ?? false,
     clampWhenFinished: options.clampWhenFinished ?? true,
+    startS: options.startS ?? 0,
+    endS: options.endS ?? null,
   }
 }
 
@@ -324,6 +355,8 @@ export function createVariable(options: {
   default: VariableValue
   options?: string[]
   persist?: boolean
+  /** v3 · 多场景作用域。 */
+  scope?: VariableScope
 }): Variable {
   return {
     id: options.id,
@@ -332,6 +365,7 @@ export function createVariable(options: {
     default: options.default,
     ...(options.options ? { options: options.options } : {}),
     persist: options.persist ?? false,
+    scope: options.scope ?? 'scene',
   }
 }
 
