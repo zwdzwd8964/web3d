@@ -9,7 +9,10 @@ const coreVersion = createRequire(import.meta.url)('../core/package.json').versi
 
 // C6 · zero external runtime dependencies:
 //  - no CDN, no Google Fonts, no remote decoder;
-//  - vendor/ (Draco + KTX2) is copied into the build output by scripts/sync-vendor.mjs
+//  - vendor/ (Draco + KTX2) is NOT copied into the build output. `sync-vendor.mjs` copies
+// three's decoders into the repository's `vendor/`, which is a different thing entirely —
+// the bundler emits its own copies into `dist/assets/` via `import.meta.url`. Corrected by
+// T-220 / ADR-0037; the original sentence had been false since ADR-0012
 //    and served from the app's own origin.
 export default defineConfig({
   define: { __W3_CORE_VERSION__: JSON.stringify(coreVersion) },

@@ -11,6 +11,11 @@
  *   - **ADR-0024** · `C7` · 到期 `v1.5` — the player's one `fetch`, until `HttpApiProvider`
  *   - **ADR-0025** · `渲染出口` · 到期 `v2` — the capture pass's extra overlay draw
  *
+ * **T-220 added the first two that ARE in the code** (`loader.ts`'s two `VENDOR_*` constants,
+ * `C5 · ADR-0037 · 到期 v1.2`). So this script now guards live promises, not only fixtures —
+ * the count printed on every run is the honest number, and the three below are the ones still
+ * waiting for their code to exist.
+ *
  * ⚠ **None of the three is in the code yet, and that is not this script's failure.** Their
  * landing places do not exist: `ADR-0025`'s belongs on a `captureImage()` that is still
  * T-266's un-wired stub; `ADR-0022`'s belongs in a benchmark script nobody has written;

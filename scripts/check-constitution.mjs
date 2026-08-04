@@ -25,7 +25,10 @@ const GUARDS = [
   { article: 'C7', script: 'check-provider-swap.mjs', args: [], what: 'provider construction and network primitives each have exactly the declared sites' },
   { article: 'MVP §3', script: 'check-deps-direction.mjs', args: [], what: 'package dependency graph has no reverse edges' },
   { article: 'C6', script: 'check-no-external.mjs', args: REQUIRE_BUILD ? [] : ['--allow-missing'], what: 'no external URL in build output' },
-  { article: 'C6', script: 'sync-vendor.mjs', args: ['--check'], what: 'Draco / KTX2 decoders are vendored and match the locked three' },
+  // v1.0 · T-220. `--require-build` is ADR-0012's undo condition #2 becoming a machine: it
+  // asserts the BUNDLER still emits the decoders into `dist/assets/`. Only meaningful when
+  // something is built, so it rides the same flag as the C6 output scan.
+  { article: 'C6 + ADR-0012', script: 'sync-vendor.mjs', args: REQUIRE_BUILD ? ['--check', '--require-build'] : ['--check'], what: 'Draco / KTX2 decoders are vendored, match the locked three, and are still emitted into dist' },
   // v0.5 · T-173. The built-in library is content that ships WITH the app, so every file it
   // names is a C6 surface: one `https://` in a manifest entry and an air-gapped deployment
   // shows a broken tile. The licence field is enforced by the same script (D17 · 版权风险 V1),

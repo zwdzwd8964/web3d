@@ -31,9 +31,23 @@ import type { AssetResolver, AssetSource, LoadedAsset } from './types.js'
 
 /**
  * Where `vendor/` is served from, for hosts that opt into an explicit decoder path.
- * NOT applied by default — see the note above.
+ *
+ * **Who uses these** (T-220 · the question ADR-0012 left open and nobody answered for two
+ * releases): nothing in this repository does, on purpose. The bundler resolves three's own
+ * decoders through `import.meta.url` and emits them same-origin into `dist/assets/` with a
+ * content hash — measured, 7 files in each of the editor's and player's `dist`. **`/vendor/`
+ * receives zero requests in every deployment shape this repository builds.**
+ *
+ * They exist for the **non-bundled** deployment: two `dist` folders dropped onto an arbitrary
+ * static server, or decoders served from a shared location. That host passes one of these to
+ * `AssetLoaderOptions.dracoPath` / `ktx2Path`. `docs/DEPLOY.md` §5 is that shape.
+ *
+ * ⚠ **That path has no test pointing at it.** ADR-0037 accepts this as its weakest link and
+ * writes the undo condition accordingly — hence the expiry below rather than a bare comment.
  */
+// CONSTITUTION-EXCEPTION: C5 · ADR-0037 · 到期 v1.2
 export const VENDOR_DRACO_PATH = '/vendor/draco/gltf/'
+// CONSTITUTION-EXCEPTION: C5 · ADR-0037 · 到期 v1.2
 export const VENDOR_KTX2_PATH = '/vendor/basis/'
 
 export interface AssetLoaderOptions {

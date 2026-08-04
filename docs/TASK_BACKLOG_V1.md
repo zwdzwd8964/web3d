@@ -1084,8 +1084,28 @@
   `KTX2Loader` 已在 bundle 里，附件A 已把「允许 KTX2」写给客户，本卡清的是 v1.0 的债
   ——逐字见 [ADR-0031](adr/0031-减面移出-Out-of-Scope.md) 第 3 节末段「不要把 P-14 读成 KTX2 全线不做」。
 
-### [ ] T-220 · `vendor/` 与 `VENDOR_*` 常量的去留裁决
-- **依赖** T-218（要它打印的真实 URL）· **预估** 0.3d · **实际** —
+### [x] T-220 · `vendor/` 与 `VENDOR_*` 常量的去留裁决
+- **依赖** T-218（要它打印的真实 URL）· **预估** 0.3d · **实际** 0.8h
+- **裁决：保留，并给它配一台机器。** 见 [ADR-0037](adr/0037-vendor-目录的去留.md)。
+- **卡面的裁决依据是错配的。** 它要求依据 T-218 打印的真实 URL，而 T-218/T-219 的 E2E 跑在
+  vite **dev server** 上，观测到的是 `/@fs/…` 开发期路径，**生产里根本不存在**。决定性证据
+  在构建产物里、今天就能数：`packages/{editor,player}/dist/assets/` 各 **7 个**带内容哈希的
+  解码器产物。ADR-0037 用的是这个。
+- **验收③「进 T-205 的豁免表」机器上不可能**：那张表的 `symbol` 列是导出符号，一个目录名
+  必落进 stale 分支 exit 1；退一步只登记两个常量也不行，`MAX_EXEMPTIONS` 正好 34/34 且
+  「只能降不能升」。改走 `CONSTITUTION-EXCEPTION`（由 T-298 的 `check-expiry.mjs` 读），
+  **到期 `v1.2`**——写 `v1.0` 等于当天到期转红。
+- **卡面自相矛盾**：独占列了三条「（若删）」路径，而两个分支没有一个是删，自测栏又逐字要求
+  「`sync-vendor --check` 必须仍绿」（删了必红）。「去留裁决」实际只有「留 + 怎么留」。
+- **本卡真正的交付是那两台机器**，不是那份 ADR：
+  ① `sync-vendor --check` 补扫描面下限——它原本的判据两侧同时为空时**恒真**，
+  而它长在本卡自测所倚仗的那条命令上；
+  ② `--require-build` 断言 `dist/assets/` 里仍有解码器产物——**这是 ADR-0012 的撤销条件 #2
+  第一次变成机器**，此前是一句全仓零脚本的人工承诺。
+- **交付偏差**（六处，均在提交信息里点名）：`scripts/sync-vendor.mjs` · `scripts/check-constitution.mjs` ·
+  `docs/DEPLOY.md`（T-221 独占，新增 §5.1）· `packages/editor/vite.config.ts`（那条已证伪的注释，
+  原由 v1.5 的 T-418 认领——不改就是让一条已知假话跨两个里程碑）· `README.md` + `docs/V1_KICKOFF.md`
+  （ADR 计数 32 → 33）· `scripts/check-expiry.mjs`（JSDoc 里「三条到期承诺」现在是五条）。
 - **独占** `docs/adr/0037-vendor-目录的去留.md`（新，**本版改号**：原定 0030 已被
   [ADR-0030 批准 v1 新增第三方依赖](adr/0030-批准-v1-新增第三方依赖.md) 占用）·
   `packages/core/src/runtime/loader.ts:35-36`（若删）·

@@ -129,7 +129,7 @@ pnpm verify:full         # 含 e2e
 | [docs/METRICS.md](docs/METRICS.md) | 指标快照与趋势 |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | 在客户机器上出性能报告 |
 | [docs/附件A_数字资产规范_草案.md](docs/附件A_数字资产规范_草案.md) | 和客户谈资产交付标准 |
-| [docs/adr/](docs/adr/) | 32 条架构决策记录，每条都有代价与撤销条件 |
+| [docs/adr/](docs/adr/) | 33 条架构决策记录，每条都有代价与撤销条件 |
 
 ---
 

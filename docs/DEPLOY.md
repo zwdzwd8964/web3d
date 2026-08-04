@@ -105,6 +105,19 @@ docker run --rm -p 8080:8080 web3d:local
 - **`.wasm` 的 MIME**：必须是 `application/wasm`，否则 Draco / KTX2 解码器加载失败；
 - **`assets/` 长缓存**：Vite 产物带内容哈希，`immutable` 是安全的；`index.html` **不许**长缓存。
 
+### 5.1 `/vendor/` 服务于哪一种形态（T-220 / ADR-0037）
+
+**只服务于这一节。** 在 §3（云托管）与 §4（自建容器）里，`/vendor/` 收到**零个请求**——
+打包器通过 `import.meta.url` 把 three 的解码器同源产出到 `dist/assets/`，带内容哈希
+（实测：editor 与 player 各 7 个）。镜像里那份 `/vendor/` 是发出去了没人取。
+
+它存在是为了**非打包部署**：把两份 `dist` 摆到任意静态服务器上，而解码器由别处提供
+（共享 CDN 之外的内网静态站、或一份所有产品共用的解码器目录）。那种宿主把
+`/vendor/draco/gltf/` 传给 `AssetLoaderOptions.dracoPath`。
+
+⚠ **这条路今天没有任何测试指向它**，ADR-0037 把这一点写成了它最弱的一环，
+并给两个常量配了到期版本号 `v1.2`：到那时仍然没有测试，就删掉整块。
+
 ## 6 · 验证
 
 部署完之后逐条跑，`<host>` 换成实际地址：
