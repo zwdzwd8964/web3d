@@ -13,6 +13,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { Vector2 } from 'three'
 import { RenderPipeline, createDefaultComposer } from './render-pipeline.js'
 import { SectionLayer, sectionFactory } from './section-layer.js'
+import { ExplodeLayer } from './explode-layer.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
@@ -135,6 +136,8 @@ export class SceneRuntime implements RuntimeContext {
   private readonly chrome = new ChromeRegistry()
   /** T-243 · 剖切平面层。它读场景图的世界矩阵，写渲染器的 clippingPlanes。 */
   private readonly sections: SectionLayer
+  /** T-244 · 爆炸叠加层。系数是运行时瞬态（D29），不进文档。 */
+  private readonly explode: ExplodeLayer
   /** T-241 · 编辑期辅助物此刻可见吗。选中态描边跟着它走。 */
   private chromeVisible = true
   /** T-241 · 当前选中集。策略换成描边、或 chrome 重新可见时按它重推。 */
@@ -241,6 +244,7 @@ export class SceneRuntime implements RuntimeContext {
       ...(options.compileEnvMap ? { compile: options.compileEnvMap } : {}),
     })
     this.sections = new SectionLayer(this.graph)
+    this.explode = new ExplodeLayer(this.graph)
 
     this.patches = new PatchApplier({
       graph: this.graph,
@@ -263,6 +267,9 @@ export class SceneRuntime implements RuntimeContext {
       },
       // T-243 · 剖切面是一个全局集合，逐节点增量在这里是错的抽象（见钩子的注释）。
       applySections: (doc) => this.syncSections(doc),
+      // T-244 · 位移是全组成员锚点的函数，改一个成员会动到其余每一个 —— 整片清缓存。
+      applyExplode: () => this.explode.invalidate(),
+      forgetExplodeFor: (nodeId) => this.explode.forgetApplied(nodeId),
       log: (level, message, data) => this.log(level, message, data),
     })
 
@@ -378,6 +385,26 @@ export class SceneRuntime implements RuntimeContext {
    *  ③ 开关描边、或者 chrome 重新可见时要**重推一次**，否则选中态在切换那一瞬间消失，
    *    而用户并没有取消选择。
    */
+  /**
+   * T-244 · 把一个爆炸分组推到 `factor`。`factor: 0` 即复原。
+   *
+   * 目标不是爆炸分组时**跳过 + error 日志**（B9，与 `setLight` 逐字一致），不抛：
+   * 一条规则里写错了目标，整条规则链不该因此断掉。
+   */
+  setExplode(groupNodeId: string, factor: number, options?: { durationS?: number; signal?: AbortSignal }): Promise<void> {
+    const node = this.document.nodes.find((n) => n.id === groupNodeId)
+    if (!node || node.explode === null) {
+      this.log('error', `爆炸目标「${groupNodeId}」不是爆炸分组，已跳过`)
+      return Promise.resolve()
+    }
+    return this.explode.setExplode(this.document, groupNodeId, factor, this.now(), options ?? {})
+  }
+
+  /** T-244 · 这个分组此刻的系数。契约套件的 `explodeOf` 读它。 */
+  explodeOf(groupNodeId: string): number {
+    return this.explode.factorOf(groupNodeId)
+  }
+
   setSelectionOutline(nodeIds: readonly string[]): void {
     this.selectionOutline = [...nodeIds]
     this.pushSelectionOutline()
@@ -876,6 +903,9 @@ export class SceneRuntime implements RuntimeContext {
     const now = this.now()
     this.tweens.update(now)
     this.clips.update(now)
+    // T-244 · **在补间与片段之后**。爆炸是叠加层：它这一帧的 base 就是补间刚写完的位置，
+    // 顺序反过来会让补间把爆炸偏移覆盖掉，而症状是「一边播动画一边爆炸时零件塌回去」。
+    this.explode.update(this.document, now)
     this.camera.update(now)
     // After the camera and the tweens: a light being animated, or its parent being
     // dragged, has to move its helper in the SAME frame or the cone lags the light by one.
@@ -905,6 +935,7 @@ export class SceneRuntime implements RuntimeContext {
     this.waits.clear()
     this.tweens.stopAll()
     this.clips.dispose()
+    this.explode.reset(this.document)
     // T-243 · 不还给渲染器的话，下一份文档会带着上一份的刀开场
     this.sections.dispose(this.renderer ?? null)
     this.camera.dispose()
@@ -1275,6 +1306,9 @@ export class SceneRuntime implements RuntimeContext {
     // thing this feature can do.
     this.media.stop('all')
     this.tweens.stopAll()
+    // T-244 · resetScene 第 10 步。**在 graph.build 之前**：它要把自己加过的位移减回去，
+    // 而 build 之后那批对象已经换人了。
+    this.explode.reset(this.document)
     // T-237 · **不是 `stopAll`，是把 mixer 整个交回去，而且要在 `graph.build` 之前。**
     // 每个 mixer 绑死一个 `Object3D`，下面一行重建之后那些对象就没人渲染了；只 stop
     // 的话它们连同各自的 action 与 PropertyMixer 一直挂在这里，「反复排练一段拆装流程」
@@ -1429,11 +1463,6 @@ export class SceneRuntime implements RuntimeContext {
    *
    * Every entry names the card that owns it. No owner, no seam (D36's rule, applied early).
    */
-
-  /** T-244 · drives one explode group to `factor`, optionally over `durationS`. */
-  setExplode(_groupNodeId: string, _factor: number, _options?: { durationS?: number; signal?: AbortSignal }): Promise<void> {
-    throw new Error(SEAM_NOT_WIRED('setExplode', 'T-244'))
-  }
 
   /** T-266 · the eight-step capture: resize, freeze, draw, compose overlays, restore. */
   captureImage(_request: unknown): Promise<Blob | null> {

@@ -1862,8 +1862,8 @@
   program 的 cache key → 开 / 关剖切让每个材质重编译；`Material.copy()` 会连 `clippingPlanes` 一起
   复制，而 `MaterialRegistry` 的克隆走 clone/copy → 逐材质剖切一旦启用，每次高亮克隆都会继承裁剪状态。
 
-### [ ] T-244 · `ExplodeLayer` + tick 接线 + `resetScene` 第 10 步
-- **依赖** T-238 · T-243（共享 `scene-runtime.ts` → 排其后，列 R）· **预估** 1.5d · **实际** —
+### [x] T-244 · `ExplodeLayer` + tick 接线 + `resetScene` 第 10 步
+- **依赖** T-238 · T-243（共享 `scene-runtime.ts` → 排其后，列 R）· **预估** 1.5d · **实际** 1.7d
 - **独占** `packages/core/src/runtime/explode-layer.ts`(新) · `packages/core/test/runtime/explode-layer.test.ts`(新)
 - **做** 叠加层含过渡（`ease()`）、中断冻结 + reject、每组偏移缓存与「批次里出现 `nodes` 路径就清
   缓存」的失效、`reset()`；`tick()` 里插在 `clips.update` 之后；`resetScene` 加 `explode.reset()`。

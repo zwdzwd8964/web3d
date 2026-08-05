@@ -92,6 +92,13 @@ export interface PatchApplierTargets {
   readonly applySections?: (doc: SceneDocument) => void
   /** T-243 · 爆炸分组的参数或逐件偏移变了。消费者是 T-244 的叠加层。 */
   readonly applyExplode?: (doc: SceneDocument) => void
+  /**
+   * T-244 · 这个节点的 transform 刚被文档值覆盖，爆炸叠加层的账本要清。
+   *
+   * **按节点，不是整片**：没被覆盖的成员仍停在「base + 偏移」上，把它们的账本一起清
+   * 会让下一帧再叠一次，位置直接翻倍。
+   */
+  readonly forgetExplodeFor?: (nodeId: string) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -303,6 +310,10 @@ export class PatchApplier {
         // T-243 · 拖一把剖切刀就是在改它的 transform，而平面**就是**那个 transform。
         // 不在这里重算的话，拖动时指示矩形动了、切面不动。
         this.targets.applySections?.(next)
+        // T-244 · 这一行刚把文档值原样写回对象，爆炸叠加层的账本因此过期了。
+        // 不告诉它的话下一帧算出的增量是 0，零件停在未爆炸的位置——**爆炸塌了，
+        // 而没有任何报错**（D29 逐字要求「被 patch 覆盖后下一帧自动补回」）。
+        this.targets.forgetExplodeFor?.(node.id)
         return ok
       }
       case 'visible': {
