@@ -1,4 +1,4 @@
-import type { Fog, SceneDocument } from '@w3/schema'
+import type { Fog, OutlineEffect, SceneDocument } from '@w3/schema'
 
 /**
  * T-239 · 场景效果（雾 / 描边）的 commit 构造器。
@@ -41,4 +41,25 @@ export function setFogParams(
  */
 export function applySuggestedFogRange(draft: SceneDocument, range: { near: number; far: number }): void {
   draft.meta.fog = { ...draft.meta.fog, type: 'linear', near: range.near, far: range.far }
+}
+
+/* --- 描边（T-241）--------------------------------------------------------- */
+
+/** 开 / 关描边。**不动其余字段**——关掉再打开应当回到原来的参数（与雾同一条纪律）。 */
+export function setOutlineEnabled(draft: SceneDocument, enabled: boolean): void {
+  draft.meta.effects.outline = { ...draft.meta.effects.outline, enabled }
+}
+
+/**
+ * 改一组描边参数。
+ *
+ * `color` 只作用于**编辑器选中态**与回落色：`highlight.preset` 的颜色永远来自预设表
+ * （规划 §4 的字段注释逐字写着 "Never overrides `highlight.preset`"）。面板文案要说清
+ * 这一点，否则用户会以为这里能改规则高亮的颜色，改完发现没变。
+ */
+export function setOutlineParams(
+  draft: SceneDocument,
+  patch: Partial<Pick<OutlineEffect, 'color' | 'widthPx' | 'strength' | 'hiddenEdge'>>,
+): void {
+  draft.meta.effects.outline = { ...draft.meta.effects.outline, ...patch }
 }

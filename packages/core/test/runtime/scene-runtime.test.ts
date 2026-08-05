@@ -80,6 +80,15 @@ function fakeRenderer() {
         calls.dispose++
       },
       domElement: {} as HTMLCanvasElement,
+      // T-241 · core 自带的 composer 工厂会问显卡有没有浮点帧缓冲，真 `WebGLRenderer`
+      // 永远有 `extensions`。与 `shadowMap` 同一条理由放进替身：让生产代码为一个
+      // 只在测试里可能出现的状态写 `if`，那个分支永远测不到。
+      extensions: { has: () => false },
+      getPixelRatio: () => 1,
+      getSize: (target: { set: (w: number, h: number) => unknown }) => target.set(800, 600),
+      setRenderTarget: () => {},
+      getRenderTarget: () => null,
+      clear: () => {},
     } as never,
   }
 }
@@ -1083,8 +1092,10 @@ describe('T-240 · 描边开关决定高亮怎么画', () => {
     runtime.dispose()
   })
 
-  it('没注入 createOutlinePass 时，哪怕 composed 也走自发光', () => {
-    // 真 `OutlinePass` 要 WebGL 上下文。一个没注入它的宿主不该因为文档开了描边就崩。
+  it('**宿主一个工厂都不注入时，描边仍然真的走描边** —— 这是 C3 的落点（T-241）', async () => {
+    // 播放器从不注入任何东西（`session.ts` 是 C3 验收口径明令不许出现 diff 的文件），
+    // 所以默认值必须在 core 里。默认值一旦丢了，症状是「预览里有轮廓、发布出去没有」——
+    // 而两边的测试各自都是绿的。
     const runtime = new SceneRuntime(shadedDoc(true), {
       canvas: canvas(),
       resolver: createMemoryResolver(new Map()),
@@ -1092,16 +1103,26 @@ describe('T-240 · 描边开关决定高亮怎么画', () => {
       createRenderer: () => fakeRenderer().renderer,
       hotspotRenderer: new NullHotspotRenderer(),
       now: () => 0,
-      createComposer: fakeComposer,
     })
     runtime.graph.build(runtime.doc)
     const before = (runtime.graph.objectFor(SHADED) as Mesh & { material: MeshStandardMaterial }).material.emissive.getHexString()
 
     runtime.highlight(SHADED, 'outline_amber')
 
-    expect(runtime.pipelineMode).toBe('composed')
+    expect(runtime.pipelineMode, '默认 composer 工厂也在 core 里').toBe('composed')
     expect(runtime.highlightOf(SHADED)).toBe('outline_amber')
-    expect((runtime.graph.objectFor(SHADED) as Mesh & { material: MeshStandardMaterial }).material.emissive.getHexString()).not.toBe(before)
+    expect(
+      (runtime.graph.objectFor(SHADED) as Mesh & { material: MeshStandardMaterial }).material.emissive.getHexString(),
+      '走了描边就不该碰材质',
+    ).toBe(before)
+    runtime.dispose()
+  })
+
+  it('注入口仍然管用 —— 注入的桩要盖过默认值', () => {
+    // 默认值不能把注入口挤掉：core 自己的单测、headless 导出、bench 页都靠注入桩。
+    const { runtime, passes } = outlineRuntime(true)
+    runtime.highlight(SHADED, 'outline_amber')
+    expect(passes, '用的是注入的那个工厂，不是默认那个').toHaveLength(1)
     runtime.dispose()
   })
 
@@ -1203,6 +1224,131 @@ describe('T-237 · resetScene 与 rebuild 都把 mixer 交回去', () => {
 
     expect(ghost.position.y, '幽灵对象一动都不许再动').toBe(ghostY)
     expect(runtime.clips.mixerCount, '重建前那个 mixer 也不该留着').toBe(0)
+    runtime.dispose()
+  })
+})
+
+/* ========================================================================== */
+/* T-241 · 选中态描边通道接在运行时上                                          */
+/* ========================================================================== */
+
+describe('T-241 · setSelectionOutline', () => {
+  const SHADED = 'nd_shade001'
+
+  const shadedEditDoc = (outline: boolean): SceneDocument => {
+    const base = createGoldenPathDocument()
+    return {
+      ...base,
+      meta: { ...base.meta, effects: { outline: { ...base.meta.effects.outline, enabled: outline } } },
+      nodes: [
+        ...base.nodes,
+        {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
+          id: SHADED,
+          name: '标记球',
+          parent: null,
+          order: 9100,
+          assetRef: null,
+          primitive: { kind: 'sphere', radius: 0.2 },
+          light: null,
+          transform: { p: [0, 1, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+          visible: true,
+          locked: false,
+          overrides: {},
+        },
+      ],
+    }
+  }
+
+  /** 编辑模式的运行时。选中态只在编辑模式下有意义。 */
+  function editRuntime(outline: boolean) {
+    const runtime = new SceneRuntime(shadedEditDoc(outline), {
+      canvas: canvas(),
+      resolver: createMemoryResolver(new Map()),
+      mode: 'edit',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+    })
+    runtime.graph.build(runtime.doc)
+    return runtime
+  }
+
+  /** 选中通道当前画着几个对象。走 highlights 的策略，不另开公开面。 */
+  const selectionCount = (runtime: SceneRuntime) =>
+    (runtime.highlights as unknown as { strategy: { selectionObjects?: readonly unknown[] } }).strategy.selectionObjects
+      ?.length ?? 0
+
+  it('**先证明非空，再证明为空** —— 描边开着时选中集真的进了通道', () => {
+    // 只断「进预览后为 0」是假绿：它对一个从来没画过选中态的实现同样成立
+    // （T-239 ② 已经在雾上踩过这个形状）。
+    const runtime = editRuntime(true)
+    runtime.setSelectionOutline([SHADED])
+    expect(selectionCount(runtime), '前提：它本来是非空的').toBe(1)
+    runtime.dispose()
+  })
+
+  it('进预览（setChromeVisible(false)）时清空', () => {
+    const runtime = editRuntime(true)
+    runtime.setSelectionOutline([SHADED])
+
+    runtime.setChromeVisible(false)
+
+    expect(selectionCount(runtime), '选中态与 grid / gizmo 同类，进预览一起收起来').toBe(0)
+    runtime.dispose()
+  })
+
+  it('退出预览时**按当时的选中集恢复**，不是留空', () => {
+    const runtime = editRuntime(true)
+    runtime.setSelectionOutline([SHADED])
+    runtime.setChromeVisible(false)
+
+    runtime.setChromeVisible(true)
+
+    expect(selectionCount(runtime), '用户没有取消过选择').toBe(1)
+    runtime.dispose()
+  })
+
+  it('预览期间改选中集，不会漏进画面', () => {
+    const runtime = editRuntime(true)
+    runtime.setChromeVisible(false)
+    runtime.setSelectionOutline([SHADED])
+    expect(selectionCount(runtime)).toBe(0)
+    runtime.dispose()
+  })
+
+  it('中途打开描边：当前选中集立刻出现在新通道里', () => {
+    // 换策略之后不重推的话，「面板上打开描边」会让选中的对象没有轮廓，
+    // 直到用户重新点一次 —— 而用户会认为是描边坏了。
+    const runtime = editRuntime(false)
+    runtime.setSelectionOutline([SHADED])
+    expect(runtime.pipelineMode).toBe('direct')
+
+    runtime.setPostFxEnabled(true)
+
+    expect(runtime.pipelineMode).toBe('composed')
+    expect(selectionCount(runtime)).toBe(1)
+    runtime.dispose()
+  })
+
+  it('描边关着时它是无操作，不抛', () => {
+    const runtime = editRuntime(false)
+    expect(() => runtime.setSelectionOutline([SHADED])).not.toThrow()
+    runtime.dispose()
+  })
+
+  it('选中态不碰材质 —— 它与 highlight 是两条路', () => {
+    const runtime = editRuntime(true)
+    const material = (runtime.graph.objectFor(SHADED) as Mesh).material as MeshStandardMaterial
+    const before = material.emissive.getHexString()
+
+    runtime.setSelectionOutline([SHADED])
+
+    expect(material.emissive.getHexString()).toBe(before)
+    expect(runtime.highlightOf(SHADED), '选中不是高亮').toBeNull()
     runtime.dispose()
   })
 })

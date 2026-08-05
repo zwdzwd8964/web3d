@@ -194,6 +194,10 @@ export function Viewport() {
     // ECA_SPEC §7 · the gizmo belongs to edit mode. Leaving it attached during preview
     // would put a translate handle on top of whatever the viewer is looking at.
     gizmoRef.current?.attach(previewActive ? [] : selection)
+    // T-241 · 选中态描边走同一条选择集。**这里不判 previewActive**：进/出预览的清空与
+    // 恢复归 core 的 `setChromeVisible`（下一个 effect），在这里再判一次会让两处各记
+    // 一半状态——预览中改选择、再退出预览时，谁也说不清该显示哪一批。
+    runtimeRef.current?.setSelectionOutline(selection)
   }, [selection, ready, previewActive])
 
   useEffect(() => {

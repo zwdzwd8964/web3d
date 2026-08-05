@@ -2,14 +2,16 @@ import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { neverEnds } from '../eca/types.js'
 import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
-import type { Mesh, Texture, WebGLRenderer } from 'three'
+import type { Camera, Mesh, Texture, WebGLRenderer } from 'three'
 import { createWebGLRenderer } from './renderer-like.js'
 import { ChromeRegistry } from './chrome-registry.js'
 import { EmissiveStrategy, HIGHLIGHT_PRESETS } from './highlight.js'
 import { OutlineLayer } from './outline-layer.js'
-import type { OutlineLayerOptions } from './outline-layer.js'
+import type { OutlineLayerOptions, OutlinePassLike } from './outline-layer.js'
 import { disableFogOn } from './environment.js'
-import { RenderPipeline } from './render-pipeline.js'
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
+import { Vector2 } from 'three'
+import { RenderPipeline, createDefaultComposer } from './render-pipeline.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
@@ -90,10 +92,10 @@ export interface SceneRuntimeOptions {
    */
   readonly createComposer?: RenderPipelineOptions['createComposer']
   /**
-   * T-240 · 造一条 `OutlinePass`。**不注入 = 永远走自发光高亮。**
+   * T-240 · 造一条 `OutlinePass`。**不注入时用 core 自己的默认实现**（T-241 改）。
    *
-   * 与 `createComposer` 同一个理由：真 pass 要 WebGL 上下文，Node 里 new 一下就抛。
-   * 而把它做成注入口的另一半价值是「删掉 addPass」这条变异在单测里观测得到。
+   * 注入口本身留着，理由与 `createComposer` 相同：真 pass 要 WebGL 上下文，Node 里
+   * new 一下就抛；而「删掉 addPass」这条变异也只有在能注入桩的时候才观测得到。
    */
   readonly createOutlinePass?: OutlineLayerOptions['createPass']
 }
@@ -130,6 +132,12 @@ export class SceneRuntime implements RuntimeContext {
   readonly lightHelpers: LightHelperLayer | null
   /** T-235 · 编辑期辅助物的登记处。 */
   private readonly chrome = new ChromeRegistry()
+  /** T-241 · 编辑期辅助物此刻可见吗。选中态描边跟着它走。 */
+  private chromeVisible = true
+  /** T-241 · 当前选中集。策略换成描边、或 chrome 重新可见时按它重推。 */
+  private selectionOutline: readonly string[] = []
+  /** T-241 · 当前那条描边策略，没有就是 null（描边关着 / 没注入 pass 工厂）。 */
+  private outline: OutlineLayer | null = null
   private readonly pipeline: RenderPipeline
   /**
    * 出图进行中。
@@ -254,7 +262,17 @@ export class SceneRuntime implements RuntimeContext {
     this.scene.add(this.graph.root)
     // ECA_SPEC §7 · helpers belong to editing, exactly like the grid. A published scene
     // must contain no trace of them (and the picker must not offer them to a viewer).
+    // T-241 · **两个工厂在 core 里就有默认值，不在宿主里注入。**
+    //
+    // 换个走法都不行：只在编辑器注入，播放器就永远画不出描边——一份开着描边的文档
+    // 在预览里有轮廓、发布出去没有，正是 C3 说的那种分叉；而在播放器里注入要动
+    // `session.ts`，那是 C3 验收口径明令不许出现 diff 的文件。放在 core 里，两个视图
+    // 拿到的是同一台引擎，**这本来就是 C3 想要的形状**。
+    //
+    // 不担心它把默认路径推进后处理：`outline.enabled` 默认 false，而 RenderPipeline 在
+    // 它为 false 时**一次都不调工厂**（T-235 的第一条验收断的就是调用次数）。
     this.pipeline = new RenderPipeline({
+      createComposer: this.options.createComposer ?? createDefaultComposer,
       ...(options.createComposer === undefined ? {} : { createComposer: options.createComposer }),
       log: (level, message, data) => this.log(level, message, data),
     })
@@ -338,6 +356,28 @@ export class SceneRuntime implements RuntimeContext {
   setChromeVisible(visible: boolean): void {
     if (this.options.mode !== 'edit') return
     this.chrome.setVisible(visible)
+    this.chromeVisible = visible
+    // T-241 ② · 选中态与 grid / gizmo 同类，进预览一起收起来
+    this.pushSelectionOutline()
+  }
+
+  /**
+   * T-241 · 编辑器把当前选中集推进描边通道。
+   *
+   * 三件事都记在这里，因为它们都能让这条通道**看起来接上了、实际是空的**：
+   *  ① 描边关着时它什么都不做（策略是自发光，没有 pass 可挂）——这不是失败，
+   *    是「开关是总开关」的直接后果；
+   *  ② `setChromeVisible(false)`（进预览）时清空，与 grid / gizmo 同一条规矩；
+   *  ③ 开关描边、或者 chrome 重新可见时要**重推一次**，否则选中态在切换那一瞬间消失，
+   *    而用户并没有取消选择。
+   */
+  setSelectionOutline(nodeIds: readonly string[]): void {
+    this.selectionOutline = [...nodeIds]
+    this.pushSelectionOutline()
+  }
+
+  private pushSelectionOutline(): void {
+    this.outline?.setSelection(this.chromeVisible ? this.selectionOutline : [])
   }
 
   /** 当前渲染路径。`'composed'` 当且仅当后处理链真的建起来了。 */
@@ -513,28 +553,38 @@ export class SceneRuntime implements RuntimeContext {
    * 没有注入 `createOutlinePass` 时永远走自发光——真 `OutlinePass` 要 WebGL 上下文，
    * 而单测与 headless 都没有。
    */
+  /** 造一条真 `OutlinePass`。宿主没注入时用它——理由同 `createComposer` 的默认值。 */
+  private createOutlinePass(scene: Scene, camera: Camera): OutlinePassLike {
+    const make = this.options.createOutlinePass
+    if (make) return make(scene, camera)
+    return new OutlinePass(new Vector2(this.width, this.height), scene, camera)
+  }
+
   private syncHighlightStrategy(): void {
-    const wantsOutline = this.pipeline.mode === 'composed' && this.options.createOutlinePass !== undefined
+    const wantsOutline = this.pipeline.mode === 'composed'
     if (wantsOutline === (this.highlights.strategyKind === 'outline')) return
 
     if (!wantsOutline) {
+      this.outline = null
       this.highlights.setStrategy(new EmissiveStrategy(this.graph, this.materials))
       return
     }
     const composer = this.pipeline.composerHandle
     if (composer === null) return
-    this.highlights.setStrategy(
-      new OutlineLayer({
+    this.outline = new OutlineLayer({
         composer,
         scene: this.scene,
         camera: this.camera.camera,
         graph: this.graph,
         fallback: new EmissiveStrategy(this.graph, this.materials),
-        createPass: this.options.createOutlinePass!,
-        settings: () => this.document.meta.effects.outline,
-        log: (level, message, data) => this.log(level, message, data),
-      }),
-    )
+        createPass: (scene, camera) => this.createOutlinePass(scene, camera),
+      settings: () => this.document.meta.effects.outline,
+      log: (level, message, data) => this.log(level, message, data),
+    })
+    this.highlights.setStrategy(this.outline)
+    // T-241 ③ · 换策略之后把选中态重推一遍。少了这一句，「面板上打开描边」会让当前
+    // 选中的对象在那一帧失去轮廓，直到用户重新点一次。
+    this.pushSelectionOutline()
   }
 
   private applyBackground(doc: SceneDocument): void {
@@ -1351,11 +1401,6 @@ export class SceneRuntime implements RuntimeContext {
    *
    * Every entry names the card that owns it. No owner, no seam (D36's rule, applied early).
    */
-
-  /** T-241 · the editor's selection channel into the outline pass. */
-  setSelectionOutline(_nodeIds: readonly string[]): void {
-    throw new Error(SEAM_NOT_WIRED('setSelectionOutline', 'T-241'))
-  }
 
   /** T-244 · drives one explode group to `factor`, optionally over `durationS`. */
   setExplode(_groupNodeId: string, _factor: number, _options?: { durationS?: number; signal?: AbortSignal }): Promise<void> {

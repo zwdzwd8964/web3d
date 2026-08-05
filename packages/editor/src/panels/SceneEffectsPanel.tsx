@@ -1,16 +1,23 @@
-import { FOG_TYPES } from '@w3/schema'
-import type { Fog, SceneDocument } from '@w3/schema'
+import { FOG_TYPES, HIDDEN_EDGE_MODES } from '@w3/schema'
+import type { Fog, HiddenEdgeMode, SceneDocument } from '@w3/schema'
 import { suggestFogRange } from '@w3/core'
-import { applySuggestedFogRange, setFogEnabled, setFogParams, setFogType } from '../lib/effects-edit.js'
+import {
+  applySuggestedFogRange,
+  setFogEnabled,
+  setFogParams,
+  setFogType,
+  setOutlineEnabled,
+  setOutlineParams,
+} from '../lib/effects-edit.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { NumberField } from '../widgets/NumberField.js'
 
 /**
- * T-239 · 场景效果面板 · 雾段。
+ * T-239 / T-241 · 场景效果面板 · 雾段与描边段。
  *
- * 描边段由 T-241 补进同一个面板（X-44 定的：雾与描边共一个面板，而**不是**共一个
- * `meta.effects` 块——D30 把 `meta.fog` 独立出来，因为雾不是后处理，它的消费者、代价
- * 与出图裁决三项都与描边不同）。
+ * 两段在同一个面板里（X-44 定的），但**不在同一个 `meta` 块里**——D30 把 `meta.fog`
+ * 独立于 `meta.effects`，因为雾不是后处理，它的消费者、代价与出图裁决三项都与描边不同。
+ * 面板把它们放一起是给人看的分组，写文档时仍然是两条路径。
  *
  * 拖滑块走 `preview`（不落撤销），松手 `previewCommit` 落一条。这不是体验优化：
  * 每一帧一条撤销会让「撤销上一步」变成撤销一像素。形状与 `LightPanel` 逐字同形——
@@ -22,8 +29,16 @@ const TYPE_LABELS: Record<Fog['type'], string> = {
   exp2: '指数（更像真实大气）',
 }
 
+/** T-241 · 被遮挡的那一段轮廓怎么画。 */
+const HIDDEN_EDGE_LABELS: Record<HiddenEdgeMode, string> = {
+  hide: '不画（只画看得见的那一段）',
+  dim: '画一条暗的',
+  show: '与可见部分同色',
+}
+
 export function SceneEffectsPanel() {
   const fog = useDocumentSelector((s) => s.doc.meta.fog)
+  const outline = useDocumentSelector((s) => s.doc.meta.effects.outline)
   const nodes = useDocumentSelector((s) => s.doc.nodes)
   const { commit, preview, previewStart, previewCommit } = useDocumentActions()
 
@@ -132,6 +147,78 @@ export function SceneEffectsPanel() {
           <button type="button" className="tbtn" data-testid="fog-suggest" onClick={suggest} disabled={nodes.length === 0}>
             按场景大小估算
           </button>
+        </>
+      )}
+
+      <div className="subpanel__head">描边</div>
+
+      <label className="row">
+        <span>描边</span>
+        <input
+          type="checkbox"
+          data-testid="outline-enabled"
+          checked={outline.enabled}
+          onChange={(e) =>
+            commit(e.target.checked ? '开启描边' : '关闭描边', (d) => setOutlineEnabled(d, e.target.checked))
+          }
+        />
+      </label>
+
+      {outline.enabled && (
+        <>
+          <label className="row">
+            <span>选中色</span>
+            <input
+              type="color"
+              data-testid="outline-color"
+              value={outline.color}
+              onChange={(e) => commit('调整描边色', (d) => setOutlineParams(d, { color: e.target.value }))}
+            />
+          </label>
+          {/* 这一句省不掉：面板上唯一的颜色控件却管不到规则高亮，不说清楚，
+              用户会改完发现「没变」并认为描边坏了 */}
+          <div className="hint">此颜色用于编辑器选中态；规则里的高亮用各自预设的颜色</div>
+
+          <NumberField
+            label="宽度（近似像素）"
+            value={outline.widthPx}
+            min={1}
+            max={8}
+            step={0.5}
+            onPreviewStart={previewStart}
+            onPreview={(v) => preview((d: SceneDocument) => setOutlineParams(d, { widthPx: v }))}
+            onCommit={(v) => commit('调整描边宽度', (d: SceneDocument) => setOutlineParams(d, { widthPx: v }))}
+            onPreviewEnd={() => previewCommit('调整描边宽度')}
+          />
+          <NumberField
+            label="强度"
+            value={outline.strength}
+            min={0}
+            max={5}
+            step={0.1}
+            onPreviewStart={previewStart}
+            onPreview={(v) => preview((d: SceneDocument) => setOutlineParams(d, { strength: v }))}
+            onCommit={(v) => commit('调整描边强度', (d: SceneDocument) => setOutlineParams(d, { strength: v }))}
+            onPreviewEnd={() => previewCommit('调整描边强度')}
+          />
+
+          <label className="row">
+            <span>被遮挡部分</span>
+            <select
+              className="field"
+              data-testid="outline-hidden-edge"
+              value={outline.hiddenEdge}
+              onChange={(e) => commit('调整遮挡轮廓', (d) => setOutlineParams(d, { hiddenEdge: e.target.value as HiddenEdgeMode }))}
+            >
+              {HIDDEN_EDGE_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {HIDDEN_EDGE_LABELS[mode]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="hint hint--warn">开启描边会用后处理管线，透明背景导出与 4× 导出不含描边</div>
         </>
       )}
     </div>

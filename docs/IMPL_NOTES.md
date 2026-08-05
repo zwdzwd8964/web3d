@@ -74,6 +74,7 @@ Node v24.18.0 · pnpm 11.12.0 · git 2.48.1 · Windows 11
 | U-19 | CI 工作流在 GitHub 上真跑一次 | ✅ **已真实执行** | 2026-07-31 推 main。前两轮红，第三轮两个 job 全绿（run 30660510375：verify 44s · E2E 2m1s） | — |
 | U-20 | `pnpm -r lint` 在干净仓库上能跑 | ❌ **今天是红的**（T-207 勘察发现） | `tools/lint` 的 `lint` 脚本 cwd 在 `tools/lint`，ESLint 9 在 `--config` 显式给出时把 ConfigArray 的 basePath 锁成 cwd，于是 `../../packages` 下每个文件都被判成 base path 之外 → 全被 ignore → exit 2。根 `pnpm lint` 是绿的，`pnpm verify` 走的也是根脚本，**所以两个版本都没人发现** | T-208 |
 | U-21 | **v1.0 · 描边的像素结果在 parity 里永远不可观测**（T-240 · 登记项属 T-296） | **不可验证，且不打算让它可验证** | parity 比的是**编辑器预览与播放器两侧的状态轨迹**，两侧都是无 GL 的 `SceneRuntime`。描边是一条后处理通道，它改的只有像素：轨迹里能比的只有「哪个节点挂在哪条 pass 的 `selectedObjects` 上」，而**两侧同时把描边画错（甚至同时不画）在双向比较下恒绿**——ADR-0019 那条教训逐字重演。单测覆盖到「pass 进了 `composer.passes`、参数对、上限与回落对」为止，再往后是像素，只有 E2E 的 `colourBuckets` 能证明画面确实变了 | E2E：T-252 的 `section-outline.spec.ts` 与 T-294 的 `postfx.spec.ts`（G1.0-14 要的正是「颜色桶前后不同」）|
+| U-22 | **v1.0 · 「视口里点选一个节点」这个手势今天没有测试压着**（T-241） | **未验证** | 选中态描边的 core 侧有 8 条单测（含「先证明非空、再证明为空」两头断言），面板侧有 10 条 jsdom 测试；**中间那一根线——`Viewport.tsx` 选择 effect 里的 `setSelectionOutline(selection)`——只有 `check:constitution` 的孤儿检查压着**（删掉它，dead-exports 转红，但一条行为断言都不红）。渲染 `Viewport` 需要真 canvas 与 GL，jsdom 做不到（[ADR-0038](adr/0038-编辑器-ui-事件入口的测试范式.md) 明确把像素与真实 GL 划给 E2E） | E2E：T-294 的 `postfx.spec.ts`（卡面逐字要求「`outline.enabled` 打开后点选一个节点 → colourBuckets 增加，退出到预览 → 回落」）|
 
 **Runtime 的可测边界**：three 的场景图、材质、Raycaster、相机数学、AnimationMixer 都不
 需要 GL 上下文，所以 T-033~T-040 是**真跑过的**，不是"看起来对"。只有 `WebGLRenderer`

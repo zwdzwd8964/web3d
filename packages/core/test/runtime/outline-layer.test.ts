@@ -81,7 +81,7 @@ function setup(objects: Record<string, Object3D>) {
   const fallback = fakeFallback()
   const created: FakePass[] = []
   const warns: string[] = []
-  const settings = { widthPx: 3, strength: 2.5, hiddenEdge: 'dim' as 'hide' | 'dim' | 'show' }
+  const settings = { widthPx: 3, strength: 2.5, hiddenEdge: 'dim' as 'hide' | 'dim' | 'show', color: '#33ccff' }
 
   const layer = new OutlineLayer({
     composer,
@@ -367,5 +367,104 @@ describe('T-240 · 什么算画得上', () => {
     const { layer, created } = setup({})
     expect(apply(layer, 'nd_missing', 'outline_amber')).toBe(false)
     expect(created).toHaveLength(0)
+  })
+})
+
+/* --- 选中通道（T-241）------------------------------------------------------ */
+
+describe('T-241 · 编辑器选中态是一条独立通道', () => {
+  it('setSelection 建一条自己的 pass 并挂进链路', () => {
+    const a = meshNode()
+    const { layer, composer, created, settings } = setup({ nd_a: a })
+
+    layer.setSelection(['nd_a'])
+
+    expect(created).toHaveLength(1)
+    expect(composer.passes).toEqual([created[0]])
+    expect(layer.selectionObjects).toEqual([a])
+    // 颜色取 meta.effects.outline.color，**不是**任何一个预设的颜色
+    expect(created[0]!.visibleEdgeColor.value).toBe(settings.color)
+    expect(created[0]!.pulsePeriod, '与预设通道同一条纪律').toBe(0)
+  })
+
+  it('**不占那两个预设名额** —— 选中着也能有两种预设', () => {
+    // 占了的话，「我此刻选中了什么」会决定「我的规则高亮画成什么样」，
+    // 而播放器根本没有选中态，用户无从复现。
+    const { layer, fallback, created } = setup({ nd_a: meshNode(), nd_b: meshNode(), nd_c: meshNode() })
+
+    layer.setSelection(['nd_a'])
+    apply(layer, 'nd_b', 'outline_amber')
+    apply(layer, 'nd_c', 'outline_red')
+
+    expect(fallback.applied, '两种预设都不该被挤到自发光').toEqual([])
+    expect(layer.activePasses.size).toBe(MAX_ACTIVE_OUTLINE_PRESETS)
+    expect(created).toHaveLength(3)
+  })
+
+  it('反过来：两种预设占满了也不影响选中通道', () => {
+    const { layer, created } = setup({ nd_a: meshNode(), nd_b: meshNode(), nd_c: meshNode() })
+    apply(layer, 'nd_b', 'outline_amber')
+    apply(layer, 'nd_c', 'outline_red')
+
+    layer.setSelection(['nd_a'])
+
+    expect(layer.selectionObjects).toHaveLength(1)
+    expect(created).toHaveLength(3)
+  })
+
+  it('空数组把那条 pass 拆掉并 dispose', () => {
+    const { layer, composer, created } = setup({ nd_a: meshNode() })
+    layer.setSelection(['nd_a'])
+
+    layer.setSelection([])
+
+    expect(layer.selectionObjects).toEqual([])
+    expect(composer.passes).toEqual([])
+    expect(created[0]!.disposed).toBe(1)
+  })
+
+  it('换一批选中复用同一条 pass，不重建', () => {
+    const b = meshNode()
+    const { layer, created } = setup({ nd_a: meshNode(), nd_b: b })
+    layer.setSelection(['nd_a'])
+    layer.setSelection(['nd_b'])
+
+    expect(created, '一条就够了').toHaveLength(1)
+    expect(layer.selectionObjects).toEqual([b])
+  })
+
+  it('画不出来的节点被滤掉 —— 空 Group 与图里没有的 id', () => {
+    const a = meshNode()
+    const { layer, created } = setup({ nd_a: a, nd_group: new Group() })
+
+    layer.setSelection(['nd_a', 'nd_group', 'nd_missing'])
+    expect(layer.selectionObjects).toEqual([a])
+
+    layer.setSelection(['nd_group', 'nd_missing'])
+    expect(layer.selectionObjects, '一个都画不出来就该把 pass 拆掉').toEqual([])
+    expect(created[0]!.disposed).toBe(1)
+  })
+
+  it('clearAll 连选中通道一起收掉', () => {
+    // 换策略（开关描边）时 HighlightLayer 会调 clearAll。漏掉选中通道的话，
+    // 那条 pass 会连同它的两张离屏目标一起留在已经拆掉的 composer 上。
+    const { layer, composer } = setup({ nd_a: meshNode(), nd_b: meshNode() })
+    apply(layer, 'nd_b', 'outline_amber')
+    layer.setSelection(['nd_a'])
+
+    layer.clearAll()
+
+    expect(layer.selectionObjects).toEqual([])
+    expect(composer.passes).toEqual([])
+  })
+
+  it('参数跟着文档走 —— 宽度 / 强度 / 遮挡边三档', () => {
+    const s = setup({ nd_a: meshNode() })
+    s.settings.hiddenEdge = 'show'
+    s.layer.setSelection(['nd_a'])
+
+    expect(s.created[0]!.edgeThickness).toBe(s.settings.widthPx)
+    expect(s.created[0]!.edgeStrength).toBe(s.settings.strength)
+    expect(s.created[0]!.hiddenEdgeColor.value).toBe(s.settings.color)
   })
 })

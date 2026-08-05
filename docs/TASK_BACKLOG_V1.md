@@ -1807,8 +1807,8 @@
 - ⚠ **描边的像素结果在 parity 里永远不可观测**（parity 全程无 canvas，renderer 恒 null）。
   这是接受的残余风险，不是已解决，必须如实登记进 IMPL_NOTES 的已知盲区（T-296）。
 
-### [ ] T-241 · 场景效果面板（描边段）+ 编辑器选中态描边通道
-- **依赖** T-240 · T-239 · **预估** 1.5d · **实际** —
+### [x] T-241 · 场景效果面板（描边段）+ 编辑器选中态描边通道
+- **依赖** T-240 · T-239 · **预估** 1.5d · **实际** 2.6d
 - **独占** `packages/editor/src/panels/SceneEffectsPanel.tsx`（描边段）·
   `packages/editor/src/viewport/Viewport.tsx` · `packages/editor/test/panels/SceneEffectsPanel.test.tsx`
 - **做** 描边段（开关 / 颜色 / 宽度写「近似像素」/ 强度 / 被遮挡轮廓三档），滑块 `preview`、

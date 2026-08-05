@@ -60,8 +60,8 @@ export interface OutlineLayerOptions {
   readonly fallback: HighlightStrategy
   /** 造一条 pass。**注入而不是自己 new**——否则「删掉 addPass」这条变异在 Node 里观测不到。 */
   readonly createPass: (scene: Scene, camera: Camera) => OutlinePassLike
-  /** 文档里的描边参数（宽度 / 强度 / 遮挡边）。 */
-  readonly settings: () => { widthPx: number; strength: number; hiddenEdge: 'hide' | 'dim' | 'show' }
+  /** 文档里的描边参数（宽度 / 强度 / 遮挡边 / 选中态颜色）。 */
+  readonly settings: () => { widthPx: number; strength: number; hiddenEdge: 'hide' | 'dim' | 'show'; color: string }
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -73,6 +73,22 @@ export class OutlineLayer implements HighlightStrategy {
   private readonly placement = new Map<string, string | null>()
   /** 已经为哪些预设报过「超限」。**每个预设一条，不是每次 apply 一条。** */
   private readonly warned = new Set<string>()
+
+  /**
+   * T-241 · 编辑器选中态那条通道，**与预设通道分开的一条独立 pass**。
+   *
+   * ## 为什么它不占那两个预设名额
+   *
+   * 占了的话，「我此刻选中了什么」会决定「我的规则高亮画成什么样」：选中一个对象，
+   * 第一种规则预设就掉进自发光回落——一个用户既解释不了、也无法在播放器里复现的耦合
+   * （播放器根本没有选中态）。选中态是编辑期辅助物，与 grid / gizmo 同类，走
+   * `ChromeRegistry` 的可见性规矩（进预览即清空），不该跟内容抢名额。
+   *
+   * 代价：编辑器里最多同时三条 pass 而不是两条。这个代价只在编辑期付，且
+   * **进预览时那一条一定不在**——所以出图与 parity 看到的仍然是至多两条。
+   */
+  private selectionPass: OutlinePassLike | null = null
+  private selectionIds: readonly string[] = []
 
   constructor(private readonly options: OutlineLayerOptions) {}
 
@@ -132,6 +148,47 @@ export class OutlineLayer implements HighlightStrategy {
 
   clearAll(): void {
     for (const nodeId of [...this.placement.keys()]) this.clear(nodeId)
+    this.setSelection([])
+  }
+
+  /**
+   * T-241 · 换一批编辑器选中态。空数组 = 拆掉这条 pass。
+   *
+   * 颜色取 `meta.effects.outline.color`（**只有选中态用它**——`highlight.preset` 的颜色
+   * 永远来自预设表，规划 §4 的字段注释逐字写着 "Never overrides `highlight.preset`"）。
+   */
+  setSelection(nodeIds: readonly string[]): void {
+    this.selectionIds = [...nodeIds]
+    const objects = this.selectionIds
+      .map((id) => this.options.graph.objectFor(id))
+      .filter((object): object is Object3D => object !== undefined && hasMesh(object))
+
+    if (objects.length === 0) {
+      if (this.selectionPass) {
+        this.options.composer.removePass(this.selectionPass)
+        this.selectionPass.dispose()
+        this.selectionPass = null
+      }
+      return
+    }
+
+    if (!this.selectionPass) {
+      const pass = this.options.createPass(this.options.scene, this.options.camera)
+      pass.pulsePeriod = 0
+      this.options.composer.addPass(pass)
+      this.selectionPass = pass
+    }
+    const settings = this.options.settings()
+    this.selectionPass.edgeThickness = settings.widthPx
+    this.selectionPass.edgeStrength = settings.strength
+    this.selectionPass.visibleEdgeColor.set(settings.color)
+    this.selectionPass.hiddenEdgeColor.set(settings.hiddenEdge === 'show' ? settings.color : '#000000')
+    this.selectionPass.selectedObjects = objects
+  }
+
+  /** 选中通道当前画着的那些对象。验收断的就是它（进预览后长度为 0）。 */
+  get selectionObjects(): readonly Object3D[] {
+    return this.selectionPass?.selectedObjects ?? []
   }
 
   /** 当前活跃的 pass，按预设名。测试的观测点。 */
