@@ -68,6 +68,41 @@ describe('references, from the document index', () => {
     expect(deleteWarning(withMedia(), MEDIA.id), '没人引用就不该问').toBeNull()
   })
 
+  /**
+   * T-227 · **被引用数与摘要必须来自同一次统计。**
+   *
+   * 原来 `refCount` 数全部引用，而 `refSummary` 只认 hotspot 与 rule 两种 from.kind。
+   * v3 给覆盖层加上「引用媒体」这条出边之后，一份只被覆盖层用到的媒体会显示
+   * 「被 1 处引用」而摘要是空串——删除确认框问了一句它自己答不上来的话。
+   *
+   * 这条测试的样本文档必须**含 pages**：本文件其余用例都不含，所以那个缺陷在它们
+   * 眼皮底下全程是绿的。
+   */
+  it('只被覆盖层引用的媒体，摘要说得出是谁 —— 不是空串', () => {
+    const doc = produce(withMedia(), (draft) => {
+      draft.pages = [
+        {
+          id: 'pg_00000001',
+          name: '第一页',
+          overlays: [
+            {
+              id: 'ov_00000001',
+              type: 'panel',
+              rect: { x: 0, y: 0, w: 0.3, h: 0.2 },
+              anchor: 'tl',
+              props: { title: '说明', text: '', mediaId: MEDIA.id, flowId: null, progress: false },
+            },
+          ],
+        },
+      ]
+    })
+
+    const [row] = mediaRows(doc)
+    expect(row!.refCount, '覆盖层的引用没进索引').toBe(1)
+    expect(row!.refSummary, '数得出却说不出是谁').toBe('1 个覆盖层')
+    expect(deleteWarning(doc, MEDIA.id)!).toContain('1 个覆盖层')
+  })
+
   it('names what points at it, so the confirmation is worth reading', () => {
     const doc = referenced()
     const [row] = mediaRows(doc)

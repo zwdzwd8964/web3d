@@ -1,4 +1,5 @@
 import type { Animation } from './animation.js'
+import { getFlowChain } from './selectors.js'
 import type { Asset } from './asset.js'
 import type { SceneDocument } from './document.js'
 import type { Hotspot } from './hotspot.js'
@@ -100,10 +101,12 @@ function conditionRefs(cond: Condition): RefTarget[] {
     case 'isPanelOpen':
       return [{ kind: 'hotspot', id: cond.hotspotId }]
     case 'isPageVisible':
-      // v3 · 页面今天不是引用目标（`ID_COLLECTIONS.pages.refKind === null`），所以这里没有
-      // 可登记的引用。**显式列出来而不是让它掉进 default**：default 那一支要读 `left`/`right`，
-      // 而本条件没有这两个字段。把 pages 变成引用目标是 T-227 的活。
-      return []
+      // T-227 · 页面成为引用目标。
+      //
+      // `ID_COLLECTIONS.pages.refKind` 仍是 `null`，**故意不翻**：那个字段同时被
+      // `checkIntegrity` 的 sets 派生读（T-226 的独占文件），翻它要两张卡一起改。
+      // `RefTarget.kind` 本来就是自由字符串，反向索引不需要注册表点头。
+      return [{ kind: 'page', id: cond.pageId }]
     case 'in':
       return valueExprRefs(cond.left)
     default:
@@ -125,6 +128,24 @@ export function eventDescriptorRefs(rule: Rule): RefTarget[] {
       return [{ kind: 'animation', id: w.animationId }]
     case 'variableChange':
       return [{ kind: 'variable', id: w.variableId }]
+    // T-227 · v3 的三个新事件。
+    case 'pageEnter':
+      return [{ kind: 'page', id: w.pageId }]
+    case 'flowStepEnter':
+      // **两条，不是一条。** 卡面验收把 step 的引用说成「startStepId / next 两类」，
+      // 而这一支让它变成三类：删掉一个步骤，指着它的 flowStepEnter 规则也会失效，
+      // 删除确认必须说得出这件事。
+      return [
+        { kind: 'flow', id: w.flowId },
+        { kind: 'step', id: w.stepId },
+      ]
+    case 'overlayClick':
+      return [{ kind: 'overlay', id: w.overlayId }]
+    // 这两支确实没有引用。**显式列出来而不是让它们掉进 default**：default 留给
+    // 「有人加了第 12 种事件却忘了改这里」，那时它应该是不可达的。
+    case 'sceneReady':
+    case 'timer':
+      return []
     default:
       return []
   }
@@ -240,9 +261,57 @@ export function buildIndex(doc: SceneDocument, options: BuildIndexOptions = {}):
     })
   })
 
+  // T-227 · 覆盖层的两条出边。
+  //
+  // **只有 media 与 flow 两类。** 卡面写的是「mediaId / bind / flowId 三条」，而
+  // `props.bind` 在 v3 冻结的 schema 里根本不存在（四支 props 都是 `.strict()`）。
+  // 加一个字段进去是把 v1 唯一一次 bump 变成两次（铁律 8），所以照 schema 做两条。
+  doc.pages.forEach((page, i) => {
+    page.overlays.forEach((overlay, j) => {
+      const from: RefTarget = { kind: 'overlay', id: overlay.id }
+      const at = `pages[${i}].overlays[${j}].props`
+      // 判别联合，用 `in` 收窄而不是 `as`
+      if ('mediaId' in overlay.props && overlay.props.mediaId != null) {
+        pushRef(refsTo, overlay.props.mediaId, { from, path: `${at}.mediaId`, targetKind: 'media' })
+      }
+      if ('flowId' in overlay.props && overlay.props.flowId != null) {
+        pushRef(refsTo, overlay.props.flowId, { from, path: `${at}.flowId`, targetKind: 'flow' })
+      }
+    })
+  })
+
+  // T-227 · 数据源的映射出边。字段名是 `map` 不是 `mapping`（卡面写错了，以 schema 为准）。
+  doc.dataSources.forEach((source, i) => {
+    const from: RefTarget = { kind: 'dataSource', id: source.id }
+    source.map.forEach((mapping, j) => {
+      pushRef(refsTo, mapping.variableId, {
+        from,
+        path: `dataSources[${i}].map[${j}].variableId`,
+        targetKind: 'variable',
+      })
+    })
+  })
+
   doc.flows.forEach((flow, i) => {
     const from: RefTarget = { kind: 'flow', id: flow.id }
     pushRef(refsTo, flow.variableId, { from, path: `flows[${i}].variableId`, targetKind: 'variable' })
+
+    // T-227 · 步骤的两条出边。
+    //
+    // `getFlowChain` 在这里**不是顺手用一下**：链的定义只写一次，是 `getStepPrev`
+    // 与 v1.2 的「上一步」按钮能和索引给出同一个答案的唯一保证。
+    if (flow.startStepId !== null) {
+      pushRef(refsTo, flow.startStepId, { from, path: `flows[${i}].startStepId`, targetKind: 'step' })
+    }
+    const stepIndex = new Map(flow.steps.map((step, j) => [step.id, j]))
+    for (const step of getFlowChain(flow)) {
+      if (step.next === null) continue
+      pushRef(refsTo, step.next, {
+        from,
+        path: `flows[${i}].steps[${stepIndex.get(step.id)}].next`,
+        targetKind: 'step',
+      })
+    }
     if (options.actionRefs) {
       flow.steps.forEach((step, j) => {
         step.onEnter.forEach((action, k) => {
@@ -290,6 +359,11 @@ export function describeReferences(index: DocIndex, id: string): string {
     material: '个材质',
     media: '个多媒体',
     flow: '个流程',
+    // T-227 · 两个新的引用方。**没有 `page`**：覆盖层的出边记在 overlay 名下
+    // （验收要的是「1 个覆盖层」），所以 v1.0 没有任何 ref 的 `from.kind` 会是 page，
+    // 加一条 page 标签就是加一条死表项。
+    overlay: '个覆盖层',
+    dataSource: '个数据源',
     document: '处场景设置',
   }
   const counts = new Map<string, Set<string>>()

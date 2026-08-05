@@ -1478,8 +1478,8 @@
   `pnpm check:deps-direction` **必须红**（验后挪回）。**这条不是形式主义**：本文件放错包是本卡
   草案里就犯过一次的错，而 TypeScript 在 monorepo 里对它一声不吭。
 
-### [ ] T-227 · `buildIndex` / `describeReferences` / `eventDescriptorRefs` 全域扩展
-- **依赖** T-225 · **预估** 1.5d · **实际** —
+### [x] T-227 · `buildIndex` / `describeReferences` / `eventDescriptorRefs` 全域扩展
+- **依赖** T-225 · **预估** 1.5d · **实际** 1.4d
 - **独占** `packages/schema/src/index-builder.ts` · `packages/schema/src/selectors.ts`（仅新增
   `getFlowChain`/`getStepPrev`/`getCarrier` 扩四路）· `packages/schema/test/index-builder.test.ts` ·
   `packages/schema/test/event-exhaustive.test.ts`(新)

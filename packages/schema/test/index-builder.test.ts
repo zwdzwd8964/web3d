@@ -4,6 +4,15 @@ import { buildIndex, describeReferences, referencesTo } from '../src/index-build
 import { GOLDEN_PATH_IDS, createGoldenPathDocument } from '../src/samples.js'
 import type { SceneDocument } from '../src/document.js'
 import goldenPathTwo from './fixtures/v2/golden-path-2.json' with { type: 'json' }
+import orchestration from './fixtures/v3/orchestration.json' with { type: 'json' }
+import placeholder from './fixtures/v3/integration-placeholder.json' with { type: 'json' }
+import { migrate } from '../src/migrate.js'
+
+/** 迁移链的产物，失败时把错误打出来而不是给出一个空对象。 */
+const unwrapChain = (r: ReturnType<typeof migrate>): SceneDocument => {
+  if (!r.ok) throw new Error(`v2 fixture 迁移失败：${JSON.stringify(r.error)}`)
+  return r.value.document
+}
 
 /** T-015 · SCHEMA_SPEC §8. */
 
@@ -134,7 +143,17 @@ describe('refsTo — the reverse index behind "what breaks if I delete this?"', 
 /* ========================================================================== */
 
 describe('the v2 index', () => {
-  const v2 = () => structuredClone(goldenPathTwo) as unknown as SceneDocument
+  /**
+   * **先迁移，再当 SceneDocument 用。**
+   *
+   * 原来是把 v2 的原始 JSON 直接 `as unknown as SceneDocument` —— 于是 `dataSources`
+   * / `prefabs` 这些 v3 集合在类型上「有」、在运行时是 `undefined`。T-227 给
+   * `buildIndex` 加了 `doc.dataSources.forEach` 之后这六条当场 TypeError。
+   *
+   * 这与 T-225 在 `integrity.test.ts` 里修的是同一处形状：一份 v2 文档不是 v3 的
+   * `SceneDocument`，让类型断言说它是，只是把发现时间推迟到有人真去读那个字段。
+   */
+  const v2 = () => unwrapChain(migrate(structuredClone(goldenPathTwo)))
 
   it('indexes media by id like every other collection', () => {
     const index = buildIndex(v2())
@@ -189,5 +208,90 @@ describe('the v2 index', () => {
     const index = buildIndex(doc)
     expect(referencesTo(index, textureId).map((r) => r.path)).toContain('materials[0].params.maps.map')
     expect(describeReferences(index, textureId)).toContain('个材质')
+  })
+})
+
+/* ========================================================================== */
+/* T-227 · v3 的索引面                                                         */
+/* ========================================================================== */
+
+describe('the v3 index', () => {
+  const orc = () => structuredClone(orchestration) as unknown as SceneDocument
+  const ph = () => structuredClone(placeholder) as unknown as SceneDocument
+
+  const pathsTo = (doc: SceneDocument, id: string) =>
+    referencesTo(buildIndex(doc), id)
+      .map((r) => r.path)
+      .sort()
+
+  it('前提：夹具里确实有页面、覆盖层、流程与数据源', () => {
+    // 扫描面下限。夹具哪天被改空，下面每一条 toEqual([]) 都会「通过」。
+    const o = orc()
+    expect(o.pages[0]!.overlays).toHaveLength(4)
+    expect(o.flows[0]!.steps).toHaveLength(3)
+    expect(ph().dataSources.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('覆盖层引用的媒体：路径逐字，计数是 1 —— 不是「大于 0」', () => {
+    // `toContain` / `length > 0` 对「pages 那一段被删掉一半」同样为真。
+    expect(pathsTo(orc(), 'med_img00001')).toEqual(['pages[0].overlays[1].props.mediaId'])
+  })
+
+  it('删一个被覆盖层引用的媒体，删除确认说得出「1 个覆盖层」', () => {
+    expect(describeReferences(buildIndex(orc()), 'med_img00001')).toBe('1 个覆盖层')
+  })
+
+  it('覆盖层与规则一起引用同一个流程时，三条路径都在', () => {
+    expect(pathsTo(orc(), 'flw_00000001')).toEqual([
+      'pages[0].overlays[0].props.flowId',
+      'pages[0].overlays[3].props.flowId',
+      'rules[2].when',
+    ])
+  })
+
+  it('步骤的引用有三类：startStepId、next、以及 flowStepEnter 规则', () => {
+    // 卡面验收把它写成「两类」，那是在 flowStepEnter 只登记 flow 的前提下。
+    // 这里登记了 flow + step 两条，所以是三类——理由见 eventDescriptorRefs 的注释。
+    expect(pathsTo(orc(), 'st_00000001')).toEqual(['flows[0].startStepId'])
+    expect(pathsTo(orc(), 'st_00000002')).toEqual(['flows[0].steps[0].next', 'rules[2].when'])
+    expect(pathsTo(orc(), 'st_00000003')).toEqual(['flows[0].steps[1].next'])
+  })
+
+  it('页面被 pageEnter 规则引用', () => {
+    expect(pathsTo(orc(), 'pg_00000001')).toEqual(['rules[1].when'])
+  })
+
+  it('覆盖层被 overlayClick 规则引用', () => {
+    expect(pathsTo(orc(), 'ov_00000003')).toEqual(['rules[3].when'])
+  })
+
+  it('数据源映射引用的变量：路径逐字，摘要说「1 个数据源」', () => {
+    const doc = ph()
+    const index = buildIndex(doc)
+    const mapped = doc.dataSources.flatMap((ds) => ds.map.map((m) => m.variableId))
+    expect(mapped.length, '夹具里没有映射，这条断言没有对象').toBeGreaterThan(0)
+    const first = mapped[0]!
+    expect(referencesTo(index, first).map((r) => r.path)).toEqual([`dataSources[1].map[0].variableId`])
+    expect(describeReferences(index, first)).toBe('1 个数据源')
+  })
+
+  it('成环的流程不会让索引挂住，且只登记链上走得到的那些', () => {
+    const doc = orc()
+    // st_3 指回 st_1：链变成 1 → 2 → 3 → (回到 1，截断)
+    doc.flows[0]!.steps[2]!.next = 'st_00000001'
+    const index = buildIndex(doc)
+    // 三条 next 全都在链上，所以三条都登记；关键是它**返回了**，没有转圈
+    expect(referencesTo(index, 'st_00000001').map((r) => r.path).sort()).toEqual([
+      'flows[0].startStepId',
+      'flows[0].steps[2].next',
+    ])
+  })
+
+  it('链断在中间时，断点之后的 next 不被登记', () => {
+    const doc = orc()
+    doc.flows[0]!.steps[0]!.next = null
+    const index = buildIndex(doc)
+    // 走不到 st_2，所以 st_2 → st_3 那条 next 不该出现在索引里
+    expect(referencesTo(index, 'st_00000003').map((r) => r.path)).toEqual([])
   })
 })

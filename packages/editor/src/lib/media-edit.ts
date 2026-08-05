@@ -1,5 +1,5 @@
 import type { Media, SceneDocument } from '@w3/schema'
-import { buildIndex } from '@w3/schema'
+import { buildIndex, describeReferences } from '@w3/schema'
 import { createActionRefResolver } from '@w3/core'
 
 /**
@@ -58,17 +58,21 @@ export function mediaRows(doc: SceneDocument, options: MediaRowOptions = {}): re
 
   return doc.media.map((media) => {
     const refs = index.refsTo.get(media.id) ?? []
-    const hotspots = refs.filter((r) => r.from.kind === 'hotspot').length
-    const rules = refs.filter((r) => r.from.kind === 'rule').length
-    const parts: string[] = []
-    if (hotspots > 0) parts.push(`${hotspots} 个热点`)
-    if (rules > 0) parts.push(`${rules} 条规则`)
 
+    // T-227 · 摘要走 `describeReferences`，不再手数两种 from.kind。
+    //
+    // 原来只认 hotspot 与 rule 两种，而 `refCount` 数的是全部——于是 v3 加上「覆盖层
+    // 引用媒体」这条出边之后，一份只被覆盖层用到的媒体会显示「被引用」却说不出被谁
+    // 引用。这不是理论风险：本卡就是加那条出边的卡，而编辑器现有测试的样本文档不含
+    // pages，全程绿。
+    //
+    // 顺带修正一处口径：`describeReferences` 数的是**不同的引用方**，而原来数的是引用
+    // 条数——同一条规则两次引用同一段媒体，原来会说「2 条规则」。
     return {
       media,
       bytes: assetById.get(media.assetId)?.stats.bytes ?? 0,
       refCount: refs.length,
-      refSummary: parts.join('、'),
+      refSummary: describeReferences(index, media.id),
     }
   })
 }

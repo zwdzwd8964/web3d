@@ -1,4 +1,5 @@
 import { ID_COLLECTIONS, ID_COLLECTION_NAMES } from './document.js'
+import type { Flow, FlowStep } from './flow.js'
 import type { SceneDocument } from './document.js'
 import type { Node } from './node.js'
 import { ORDER_STEP } from './primitives.js'
@@ -141,7 +142,7 @@ export function getUnreachableNodes(doc: SceneDocument): Node[] {
 /* -------------------------------------------------------------------------- */
 
 /** Which carrier a node holds. `null` = a pure grouping node. */
-export type NodeCarrier = 'assetRef' | 'primitive' | 'light' | null
+export type NodeCarrier = 'assetRef' | 'primitive' | 'light' | 'section' | null
 
 /**
  * The node's carrier, as one value to switch on.
@@ -159,6 +160,14 @@ export function getCarrier(node: Node): NodeCarrier {
   if (node.assetRef !== null) return 'assetRef'
   if (node.primitive !== null) return 'primitive'
   if (node.light !== null) return 'light'
+  // v3 · 第四种承载体。**顺序与 I11 收集承载体的顺序对齐**
+  // （integrity.ts 的 assetRef → primitive → light → section）。
+  //
+  // 注意它与 `typeOf` 的阶梯**故意不同**：那条是 section > explodeGroup > light > node，
+  // 回答的是「这个节点在动作参数里算哪一类」；这条回答的是「它承载的是什么」。一份
+  // I11 已判非法（同时有 assetRef 与 section）的文档上，两者会给出不同答案——这是两个
+  // 问题各自的正确答案，不是分叉。
+  if (node.section !== null) return 'section'
   return null
 }
 
@@ -256,3 +265,41 @@ export function collectAllIds(doc: SceneDocument): Set<string> {
 function isIdBearing(value: unknown): value is { id: string } {
   return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string'
 }
+
+/**
+ * 流程的步骤链：从 `startStepId` 沿 `next` 展平。
+ *
+ * **遇环截断，不抛异常。** 一份成环的流程是 I38 报 error 的事，而这个函数的调用方
+ * （索引构建、v1.2 的「上一步」按钮）要的是「能走到的那些步骤」，不是一个异常。
+ * 没有 `startStepId` 时返回空数组——那是「流程建了但没法开始」，I46 在 v1.2 会说这件事。
+ *
+ * ## 「上一步」为什么不在这里
+ *
+ * 卡面还要一个 `getStepPrev(flow, stepId)`。它在 v1.0 **没有任何消费者**——「上一步」
+ * 按钮是 v1.2 的 T-300——于是它是一个零调用者的导出，`check-dead-exports` 当场报红。
+ * 三条出路里（接上它 / 删掉它 / 进豁免表），豁免表的棘轮此刻正好卡在上限且「只能降
+ * 不能升」，而它本身就是一行：`getFlowChain(flow)` 求下标再取前一个。
+ *
+ * **真正要守的那件事已经守住了**：上一步与链必须是同一个定义，不能另写一套
+ * 「谁的 next 指向我」的判断——只要 T-300 在这个函数之上取下标，那件事就成立。
+ * 把那一行留给它自己的卡，比现在造一个没人调用的导出诚实。
+ *
+ * @param flow 流程记录
+ * @returns 从入口可达的步骤，按走到的顺序；成环时在重复的那一步之前截断
+ */
+export function getFlowChain(flow: Flow): FlowStep[] {
+  if (flow.startStepId === null) return []
+  const stepById = new Map(flow.steps.map((s) => [s.id, s]))
+  const chain: FlowStep[] = []
+  const seen = new Set<string>()
+  let cursor: string | null = flow.startStepId
+  while (cursor !== null && !seen.has(cursor)) {
+    const step = stepById.get(cursor)
+    if (step === undefined) break
+    seen.add(cursor)
+    chain.push(step)
+    cursor = step.next
+  }
+  return chain
+}
+
