@@ -243,6 +243,11 @@ export class SceneRuntime implements RuntimeContext {
       applyNodeShadow: (doc, nodeId) => this.syncNodeShadowFlags(doc, nodeId),
       // T-231 · 文档里的变量集合变了，运行时的当前值表要跟上。
       applyVariables: (doc) => this.syncVariables(doc),
+      // T-237 · 动过的那几条动画，把 ClipPlayer 里按旧定义绑好的 action 交回去。
+      // 不交的话「改了 clipName 之后还在播老片段」，而 fullRebuildCount 全程是 0。
+      applyAnimations: (ids) => {
+        for (const id of ids) this.clips.releaseFor(id)
+      },
       log: (level, message, data) => this.log(level, message, data),
     })
 
@@ -716,6 +721,14 @@ export class SceneRuntime implements RuntimeContext {
   private rebuild(doc: SceneDocument): void {
     this.document = doc
     this.media.setDocument(doc)
+    // T-237 · 两个动画播放器都得先知道整棵图要没了，而**它们需要知道的程度不一样**：
+    //  - tween 每帧按 nodeId 重解对象，重建之后自动接到新对象上；停它只是因为在播的
+    //    是上一份文档的动作，接着放下去语义上说不通。
+    //  - clip 的 mixer 绑死 `Object3D` 引用。不清的话它会**继续驱动重建前那批对象**：
+    //    每帧照常求值、照常写 position，写给一棵没人渲染的幽灵子树。
+    // 这个不对称是巧合不是设计——tween 只是碰巧写成了每帧重解。
+    this.tweens.stopAll()
+    this.clips.clearMixers()
     this.graph.build(doc)
     this.materials.applyAll(doc, this.graph)
     this.applyBackground(doc)
@@ -1186,7 +1199,11 @@ export class SceneRuntime implements RuntimeContext {
     // thing this feature can do.
     this.media.stop('all')
     this.tweens.stopAll()
-    this.clips.stopAll()
+    // T-237 · **不是 `stopAll`，是把 mixer 整个交回去，而且要在 `graph.build` 之前。**
+    // 每个 mixer 绑死一个 `Object3D`，下面一行重建之后那些对象就没人渲染了；只 stop
+    // 的话它们连同各自的 action 与 PropertyMixer 一直挂在这里，「反复排练一段拆装流程」
+    // ——样板工程的核心动作——每排练一次就多留一份。
+    this.clips.clearMixers()
     this.highlights.clearAll()
     this.resetRuntimeState()
     // Rebuilding from the document is what undoes `setLight`: the lights are constructed

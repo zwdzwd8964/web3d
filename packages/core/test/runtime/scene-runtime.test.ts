@@ -1135,3 +1135,74 @@ describe('T-240 · 描边开关决定高亮怎么画', () => {
     runtime.dispose()
   })
 })
+
+/* ========================================================================== */
+/* T-237 · mixer 在运行时里的回收接缝                                          */
+/* ========================================================================== */
+
+describe('T-237 · resetScene 与 rebuild 都把 mixer 交回去', () => {
+  /** 一个真的加载了带动画 GLB 的运行时。没有真资产就没有 mixer，断言会恒真。 */
+  async function loadedRuntime() {
+    const bytes = await buildPumpGlb({ animationName: 'Disassemble', animationSeconds: 1 })
+    const doc = withClip(createGoldenPathDocument())
+    const files = new Map<string, ArrayBuffer>([[doc.assets[0]!.url, bytes]])
+    const { runtime } = makeRuntime(doc, undefined, files)
+    await runtime.load(doc)
+    return { runtime, doc }
+  }
+
+  it('前提：播一条导入动画之后真的有 mixer', async () => {
+    // 少了这一条，下面两条对一个「从来就没有 mixer」的运行时同样成立。
+    const { runtime } = await loadedRuntime()
+    void runtime.playAnimation('anm_11111111', {}).catch(() => undefined)
+    expect(runtime.clips.mixerCount).toBeGreaterThan(0)
+    runtime.dispose()
+  })
+
+  it('resetScene 之后 mixer 数为 0', async () => {
+    const { runtime } = await loadedRuntime()
+    void runtime.playAnimation('anm_11111111', {}).catch(() => undefined)
+
+    runtime.resetScene()
+
+    expect(runtime.clips.mixerCount).toBe(0)
+    runtime.dispose()
+  })
+
+  it('**连做 5 次「播放 → resetScene」，峰值不随次数增长**', async () => {
+    // 只断「调用后为 0」是假绿：clearMixers 没接进 resetScene 时那条也绿。
+    const { runtime } = await loadedRuntime()
+    const peaks: number[] = []
+    for (let i = 0; i < 5; i++) {
+      void runtime.playAnimation('anm_11111111', {}).catch(() => undefined)
+      peaks.push(runtime.clips.mixerCount)
+      runtime.resetScene()
+    }
+    expect(new Set(peaks).size, `峰值序列 ${peaks.join(',')} 在涨`).toBe(1)
+    runtime.dispose()
+  })
+
+  it('整图重建之后不再驱动重建前的对象 —— **重建后不重播，直接继续 tick**', async () => {
+    // 这条的判别力全在「不重播」上。重建后再 play 一次的话，`play` 开头那句 `stop` 会把
+    // 旧 playback 顺手停掉，于是幽灵自己不动了——**通知有没有接进 rebuild 完全看不出来**。
+    const { runtime, doc } = await loadedRuntime()
+    void runtime.playAnimation('anm_11111111', {}).catch(() => undefined)
+    advanceClock(200)
+    runtime.tick()
+    const ghost = runtime.graph.objectFor(IDS.body)!
+    expect(ghost.position.y, '前提：它本来在被驱动').not.toBe(0)
+    const ghostY = ghost.position.y
+
+    await runtime.load(doc)
+    expect(runtime.graph.objectFor(IDS.body), '前提：重建换了对象').not.toBe(ghost)
+
+    advanceClock(400)
+    runtime.tick()
+    advanceClock(400)
+    runtime.tick()
+
+    expect(ghost.position.y, '幽灵对象一动都不许再动').toBe(ghostY)
+    expect(runtime.clips.mixerCount, '重建前那个 mixer 也不该留着').toBe(0)
+    runtime.dispose()
+  })
+})

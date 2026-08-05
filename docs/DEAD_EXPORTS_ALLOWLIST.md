@@ -23,6 +23,7 @@
 | 2026-08-04 | T-225 | 34 | 35 | **本表唯一一次上调**。`schema:EXPLODE_MODE_LABELS` 是规划 §4.1.1 逐字冻结的一项，v1.0 内没有任何消费者、v1.2 的 T-244 爆炸面板才用得上。三条路各自的代价：删掉它 = 偏离 §4 的冻结清单；假造一个 v1.0 调用点 = 正是本守卫要拦的东西；上调 1 并登记 = 守卫完整、可逆、到期自动转红。取第三条 |
 | 2026-08-05 | T-235 | 35 | **33** | **第一次往下走。** 接线了 registerChrome / setChromeVisible / pipelineMode / setPostFxEnabled 四条接缝，四行豁免随之删除；同时为 beginCapture / endCapture 新增两行（owner T-266，出图链路才有调用方）。净 −2。**这就是棘轮该有的样子**：交付一张卡，表变短 |
 | 2026-08-05 | T-240 | 33 | 35 | **第二次上调，与 T-225 同一种情形。** `highlightOf` 是规划 §4 冻结的 v1.0 三项 `RuntimeContext` 增量之一，而 v1 的条件表里没有一条读得到高亮状态——它与早就躺在遗留基线上的 `materialOf` 逐字同形：接口上有读者、规则里还没有。三条路：删掉它 = 偏离 §4 冻结清单且 T-294 的 parity 轨迹没了比对项；在 `highlight()` 里塞一句 `this.highlightOf(...)` 当调用点 = 假造调用点，正是本守卫要拦的（那处真正的去重守卫已经落在 `OutlineLayer.apply` 里，它不需要 `highlightOf`）；上调 2 并登记 = 守卫完整、到期自动转红。取第三条 |
+| 2026-08-05 | T-237 | 35 | 36 | `mixerCount`。**同时把 `releaseFor` 接进了 `apply-patch` 的 `case 'animations'`**——不接的话本卡是 +2：改过 clipName 的动画会安静地继续播老片段（scoped clip 按 (animationId, objectUuid) 缓存之后才有的新缺陷），所以那不是为了守卫凑的调用点，是这次改动自己欠的。另订正 `activeCount` 一行：它的原理由（「T-237 靠它断堆积」）被本卡实测证伪。⚠ 连着三张卡都在往上走（33→35→36），原因是同一个：v1.0 在按 §4 冻结清单落 API，而消费者在 v1.2 之后。**这已经不是单卡问题，v1.0 收口前要单独裁决一次**（选项：把这类「接口先落、消费者在后」的行挪进遗留基线同级的第三张表 / 把 §4 的落地时机推迟到消费卡 / 维持现状并接受表变长） |
 
 ## 豁免
 
@@ -43,7 +44,8 @@
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
 | core:buildPumpDemoGlb | T-283 把泵组样板物化成一份可打开的项目，它是那条链上唯一的字节来源 | T-283 | v1.2 |
 | core:SAMPLE_OBJECT_PATHS | T-222 的泵组样板给它补断言，这是同一形状第三次零调用者 | T-222 | v1.2 |
-| core:ClipPlayer.activeCount | T-237 的 mixer 回收要靠它断言反复播放不再堆积 action | T-237 | v1.2 |
+| core:ClipPlayer.activeCount | **本行的原理由被 T-237 实测证伪**：它数的是在播的条数，每次 play 前的 stop 让它恒为 1，量不到堆积——量得到的是同批新增的 mixerCount。它今天的价值在「重播不叠加」那几条单测上；生产读者只可能是 bench 页那排运行时计数（T-279） | T-279 | v1.2 |
+| core:ClipPlayer.mixerCount | T-237 的验收按它断言「连做 5 次排练峰值不涨」，这是 mixer 堆积唯一量得到的地方；与 activeCount 同一形状，生产读者同归 bench 页 | T-279 | v1.2 |
 | core:AssetLoader.evict | T-429 换场景时按新文档收窄已加载资产，届时它是清场的一环 | T-429 | v1.5 |
 | core:RendererLike.getPixelRatio | T-214 的像素比封顶要读回渲染器当前值来断言钳位生效 | T-214 | v1.2 |
 | core:RendererLike.setClearColor | T-266 出图时改背景色，还原栈按进入前的值恢复 | T-266 | v1.2 |

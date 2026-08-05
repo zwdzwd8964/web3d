@@ -262,3 +262,167 @@ describe('seek', () => {
     expect(player.isPlaying('anm_11111111')).toBe(false)
   })
 })
+
+/* ========================================================================== */
+/* T-237 · action 缓存回收与整图重建                                           */
+/* ========================================================================== */
+
+/** three 内部那条 action 列表。回收有没有真的发生，只有这里看得见。 */
+const actionsOf = (object: object) =>
+  (player as unknown as { mixers: Map<string, { _actions: unknown[] }> }).mixers.get(
+    (object as { uuid: string }).uuid,
+  )?._actions ?? []
+
+describe('T-237 · 反复播放不再往 mixer 里堆 action', () => {
+  it('play ×20 之后 mixer 里仍然只有一条 action', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    const body = graph.objectFor(IDS.body)!
+
+    for (let i = 0; i < 20; i++) {
+      void player.play(animationOf(doc), doc, i * 10).catch(() => undefined)
+    }
+
+    // **断的是 three 内部那条列表的长度，不是 `activeCount`。** 后者早就是 1 了——
+    // 每次 play 前的 `stop` 把上一条从 playing 里摘掉，而堆在 mixer 里的那 20 条
+    // AnimationAction 与它们各自的 PropertyMixer 一条都没走。
+    expect(actionsOf(body)).toHaveLength(1)
+    expect(player.mixerCount).toBe(1)
+    player.stopAll()
+  })
+
+  it('seek ×20 也不堆 —— 它走的是另一条 bind 路径', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    const body = graph.objectFor(IDS.body)!
+
+    for (let i = 0; i < 20; i++) player.seek(animationOf(doc), doc, (i % 10) / 10)
+
+    expect(actionsOf(body)).toHaveLength(1)
+  })
+
+  it('releaseFor 把那条动画的缓存交回去', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    const body = graph.objectFor(IDS.body)!
+    player.seek(animationOf(doc), doc, 0.5)
+    expect(actionsOf(body)).toHaveLength(1)
+
+    player.releaseFor('anm_11111111')
+
+    expect(actionsOf(body)).toHaveLength(0)
+    // 交回去之后还能再用：下一次 bind 重新造一份
+    player.seek(animationOf(doc), doc, 0.5)
+    expect(actionsOf(body)).toHaveLength(1)
+  })
+
+  it('releaseFor 只动被点名的那条动画', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    const body = graph.objectFor(IDS.body)!
+    player.seek(animationOf(doc), doc, 0.5)
+
+    player.releaseFor('anm_99999999')
+
+    expect(actionsOf(body), '别的动画的缓存不该被顺手清掉').toHaveLength(1)
+  })
+})
+
+describe('T-237 · clearMixers 与整图重建', () => {
+  it('clearMixers 之后 mixer 数为 0', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+    expect(player.mixerCount).toBe(1)
+
+    player.clearMixers()
+
+    expect(player.mixerCount).toBe(0)
+    expect(player.activeCount).toBe(0)
+  })
+
+  it('**连做 5 次 build + clear，mixerCount 不随次数增长**', async () => {
+    // 只断「调用后为 0」是假绿：那条在 clearMixers 根本没被接进 resetScene 时也成立。
+    // 这一条断的是**跨轮次不累积**，也就是「反复排练一段拆装流程」真正会踩的形状。
+    const doc = docWithClip()
+    const seen: number[] = []
+    for (let round = 0; round < 5; round++) {
+      graph.build(doc)
+      void player.play(animationOf(doc), doc, round * 10).catch(() => undefined)
+      player.update(round * 10 + 5)
+      seen.push(player.mixerCount)
+      player.clearMixers()
+    }
+    expect(seen, '每一轮的峰值都该一样').toEqual([1, 1, 1, 1, 1])
+  })
+
+  it('重建之后不再驱动旧对象 —— 旧的不动，新的在动', async () => {
+    const doc = docWithClip()
+    graph.build(doc)
+    const ghost = graph.objectFor(IDS.body)!
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+    player.update(100)
+    expect(ghost.position.y, '前提：它本来是在被驱动的').not.toBe(0)
+    const ghostY = ghost.position.y
+
+    // 整图重建：`graph.build` 造的是全新的 Object3D，旧的那批已经没人渲染了
+    player.clearMixers()
+    graph.build(doc)
+    const fresh = graph.objectFor(IDS.body)!
+    expect(fresh, '前提：重建真的换了对象').not.toBe(ghost)
+
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+    player.update(400)
+
+    expect(fresh.position.y, '新对象要在动').not.toBe(0)
+    expect(ghost.position.y, '幽灵对象一动都不许再动').toBe(ghostY)
+    player.stopAll()
+  })
+})
+
+describe('T-237 · 绝对时间驱动', () => {
+  it('姿态由「现在是第几秒」决定，不受被跳过的帧影响', async () => {
+    // 累加式驱动里，中间少调几次 update 就等于少推几次时间，末态会停在别处。
+    const doc = docWithClip()
+    graph.build(doc)
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+    for (let t = 20; t <= 600; t += 20) player.update(t)
+    const stepped = bodyY()
+
+    player.stopAll()
+    graph.build(doc)
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+    // 同样走到 600ms，但中间只有一帧——累加式会差出一大截
+    player.update(10)
+    player.update(600)
+
+    expect(bodyY()).toBeCloseTo(stepped, 6)
+    player.stopAll()
+  })
+
+  it('循环片段按取模回绕，而不是一路涨上去', async () => {
+    const doc = docWithClip({ loop: true })
+    graph.build(doc)
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+
+    player.update(300)
+    const at300 = bodyY()
+    // 片段长 1s：1300ms 与 300ms 应当是同一帧
+    player.update(1300)
+
+    expect(bodyY()).toBeCloseTo(at300, 6)
+    player.stopAll()
+  })
+
+  it('非循环片段钳在末帧，不会算过头', async () => {
+    const doc = docWithClip({ clampWhenFinished: true })
+    graph.build(doc)
+    void player.play(animationOf(doc), doc, 0).catch(() => undefined)
+
+    player.update(1000)
+    const atEnd = bodyY()
+    player.update(5000)
+
+    expect(bodyY()).toBeCloseTo(atEnd, 6)
+  })
+})

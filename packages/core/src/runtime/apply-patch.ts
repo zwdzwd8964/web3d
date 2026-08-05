@@ -73,6 +73,15 @@ export interface PatchApplierTargets {
    * 「静默失效」形状：没有回落，所以没有告警，功能就是不工作）。
    */
   readonly applyVariables?: (doc: SceneDocument) => void
+  /**
+   * `/animations/**` —— T-237。**收到的是被动过的那几条动画的 id，不是整份文档。**
+   *
+   * ClipPlayer 现在按 `(animationId, object.uuid)` 缓存 scoped clip 与它背后那条
+   * `AnimationAction`（复用它才是「重播 20 次不堆 20 条 action」的实现）。代价是：
+   * 一条动画的 `clipName` / `assetId` 被改过之后，缓存里那份是**按旧定义绑的**，
+   * 不交回去的话下一次播放会安静地继续播老片段。谁改了谁负责通知。
+   */
+  readonly applyAnimations?: (animationIds: readonly string[]) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -182,9 +191,18 @@ export class PatchApplier {
       case 'variables':
         this.targets.applyVariables?.(next)
         return true
+      case 'animations': {
+        // 整条数组被替换（`indexRaw` 为 undefined）时新旧两侧的 id 全交出去：
+        // 删掉一条动画同样要释放，而它在 `next` 里已经不存在了。
+        const ids =
+          typeof indexRaw === 'number'
+            ? [next.animations[indexRaw]?.id, prev.animations[indexRaw]?.id]
+            : [...next.animations.map((a) => a.id), ...prev.animations.map((a) => a.id)]
+        this.targets.applyAnimations?.([...new Set(ids.filter((id): id is string => id !== undefined))])
+        return true
+      }
       case 'rules':
       case 'viewpoints':
-      case 'animations':
       case 'hotspots':
       case 'name':
       case 'schemaVersion':

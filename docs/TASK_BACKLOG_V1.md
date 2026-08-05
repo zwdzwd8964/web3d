@@ -1715,8 +1715,8 @@
   ③ 把两端对照的容差放宽到「只要都非零就算过」→ **必须证明它测不出东西**，据此把断言收紧到
   分桶分布而不是「画面非空」。
 
-### [ ] T-237 ★ · `ClipPlayer` 绝对时间驱动 + action 缓存回收 + `clearMixers` + 重建接缝
-- **依赖** T-216 · T-235 · **预估** 1.8d · **实际** —
+### [x] T-237 ★ · `ClipPlayer` 绝对时间驱动 + action 缓存回收 + `clearMixers` + 重建接缝
+- **依赖** T-216 · T-235 · **预估** 1.8d · **实际** 1.7d
 - **独占** `packages/core/src/runtime/animator/clip.ts` · `packages/core/test/runtime/clip.test.ts` ·
   `packages/core/src/runtime/scene-runtime.ts`（rebuild / resetScene 两处，列 R）·
   `packages/core/test/runtime/scene-runtime.test.ts`
