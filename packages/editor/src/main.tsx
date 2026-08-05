@@ -82,8 +82,12 @@ async function boot() {
  * A stored document that cannot be migrated at all is reported and skipped rather than
  * thrown: being unable to open the editor because of one bad record is far worse than
  * starting from the sample, and the record is left in place so it can still be recovered.
+ *
+ * T-229 · **导出只是为了让 `restore-migrates.test.ts` 调到生产路径本身，不是新 API。**
+ * 另一条路是在测试里重写一遍恢复逻辑，而那样一来「把这里的 `migrate` 改回 `validate`」
+ * 这条变异就不会红——测试自造一份实现，正是 T-176 那条存活 blocker 的形状。
  */
-async function restoreLastDocument(session: ProjectSession) {
+export async function restoreLastDocument(session: ProjectSession) {
   try {
     const projects = await session.storage.listProjects()
     const latest = [...projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
@@ -107,4 +111,11 @@ async function restoreLastDocument(session: ProjectSession) {
   }
 }
 
-void boot()
+// T-229 · 只有真的有挂载点时才启动。
+//
+// 原来是无条件 `void boot()`，于是**任何 import 这个模块的人都会顺手启动一次编辑器**
+// ——在 node 环境下 `document` 不存在，模块一加载就抛。测试要调它导出的
+// `restoreLastDocument`，就必须先把这条副作用关掉。
+//
+// 判据用 `typeof document`：浏览器里恒真，node 里恒假，不需要任何测试专用开关。
+if (typeof document !== 'undefined') void boot()

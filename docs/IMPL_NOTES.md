@@ -480,3 +480,34 @@ patch 未被识别` 一直在日志里，但没有任何断言看它。**日志�
 | G0-7 | benchmark 目标机器实测 | ❌ | 页面已可独立运行，**缺目标机器实测数据** |
 
 **6/7 通过。** 唯一未过的 G0-7 差的不是代码，是一次在客户机器上的实测。
+
+---
+
+## 5 · `validate(` / `migrate(` 调用点普查（T-229 · 规划 §V14）
+
+**卡面规定的普查命令找不到它自己点名的四处里的三处。** `grep -rn "validate(" packages/`
+实测 75 行 / 17 个文件，其中 68 行在测试里；而 `main.tsx` / `snapshots.ts` / `package.ts`
+三条生产路径写的都是 `migrate(`，一个都不在结果里。照那条命令做出来的判定表会显得
+「只有 publish.ts 一处，已判定合理」——看起来是绿的，实际什么都没审。
+
+口径改成：**谁读外部字节**，而不是**谁调用了哪个函数名**。
+
+| 位置 | 读的是什么 | 调的是 | 判定 |
+|---|---|---|---|
+| `editor/src/main.tsx:99` | IndexedDB 里上次保存的文档 | `migrate` | ✅ 外部字节，必须迁移。回归：`editor/test/restore-migrates.test.ts` |
+| `editor/src/publish/snapshots.ts:50` | 一次历史快照 | `migrate` | ✅ 外部字节，必须迁移。**今天没有专门回归**，由 `check-migrate-on-read.mjs` 看守 |
+| `storage/src/package.ts:199` | `.w3p` 包里的 `scene.json` | `migrate` | ✅ 外部字节，且是**播放器读到的每一份文档的必经之路**。回归：`storage/test/package-migrates.test.ts` |
+| `schema/src/migrate.ts:361` | 迁移链末端的产物 | `validate` | ✅ **唯一一处「validate 用对了」的正面样本**。每一份外部文档最后都从这里过一次，验的是迁移之后的形状。卡面漏了它 |
+| `editor/src/publish/publish.ts:61` | 内存中当前编辑的文档 | `validate` | ✅ 不是外部字节，刚从编辑器状态里来 |
+| `schema/src/validate.ts:64`（`assertValid`） | 调用方给什么验什么 | `validate` | ✅ 它就是 validate 的一层包装；实测只有 `schema/test/validate.test.ts` 在用 |
+| `editor/src/panels/VariablePanel.tsx:245` · `schema/src/migrate.ts:39` · `schema/src/rule.ts:28` | — | — | ⚪ **这三处是注释里的散文，不是调用点**。把它们写进表里，表本身就成了 fiction |
+
+**这张表不是本节的重点，`scripts/check-migrate-on-read.mjs` 才是。** 规划 §V14 要的是三样
+东西——一条常设回归、这张表、一条 lint 守卫——而卡面只列了前两样。表会过期，守卫不会：
+它挂在 `pnpm check:constitution` 上，读外部字节的模块里一出现 `validate(` 就红，并逐行
+指出对应的回归文件在哪。
+
+### 一处仍然只靠守卫、没有回归的路径
+
+`snapshots.ts` 的回滚路径没有专门的单测。补它需要先造一份「快照里存着 v2 文档」的
+夹具，与 `.w3p` 那条重叠度很高。登记在这里，不假装它被覆盖了。

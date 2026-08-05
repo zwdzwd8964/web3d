@@ -1514,8 +1514,8 @@
 - **变异检验** 随机挑 8 个新默认值各改成明显错的值，**8 次全部转红**——这正是 v0.5 M8 那次
   「8 个默认值被改坏而全套测试全绿」事故的直接对应实验，**8 次的结果逐条记进提交信息**。
 
-### [ ] T-229 · bump 的爆炸半径审计：`validate(` 调用点普查 + 常设回归
-- **依赖** T-225 · **预估** 0.6d · **实际** —
+### [x] T-229 · bump 的爆炸半径审计：`validate(` 调用点普查 + 常设回归
+- **依赖** T-225 · **预估** 0.6d · **实际** 0.9d
 - **独占** `packages/editor/test/restore-migrates.test.ts`(新) ·
   `packages/storage/test/package-migrates.test.ts`(新) · `docs/IMPL_NOTES.md`（追加一节）
 - **做** `grep -rn "validate(" packages/ --include=*.ts --include=*.tsx | grep -v dist`，

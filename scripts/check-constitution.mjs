@@ -24,6 +24,10 @@ const GUARDS = [
   // allowlist disagree the first time a row lands in only one of them.
   { article: 'C7', script: 'check-provider-swap.mjs', args: [], what: 'provider construction and network primitives each have exactly the declared sites' },
   { article: 'MVP §3', script: 'check-deps-direction.mjs', args: [], what: 'package dependency graph has no reverse edges' },
+  // v1.0 · T-229 · 规划 §V14 要三样东西：一条常设回归、一张判定表、**一条守卫**。
+  // 卡面只列了前两样，而一张写在 IMPL_NOTES 里的表只是一张表——三条外部读取路径里
+  // 有两条会因此只靠人记住。这一条是第三样：读外部字节的模块里出现 `validate(` 即红。
+  { article: 'V14', script: 'check-migrate-on-read.mjs', args: [], what: 'modules that read external bytes call migrate, never validate' },
   { article: 'C6', script: 'check-no-external.mjs', args: REQUIRE_BUILD ? [] : ['--allow-missing'], what: 'no external URL in build output' },
   // v1.0 · T-220. `--require-build` is ADR-0012's undo condition #2 becoming a machine: it
   // asserts the BUNDLER still emits the decoders into `dist/assets/`. Only meaningful when
