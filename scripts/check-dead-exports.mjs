@@ -41,7 +41,82 @@ const BACKLOGS = ['docs/TASK_BACKLOG_V1.md', 'docs/TASK_BACKLOG_V0_5.md', 'docs/
  * no landing point, and「把它加进豁免表」becomes the cheapest way to make this script green.
  * Raising it requires a reason in the commit message and a line in the allowlist's ratchet log.
  */
-const MAX_EXEMPTIONS = 36
+const MAX_EXEMPTIONS = 26
+
+/**
+ * ADR-0033 · 第三张表：**接口先落、消费者在后**。
+ *
+ * v1.0 按规划 §4 的冻结清单交付 API，而它们的消费者排在 v1.2 / v1.5。连着三张卡
+ * （T-225 / T-240 / T-237）都因此上调了 `MAX_EXEMPTIONS`，把「只降不升」的棘轮变成了
+ * 一本记账簿——**棘轮想拦的是「随手加个导出没人用」，而不是「照冻结清单交付」，两者
+ * 混在一张表里，那条规则没法既严格又诚实。**
+ *
+ * 所以这张表不计入 `MAX_EXEMPTIONS`，代价是它必须有一把**比人工审查更硬的门锁**，
+ * 否则它就是新的垃圾桶。门锁是 `assertNamedInSpec`：每一行的符号名必须**逐字出现在
+ * 它自己 `spec` 列点名的那一节冻结规范的代码跨度里**。写不进规范的东西进不来这张表。
+ *
+ * 它**没有条数上限**，理由与上限本身同源：这张表的长度由冻结清单决定，而冻结清单
+ * 自己就是冻的。到期检查一字不改——到期未清照样 CI 转红（NORTH_STAR §8）。
+ */
+const FROZEN_COLUMNS = ['symbol', 'reason', 'owner', 'expires', 'spec']
+
+/**
+ * `spec` 列的封闭取值：文档 + 小节标题。**封闭是关键**——允许自由填写等于允许指向
+ * 一份不存在的规范，而那和没有门锁是一回事。
+ */
+const SPEC_SOURCES = {
+  '规划§4': { file: 'docs/MVP_V1_进化规划.md', heading: '## 4. 规范增量（逐字实现）' },
+  SCHEMA_SPEC: { file: 'docs/SCHEMA_SPEC.md', heading: null },
+  ECA_SPEC: { file: 'docs/ECA_SPEC.md', heading: null },
+}
+
+/**
+ * 一节规范里出现过的所有**代码标识符**。
+ *
+ * 「出现在这一节里」不够——散文里的英文单词会蒙混过关（实测：`schema:touch` 因为
+ * 规划 §4 的一段 JSDoc 里写着 "touch nothing that is already there" 而通过了第一版
+ * 检查）。所以只认两种位置：**行内代码跨度**，以及**围栏代码块里注释以外的部分**。
+ */
+function identifiersIn(file, heading) {
+  const all = readFileSync(join(ROOT, file), 'utf8').split(/\r?\n/)
+  let lines = all
+  if (heading) {
+    const from = all.findIndex((l) => l.trim() === heading)
+    // 找不到标题就是**失败**，不是「退回全文件」——退回全文件会让门锁悄悄松开一整级。
+    if (from === -1) return { ids: null, reason: `在 ${file} 里找不到小节标题「${heading}」` }
+    const rest = all.slice(from + 1).findIndex((l) => /^## /.test(l))
+    lines = all.slice(from + 1, rest === -1 ? all.length : from + 1 + rest)
+  }
+
+  const ids = new Set()
+  const take = (text) => {
+    for (const m of text.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) ids.add(m[0])
+  }
+  let fenced = false
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced) {
+      // 注释先剥掉，否则围栏块里的英文散文与代码同权
+      take(line.replace(/\/\*.*?\*\//g, ' ').replace(/(^|\s)(\/\/|\*|\/\*\*).*$/, ' '))
+      continue
+    }
+    for (const m of line.matchAll(/`([^`]+)`/g)) take(m[1])
+  }
+  return { ids, reason: null }
+}
+
+/**
+ * 冻结规范里至少要认出多少个标识符才算「这一节真的被读到了」。
+ *
+ * D36 的 M6 形状，与 `MIN_EXPORT_SURFACE` 同一个理由：**标题正则一坏，抽出来的集合
+ * 是空的，于是「每一行都不在规范里」——但如果反过来写成「集合为空就放行」，它会变成
+ * 每一行都通过。** 这里选的是前者（空集合 = 每行都失败），再补一条下限把「抽空了」
+ * 与「规范里真没有」分开报。规划 §4 实测 1000+ 个，取远低的下限。
+ */
+const MIN_SPEC_IDENTIFIERS = 200
 
 /**
  * Ratchet on the v0 / v0.5 backlog. **Only ever goes down.**
@@ -273,19 +348,30 @@ const backlogText = BACKLOGS.filter((p) => existsSync(join(ROOT, p)))
   .join('\n')
 const { rows, problems } = readExemptions(ALLOWLIST, { current, cardExists: (card) => backlogText.includes(card) })
 
-const exempted = new Set(rows.map((r) => r.symbol))
+const frozen = readExemptions(ALLOWLIST, {
+  current,
+  cardExists: (card) => backlogText.includes(card),
+  columns: FROZEN_COLUMNS,
+})
+
+const exemptedFour = new Set(rows.map((r) => r.symbol))
+const exempted = new Set([...rows, ...frozen.rows].map((r) => r.symbol))
 const legacy = readLegacyBaseline()
 const unexplained = orphans.filter((o) => !exempted.has(o.id) && !legacy.has(o.id))
 // A stale entry is a failure too: it hides nothing, and it makes both ratchets lie about how
 // much debt is actually left.
-const stale = rows.filter((r) => !orphans.some((o) => o.id === r.symbol))
+const stale = [
+  ...rows.map((r) => ({ ...r, table: '豁免表' })),
+  ...frozen.rows.map((r) => ({ ...r, table: '冻结接口表' })),
+].filter((r) => !orphans.some((o) => o.id === r.symbol))
 const staleLegacy = [...legacy].filter((id) => !orphans.some((o) => o.id === id))
 
 console.log('')
 console.log(
-  `  导出面 ${surface.length} / 生产引用 ${references} / 孤儿 ${orphans.length} / 豁免 ${rows.length} / 遗留基线 ${legacy.size}`,
+  `  导出面 ${surface.length} / 生产引用 ${references} / 孤儿 ${orphans.length} / 豁免 ${rows.length} / 冻结接口 ${frozen.rows.length} / 遗留基线 ${legacy.size}`,
 )
 for (const row of rows) console.log(`  exempt: ${row.symbol}  (owner ${row.owner} · 到期 ${row.expires}) — ${row.reason}`)
+for (const row of frozen.rows) console.log(`  frozen: ${row.symbol}  (${row.spec} · owner ${row.owner} · 到期 ${row.expires})`)
 console.log('')
 
 const failures = []
@@ -302,7 +388,14 @@ if (legacy.size > MAX_LEGACY) {
   failures.push(`遗留基线 ${legacy.size} 条，超过棘轮上限 ${MAX_LEGACY}（这个常量只能降不能升）`)
 }
 for (const p of problems) failures.push(`${rel(ALLOWLIST)}:${p.line}  ${p.message}`)
-for (const row of stale) failures.push(`豁免表里的 ${row.symbol} 已经有生产调用者了（或已被删除），把这一行删掉`)
+for (const p of frozen.problems) failures.push(`${rel(ALLOWLIST)}:${p.line}  冻结接口表：${p.message}`)
+failures.push(...assertNamedInSpec(frozen.rows))
+for (const row of frozen.rows) {
+  if (exemptedFour.has(row.symbol)) {
+    failures.push(`${row.symbol} 同时列在豁免表与冻结接口表里，删掉其中一行`)
+  }
+}
+for (const row of stale) failures.push(`${row.table}里的 ${row.symbol} 已经有生产调用者了（或已被删除），把这一行删掉`)
 for (const id of staleLegacy) failures.push(`遗留基线里的 ${id} 已经有生产调用者了（或已被删除），把这一行删掉并把 MAX_LEGACY 调低`)
 for (const o of unexplained) {
   failures.push(`${rel(o.file)}  ${o.id} 有导出、无生产调用者。接上它、删掉它，或在豁免表里写清谁会用到它`)
@@ -315,6 +408,46 @@ if (failures.length === 0) {
 console.error(`FAIL  C5 + D36 · dead exports  — ${failures.length} violation(s)`)
 for (const f of failures) console.error(`      ${f}`)
 process.exit(1)
+
+/**
+ * ADR-0033 的门锁：冻结接口表里的每一行，符号名都得逐字写在它点名的那节规范里。
+ *
+ * 这是这张表与豁免表**唯一**的结构性差别，也是它可以不受条数棘轮约束的全部理由。
+ * 少了它，「不计入上限的表」就是把 G1.2-9 那条门槛整个绕开的合法通道。
+ */
+function assertNamedInSpec(frozenRows) {
+  const out = []
+  const cache = new Map()
+  for (const row of frozenRows) {
+    const source = SPEC_SOURCES[row.spec]
+    if (!source) {
+      out.push(
+        `${rel(ALLOWLIST)}:${row.line}  spec 列必须是封闭取值之一（${Object.keys(SPEC_SOURCES).join(' / ')}），实际是「${row.spec}」`,
+      )
+      continue
+    }
+    if (!cache.has(row.spec)) cache.set(row.spec, identifiersIn(source.file, source.heading))
+    const { ids, reason } = cache.get(row.spec)
+    if (!ids) {
+      out.push(`冻结规范读不到：${reason}——是标题改了还是路径改了，不是这一行有问题`)
+      continue
+    }
+    if (ids.size < MIN_SPEC_IDENTIFIERS) {
+      out.push(
+        `从 ${source.file} 的「${row.spec}」只抽出 ${ids.size} 个标识符（下限 ${MIN_SPEC_IDENTIFIERS}）——抽取坏了，不是规范变空了`,
+      )
+      continue
+    }
+    const name = row.symbol.includes('.') ? row.symbol.split('.').pop() : row.symbol.split(':').pop()
+    if (!ids.has(name)) {
+      out.push(
+        `${rel(ALLOWLIST)}:${row.line}  ${row.symbol} 不在「${row.spec}」的冻结清单里（按代码跨度逐字比对）。` +
+          `这张表只收「规范里写了、消费者在后面」的东西；随手加的导出请走豁免表并接受条数棘轮`,
+      )
+    }
+  }
+  return out
+}
 
 /** The bare-id legacy list, read out of the same allowlist document. */
 function readLegacyBaseline() {

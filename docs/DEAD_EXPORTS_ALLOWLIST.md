@@ -1,6 +1,14 @@
 # 零调用者豁免表
 
-`scripts/check-dead-exports.mjs` 读这张表。**四列全部必填**，缺一即 exit 1。
+`scripts/check-dead-exports.mjs` 读这个文件里的**三张表**：
+
+| 表 | 收什么 | 受条数棘轮约束吗 |
+|---|---|---|
+| [豁免](#豁免)（四列） | 能归到某一张卡、但今天确实没人调的导出 | **是**，`MAX_EXEMPTIONS` 只降不升 |
+| [冻结接口](#冻结接口接口先落消费者在后)（五列） | 规划 §4 / 两份 SPEC 里**逐字冻结**、而消费者排在后面版本的 API | **否**，改由「必须写在规范里」这把门锁把关（[ADR-0033](adr/0033-冻结接口与随手导出分表.md)） |
+| [v0 / v0.5 遗留基线](#v0--v05-遗留基线)（裸清单） | 归不到卡的历史存量 | **是**，`MAX_LEGACY` 只降不升 |
+
+**每一列都必填**，缺一即 exit 1。
 
 | 列 | 规则 |
 |---|---|
@@ -24,6 +32,7 @@
 | 2026-08-05 | T-235 | 35 | **33** | **第一次往下走。** 接线了 registerChrome / setChromeVisible / pipelineMode / setPostFxEnabled 四条接缝，四行豁免随之删除；同时为 beginCapture / endCapture 新增两行（owner T-266，出图链路才有调用方）。净 −2。**这就是棘轮该有的样子**：交付一张卡，表变短 |
 | 2026-08-05 | T-240 | 33 | 35 | **第二次上调，与 T-225 同一种情形。** `highlightOf` 是规划 §4 冻结的 v1.0 三项 `RuntimeContext` 增量之一，而 v1 的条件表里没有一条读得到高亮状态——它与早就躺在遗留基线上的 `materialOf` 逐字同形：接口上有读者、规则里还没有。三条路：删掉它 = 偏离 §4 冻结清单且 T-294 的 parity 轨迹没了比对项；在 `highlight()` 里塞一句 `this.highlightOf(...)` 当调用点 = 假造调用点，正是本守卫要拦的（那处真正的去重守卫已经落在 `OutlineLayer.apply` 里，它不需要 `highlightOf`）；上调 2 并登记 = 守卫完整、到期自动转红。取第三条 |
 | 2026-08-05 | T-237 | 35 | 36 | `mixerCount`。**同时把 `releaseFor` 接进了 `apply-patch` 的 `case 'animations'`**——不接的话本卡是 +2：改过 clipName 的动画会安静地继续播老片段（scoped clip 按 (animationId, objectUuid) 缓存之后才有的新缺陷），所以那不是为了守卫凑的调用点，是这次改动自己欠的。另订正 `activeCount` 一行：它的原理由（「T-237 靠它断堆积」）被本卡实测证伪。⚠ 连着三张卡都在往上走（33→35→36），原因是同一个：v1.0 在按 §4 冻结清单落 API，而消费者在 v1.2 之后。**这已经不是单卡问题，v1.0 收口前要单独裁决一次**（选项：把这类「接口先落、消费者在后」的行挪进遗留基线同级的第三张表 / 把 §4 的落地时机推迟到消费卡 / 维持现状并接受表变长） |
+| 2026-08-05 | （裁决 ADR-0033） | 36 | **26** | **−10，且这一次不是靠接线换来的，是靠分表。** 十条「规划 §4 逐字冻结、消费者在 v1.2/v1.5」的行迁进新的冻结接口表，四列表回到只装「归得到卡但今天没人调」的东西。⚠ 迁移不是豁免：新表有一把四列表没有的门锁——符号名必须逐字出现在它自己 `spec` 列点名的那节规范的**代码跨度**里，写不进规范的进不来。第一版门锁只查「出现在这一节里」，被 `schema:touch` 当场击穿（规划 §4 的一段 JSDoc 里写着 "touch nothing that is already there"），所以 `touch` 留在四列表里 |
 
 ## 豁免
 
@@ -57,16 +66,29 @@
 | core:SceneRuntime.beginCapture | T-266 的出图八步链路在开头调它：期间 tick 不画、resize 只记不改 | T-266 | v1.2 |
 | core:SceneRuntime.endCapture | T-266 同批交付，它负责弹出被推迟的 resize | T-266 | v1.2 |
 | core:SceneRuntime.setSelectionOutline | T-241 的场景效果面板把编辑器选中态接进描边通道 | T-241 | v1.2 |
-| core:SceneRuntime.setExplode | T-244 的爆炸叠加层与 T-248 的滑块工具态调用它 | T-244 | v1.2 |
-| core:SceneRuntime.captureImage | T-266 的出图八步链路由它编排，含还原栈与重入拒绝 | T-266 | v1.2 |
-| core:SceneRuntime.flyToView | T-337 的相机路径巡游按采样函数逐帧驱动相机 | T-337 | v1.5 |
-| core:SceneRuntime.showPage | T-307 给覆盖层三方法做双实现与契约套件时接上 | T-307 | v1.5 |
-| core:SceneRuntime.hidePage | T-307 同批交付，语义与 closePanel 逐字同形 | T-307 | v1.5 |
-| core:SceneRuntime.isPageVisible | T-307 同批交付，它是条件求值那一侧的入口 | T-307 | v1.5 |
-| core:SceneRuntime.swapDocument | T-429 的多场景切换按七步清场顺序换文档 | T-429 | v1.5 |
-| schema:EXPLODE_MODE_LABELS | T-244 的爆炸叠加层要给两种模式显示中文名，标签表与 EXPLODE_MODES 同源才不会漏一支 | T-244 | v1.2 |
-| core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 |
-| core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 |
+
+## 冻结接口（接口先落，消费者在后）
+
+**规划 §4 与两份 SPEC 是逐字实现的冻结规范**（CLAUDE.md 停下来问人第 8 条）。v1.0 照它交付
+API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIONS`——理由与代价见
+[ADR-0033](adr/0033-冻结接口与随手导出分表.md)。
+
+第五列 `spec` 是**封闭取值**：`规划§4` / `SCHEMA_SPEC` / `ECA_SPEC`。守卫会去那一节里
+按**代码跨度**逐字找这个符号名，找不到就红。**这把门锁是这张表可以不受条数限制的全部理由**，
+不要绕过它：一个「随手加的、没人用的」导出写不进冻结规范，也就进不来这张表。
+
+| symbol | reason | owner | expires | spec |
+|---|---|---|---|---|
+| core:SceneRuntime.setExplode | T-244 的爆炸叠加层与 T-248 的滑块工具态调用它 | T-244 | v1.2 | 规划§4 |
+| core:SceneRuntime.captureImage | T-266 的出图八步链路由它编排，含还原栈与重入拒绝 | T-266 | v1.2 | 规划§4 |
+| core:SceneRuntime.flyToView | T-337 的相机路径巡游按采样函数逐帧驱动相机 | T-337 | v1.5 | 规划§4 |
+| core:SceneRuntime.showPage | T-307 给覆盖层三方法做双实现与契约套件时接上 | T-307 | v1.5 | 规划§4 |
+| core:SceneRuntime.hidePage | T-307 同批交付，语义与 closePanel 逐字同形 | T-307 | v1.5 | 规划§4 |
+| core:SceneRuntime.isPageVisible | T-307 同批交付，它是条件求值那一侧的入口 | T-307 | v1.5 | 规划§4 |
+| core:SceneRuntime.swapDocument | T-429 的多场景切换按七步清场顺序换文档 | T-429 | v1.5 | 规划§4 |
+| schema:EXPLODE_MODE_LABELS | T-244 的爆炸叠加层要给两种模式显示中文名，标签表与 EXPLODE_MODES 同源才不会漏一支 | T-244 | v1.2 | 规划§4 |
+| core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 | 规划§4 |
+| core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 | 规划§4 |
 
 ## v0 / v0.5 遗留基线
 

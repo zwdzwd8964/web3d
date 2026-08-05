@@ -45,9 +45,19 @@ export function isExpired(expires, current) {
  *  - `expires` is what makes it an exemption rather than a new default. NORTH_STAR §8:
  *    "没有到期日的例外，一年后就是新的默认行为."
  *
+ * `columns` selects WHICH table in the file to read: the header row has to name exactly these
+ * columns, in this order, and every data row has to have exactly this many cells. That is what
+ * lets one file hold two tables with different shapes without either reader picking up the
+ * other's rows — ADR-0033's four-column 豁免 table and its five-column 冻结接口 table live in
+ * `DEAD_EXPORTS_ALLOWLIST.md` side by side. Columns past the fourth are returned verbatim
+ * under their own names and are validated by the caller, not here.
+ *
  * @returns {{ rows: {symbol: string, reason: string, owner: string, expires: string, line: number}[], problems: {line: number, message: string}[] }}
  */
-export function readExemptions(file, { current = 'v1.0', cardExists = () => true } = {}) {
+export function readExemptions(
+  file,
+  { current = 'v1.0', cardExists = () => true, columns = ['symbol', 'reason', 'owner', 'expires'] } = {},
+) {
   const rows = []
   const problems = []
   if (!existsSync(file)) {
@@ -73,7 +83,7 @@ export function readExemptions(file, { current = 'v1.0', cardExists = () => true
 
     // The header row names the columns; the separator row is all dashes.
     if (!inTable) {
-      if (cells[0] === 'symbol' && cells[1] === 'reason' && cells[2] === 'owner' && cells[3] === 'expires') {
+      if (cells.length === columns.length && columns.every((name, k) => cells[k] === name)) {
         inTable = 'header'
         continue
       }
@@ -85,8 +95,8 @@ export function readExemptions(file, { current = 'v1.0', cardExists = () => true
     }
 
     const [symbol = '', reason = '', owner = '', expires = ''] = cells
-    if (cells.length !== 4) {
-      problems.push({ line, message: `豁免表要求恰好四列，这一行有 ${cells.length} 列：${raw.trim()}` })
+    if (cells.length !== columns.length) {
+      problems.push({ line, message: `本表要求恰好 ${columns.length} 列，这一行有 ${cells.length} 列：${raw.trim()}` })
       continue
     }
     if (!symbol) {
@@ -112,7 +122,9 @@ export function readExemptions(file, { current = 'v1.0', cardExists = () => true
     } else if (isExpired(expires, current)) {
       problems.push({ line, message: `${symbol}：豁免已于 ${expires} 到期（当前 ${current}），请接上它或删掉它` })
     }
-    rows.push({ symbol, reason, owner, expires, line })
+    const extra = {}
+    for (let k = 4; k < columns.length; k++) extra[columns[k]] = cells[k] ?? ''
+    rows.push({ symbol, reason, owner, expires, line, ...extra })
   }
 
   return { rows, problems }

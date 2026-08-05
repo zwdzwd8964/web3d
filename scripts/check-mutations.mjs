@@ -14,7 +14,7 @@
  *
  * Usage: node scripts/check-mutations.mjs
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -221,8 +221,14 @@ for (const { cells, line } of rows) {
     if (value === '') fail(`R4 · ${at} 的「${name}」列为空。七列逐行必填，留空的行等于没登记`)
   }
 
-  if (!/^T-\d{3}$/.test(card)) {
-    fail(`R3 · ${at} 的卡号「${card}」不是卡号形状（形如 T-297）`)
+  if (/^ADR-\d{4}$/.test(card)) {
+    // ADR-0033 · 跨卡裁决也会产出变异，而它没有卡号。逼它挂到某张卡上，会在一次二分定位
+    // 时把人送去看一张与该变异无关的卡；写一个假卡号更坏。所以另开一种合法形状，**并配一把
+    // 同等硬的锁**：那份 ADR 文件必须真的存在。宽的是形状，不是校验。
+    const file = readdirSync(join(ROOT, 'docs/adr')).find((f) => f.startsWith(`${card.slice(4)}-`))
+    if (!file) fail(`R3 · ${at} 的「${card}」在 docs/adr 里没有对应文件 —— 登记表自己腐烂了`)
+  } else if (!/^T-\d{3}$/.test(card)) {
+    fail(`R3 · ${at} 的卡号「${card}」不是卡号形状（形如 T-297 或 ADR-0033）`)
   } else if (!cards.has(card)) {
     fail(`R3 · ${at} 的卡号「${card}」在台账里不存在 —— 登记表自己腐烂了，或者卡被删/改号了`)
   } else {
