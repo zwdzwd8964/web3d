@@ -1,3 +1,4 @@
+import { explodeOffsets } from './explode-math.js'
 import { ID_COLLECTIONS, ID_COLLECTION_NAMES } from './document.js'
 import type { SceneDocument } from './document.js'
 import type { ActionRefResolver, RefTarget } from './index-builder.js'
@@ -610,17 +611,17 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
 
       /* I22 · 径向模式下全部子件锚点重合 */
       if (node.explode.mode === 'radial' && children.length > 1) {
-        let coincident = true
-        for (let axis = 0; axis < 3 && coincident; axis++) {
-          let min = Infinity
-          let max = -Infinity
-          for (const c of children) {
-            const v = c.transform.p[axis]!
-            if (v < min) min = v
-            if (v > max) max = v
-          }
-          if (max - min >= 1e-6) coincident = false
-        }
+        // **问 `explodeOffsets` 而不是自己再算一遍质心。**
+        //
+        // 「锚点全部重合」在几何上就等于「径向派生位移全为零」——两种说法，一份实现。
+        // 原来这里逐轴取 min/max 比 1e-6，是「散开怎么算」的第二份定义；两份定义一旦
+        // 对不上（比如将来 radial 改成按包围盒中心而不是质心），这条检查会开始对着
+        // 一个已经不成立的模型报警。
+        //
+        // 用派生值判定还顺带覆盖了一种 min/max 版看不见的情形：某个成员钉了
+        // `explodeOffset`，那它就不该算进「散不开」——它有确定的去处。
+        const derived = explodeOffsets(doc, node.id, children)
+        const coincident = [...derived.values()].every((v) => Math.hypot(v[0], v[1], v[2]) < 1e-6)
         if (coincident) {
           add(
             'I22',

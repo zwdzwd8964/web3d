@@ -1740,8 +1740,8 @@
   ③ 删 rebuild 通知 → 幽灵对象断言红；④ 把 `clearMixers` 从 `resetScene` 里去掉 →
   「5 次不增长」红。**只测「调用后为 0」是假绿**：那条在没接进 `resetScene` 时也绿。
 
-### [ ] T-238 ★ · 爆炸位移的纯函数与它的完整测试
-- **依赖** T-225 · **预估** 1.0d · **实际** —
+### [x] T-238 ★ · 爆炸位移的纯函数与它的完整测试
+- **依赖** T-225 · **预估** 1.0d · **实际** 0.9d
 - **独占** `packages/schema/src/explode-math.ts`(新) · `packages/schema/test/explode-math.test.ts`(新)
 - **做** `explodeOffsets(doc, groupNodeId, children?)`，radial 与 axis 两条路径；
   **排序必须是 `(dot(p,axis), order, id)` 三级**；零向量轴兜底 `[0,1,0]`；`explodeOffset` 非空时
