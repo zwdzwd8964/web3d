@@ -39,6 +39,7 @@ export interface CapabilityEntry {
 export const CAPABILITY_ENTRIES: readonly CapabilityEntry[] = [
   // --- 动作：规则面板 → 新建规则 → 动作下拉 ---
   { capability: 'action:closePanel', selector: '[data-testid="rule-action-type"] option[value="closePanel"]' },
+  { capability: 'action:explode', selector: '[data-testid="rule-action-type"] option[value="explode"]' },
   { capability: 'action:highlight', selector: '[data-testid="rule-action-type"] option[value="highlight"]' },
   { capability: 'action:moveCamera', selector: '[data-testid="rule-action-type"] option[value="moveCamera"]' },
   { capability: 'action:openLink', selector: '[data-testid="rule-action-type"] option[value="openLink"]' },

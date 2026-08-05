@@ -1898,8 +1898,8 @@
   而 parity 脚本里没有 tween 之后读 positionY 的步骤。爆炸视图大规模移动 transform，
   正好把这条踩响。
 
-### [ ] T-246 · `explode` 动作（ECA 三文件法）
-- **依赖** T-245 · **预估** 0.5d · **实际** —
+### [x] T-246 · `explode` 动作（ECA 三文件法）
+- **依赖** T-245 · **预估** 0.5d · **实际** 0.7d
 - **独占** `packages/core/src/eca/actions/scene.ts` · `packages/core/src/eca/actions/scene.test.ts`
 - **做** 动作名 **`explode`**（不是 `setExplode`）；`refs()` 返回 `[{kind:'node', id}]` 并带
   `expectType:'explodeGroup'`——**爆炸是按分组的，`refs()` 返回 `[]` 会让删掉分组节点时前置检查失明**。

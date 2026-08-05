@@ -114,6 +114,18 @@ export const sectionFactory: SectionFactory = {
  */
 export class SectionLayer {
   private planes: Plane[] = []
+  /**
+   * 上一次见过的文档，以及它里面有没有剖切面。
+   *
+   * **这不是微优化，是复杂度。** `sync` 会被 `/nodes/**` 的每一条 transform / visible /
+   * parent 补丁各调一次，而一次「整份 nodes 被替换」的提交带 n 条补丁——不缓存的话
+   * 每条都要扫一遍全部节点，1000 个节点的一次导入就是 O(n²)。T-184 的缩放测试
+   * （1000 → 2000 节点近似线性）当场把它抓了出来：3.09 倍，门槛是 3。
+   *
+   * 按对象身份比，不按内容：一个批次里的每条补丁拿到的是**同一个** `next` 对象。
+   */
+  private lastDoc: SceneDocument | null = null
+  private lastHasSections = false
 
   constructor(private readonly graph: SceneGraph) {}
 
@@ -121,6 +133,13 @@ export class SectionLayer {
    * 按文档与场景图重算。`renderer` 为 null 时只算不写（无头路径也要能问「有几条」）。
    */
   sync(doc: SceneDocument, renderer: RendererLike | null): void {
+    if (doc !== this.lastDoc) {
+      this.lastDoc = doc
+      this.lastHasSections = doc.nodes.some((node) => node.section !== null)
+    }
+    // 没有剖切面、而且此刻也没挂着任何平面 —— 绝大多数文档走的是这一条
+    if (!this.lastHasSections && this.planes.length === 0) return
+
     const active: Plane[] = []
     for (const node of doc.nodes) {
       if (node.section === null) continue

@@ -3,7 +3,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ActionRegistry, BUILTIN_ACTIONS, registerBuiltinActions } from '../../src/eca/actions/index.js'
 import { HeadlessRuntime } from '../../src/eca/headless.js'
-import { FIELD_KINDS } from '../../src/eca/types.js'
+import { AbortError, FIELD_KINDS } from '../../src/eca/types.js'
 import type { ActionDefinition, RuntimeEvent } from '../../src/eca/types.js'
 import { IDS } from '../helpers.js'
 
@@ -524,6 +524,163 @@ describe('media actions (v0.5 · T-163)', () => {
   })
 })
 
+
+describe('T-246 · explode', () => {
+  /** 黄金路径 + 一个真的会散开的爆炸分组。锚点互不相同，否则位移恒为零。 */
+  function explodeCtx() {
+    const doc = testDoc()
+    const shared = {
+      section: null,
+      explodeOffset: null,
+      prefabRef: null,
+      assetRef: null,
+      primitive: null,
+      light: null,
+      visible: true,
+      locked: false,
+      overrides: {},
+      transform: { p: [0, 0, 0] as [number, number, number], r: [0, 0, 0, 1] as [number, number, number, number], s: [1, 1, 1] as [number, number, number] },
+    }
+    const withGroup = {
+      ...doc,
+      nodes: [
+        ...doc.nodes,
+        { ...shared, id: 'nd_exgrp001', name: '爆炸组', parent: null, order: 8000, explode: { mode: 'radial' as const, gain: 2, axis: [0, 1, 0] as [number, number, number], spacing: 0.5, easing: 'linear' as const } },
+        { ...shared, id: 'nd_exmem001', name: '零件 1', parent: 'nd_exgrp001', order: 1, explode: null },
+        { ...shared, id: 'nd_exmem002', name: '零件 2', parent: 'nd_exgrp001', order: 2, explode: null, transform: { ...shared.transform, p: [0, 2, 0] as [number, number, number] } },
+      ],
+    } as SceneDocument
+    ctx = new HeadlessRuntime(withGroup)
+    return { ctx, doc: withGroup }
+  }
+
+  it('把分组推到指定系数，await:true 挂起到过渡结束', async () => {
+    explodeCtx()
+    const { done } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 0.5, await: true })
+    let settled = false
+    void Promise.resolve(done).then(() => {
+      settled = true
+    })
+
+    await ctx.clock.advance(499)
+    expect(settled, '提前结束了').toBe(false)
+    await ctx.clock.advance(1)
+    await done
+    expect(ctx.explodeOf('nd_exgrp001')).toBe(1)
+  })
+
+  it('`await:false` 立即 resolve，过渡仍在走', async () => {
+    explodeCtx()
+    const { done } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 0.5, await: false })
+    await done
+    expect(ctx.explodeOf('nd_exgrp001'), '还没走完').toBeLessThan(1)
+    await ctx.clock.advance(500)
+    expect(ctx.explodeOf('nd_exgrp001')).toBe(1)
+  })
+
+  it('`durationS <= 0` 立即到位', async () => {
+    explodeCtx()
+    const { done } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 0, await: true })
+    await done
+    expect(ctx.explodeOf('nd_exgrp001')).toBe(1)
+  })
+
+  it('`factor: 0` 即复原', async () => {
+    explodeCtx()
+    await (await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 0 })).done
+    await (await run('explode', { nodeId: 'nd_exgrp001', factor: 0, durationS: 0 })).done
+    expect(ctx.explodeOf('nd_exgrp001')).toBe(0)
+  })
+
+  it('**目标不是爆炸分组 → skip + error 日志，不抛**（B9）', async () => {
+    explodeCtx()
+    const { done } = await run('explode', { nodeId: 'nd_exmem001', factor: 1, durationS: 0 })
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+    expect(ctx.explodeOf('nd_exmem001')).toBe(0)
+    expect(ctx.logs.some((l) => l.level === 'error' && l.message.includes('不是爆炸分组'))).toBe(true)
+  })
+
+  it('被打断时冻结在当前系数并 reject AbortError', async () => {
+    explodeCtx()
+    const { done, controller } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 1, await: true })
+    await ctx.clock.advance(300)
+    controller.abort()
+
+    await expect(Promise.resolve(done)).rejects.toBeInstanceOf(AbortError)
+    const frozen = ctx.explodeOf('nd_exgrp001')
+    expect(frozen, '回零了 —— 用户眼里是一次闪回').toBeGreaterThan(0)
+    expect(frozen).toBeLessThan(1)
+  })
+
+  it('**`await:false` 被中断时不产生未处理拒绝**', async () => {
+    // 少了 `.catch(() => undefined)`，一次中断在浏览器里是一条用户会当成 bug 报上来的
+    // 控制台错误。这条测试装一个 unhandledRejection 监听来抓它。
+    explodeCtx()
+    const seen: unknown[] = []
+    const onUnhandled = (reason: unknown) => seen.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const { done, controller } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 1, await: false })
+      await done
+      controller.abort()
+      await ctx.clock.advance(10)
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+      await new Promise((r) => setImmediate(r))
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+    expect(seen).toEqual([])
+  })
+
+  it('`refs()` 带 `expectType: explodeGroup`', async () => {
+    explodeCtx()
+    const { definition, params } = await run('explode', { nodeId: 'nd_exgrp001', factor: 1, durationS: 0 })
+    expect(definition.refs(params)).toEqual([{ kind: 'node', id: 'nd_exgrp001', expectType: 'explodeGroup' }])
+  })
+
+  it('**目标存在但不是爆炸分组 → checkIntegrity 报 I14**', async () => {
+    // 卡面变异 ② 的落点。⚠ **不能用悬空 id 测**：`requireType` 在 id 解析不出来时直接
+    // 静默返回，`expectType` 从头到尾没参与——拿掉它那条断言照样绿（T-226 的
+    // `action-refs-gate` 正是那个形状，它用的是保证不存在的 id）。必须给一个**存在、
+    // 但类型不对**的目标。
+    const { checkIntegrity } = await import('@w3/schema')
+    const { createActionRefResolver } = await import('../../src/eca/actions/index.js')
+    const doc = explodeCtx().doc
+    const withRule = {
+      ...doc,
+      rules: [
+        {
+          id: 'rl_expl0001',
+          name: '炸开',
+          enabled: true,
+          when: { event: 'sceneReady' as const },
+          if: [],
+          ifAny: [],
+          mode: 'sequence' as const,
+          reentry: 'restart' as const,
+          onError: 'abort' as const,
+          // nd_exmem001 存在，但它是分组的成员，不是爆炸分组本身
+          then: [{ action: 'explode', params: { nodeId: 'nd_exmem001', factor: 1, durationS: 0 } }],
+        },
+      ],
+    } as SceneDocument
+
+    const issues = checkIntegrity(withRule, { actionRefs: createActionRefResolver(registry) })
+    const typed = issues.filter((i) => i.code === 'I14')
+    expect(typed, 'expectType 没起作用 —— 删掉它这条也绿').toHaveLength(1)
+    expect(typed[0]!.message).toContain('explodeGroup')
+  })
+
+  it('参数范围逐字照冻结清单：factor 0–5、durationS 0–60', () => {
+    const definition = registry.get('explode') as ActionDefinition<unknown>
+    expect(definition.schema.safeParse({ nodeId: 'nd_exgrp001', factor: 5.1 }).success).toBe(false)
+    expect(definition.schema.safeParse({ nodeId: 'nd_exgrp001', factor: -0.1 }).success).toBe(false)
+    expect(definition.schema.safeParse({ nodeId: 'nd_exgrp001', durationS: 60.1 }).success).toBe(false)
+    // 默认值也照抄：factor=1 / durationS=0.6 / await=false
+    const parsed = definition.schema.parse({ nodeId: 'nd_exgrp001' }) as Record<string, unknown>
+    expect(parsed).toMatchObject({ factor: 1, durationS: 0.6, await: false })
+  })
+})
 
 describe('G0-5 · every registered action has a test', () => {
   it('the tested set covers the registry exactly', () => {

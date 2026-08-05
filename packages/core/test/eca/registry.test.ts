@@ -74,7 +74,8 @@ describe('registerBuiltinActions()', () => {
     expect(registry.all().map((a) => a.type).sort()).toEqual(
       [
         'closePanel',
-        'highlight',
+        'explode',
+      'highlight',
         'moveCamera',
         'openLink',
         'openPanel',

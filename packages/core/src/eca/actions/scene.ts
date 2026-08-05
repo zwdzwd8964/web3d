@@ -124,4 +124,50 @@ export const resetScene = defineAction<z.infer<typeof ResetSceneParams>>({
   describe: () => '停止播放与高亮，将变换、显隐、材质、灯光与变量全部恢复到文档初始状态',
 })
 
-export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene]
+/**
+ * v1.0 · T-246 · 爆炸视图。参数逐字照规划 §4.3 的冻结条目。
+ *
+ * `expectType: 'explodeGroup'` 在**编辑期/发布期**由 `checkIntegrity` 消费（I14）；
+ * 执行期它是空转的——`REF_KINDS.node` 没有 `expectTypeOf` 钩子，`refTypeOk` 在钩子
+ * 缺席时无条件返回 true。所以 B9 的「目标不是爆炸分组就跳过」由**运行时自己**报，
+ * 不靠引用检查（两个运行时的措辞在契约套件里逐字比对，T-245）。
+ */
+const ExplodeParams = z.object({
+  nodeId: NodeIdSchema,
+  factor: z.number().min(0).max(5).default(1),
+  durationS: z.number().min(0).max(60).default(0.6),
+  await: z.boolean().default(false),
+})
+
+export const explode = defineAction<z.infer<typeof ExplodeParams>>({
+  type: 'explode',
+  schema: ExplodeParams,
+  async handler(ctx, p, signal) {
+    const done = ctx.setExplode(p.nodeId, p.factor, { durationS: p.durationS, signal })
+    if (p.await) {
+      await done
+      return
+    }
+    // `await: false` 必须 `.catch`：一次中断会变成未处理拒绝，在浏览器里是一条用户
+    // 会当成 bug 报上来的控制台错误（与 playAnimation 逐字同形）。
+    void done.catch(() => undefined)
+  },
+  ui: {
+    label: '爆炸视图',
+    group: 'scene',
+    icon: 'sparkle',
+    fields: [
+      { key: 'nodeId', type: 'ref', refKind: 'node', label: '爆炸分组', required: true },
+      { key: 'factor', type: 'number', label: '系数（0 即复原）', default: 1, min: 0, max: 5 },
+      { key: 'durationS', type: 'number', label: '过渡时长（秒）', default: 0.6, min: 0, max: 60 },
+      { key: 'await', type: 'boolean', label: '等待过渡结束再执行下一步', default: false },
+    ],
+  },
+  refs: (p) => [{ kind: 'node', id: p.nodeId, expectType: 'explodeGroup' }],
+  describe: (p, doc) =>
+    p.factor === 0
+      ? `复原分组「${nodeName(doc, p.nodeId)}」的爆炸视图`
+      : `将分组「${nodeName(doc, p.nodeId)}」爆炸到 ${p.factor} 成${p.await ? '（等待结束）' : ''}`,
+})
+
+export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene, explode]
