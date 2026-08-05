@@ -269,3 +269,5 @@
 | T-227 | ⑤ | dataSources 的路径用 mapping 而不是 map | 路径断言必须红 | 红 · 1 条 | — | 还原。卡面写的是 mapping[].variableId，schema 里的字段名是 map（data-source.ts:96）。TS 会拦住 doc.dataSources[i].mapping，但**拼进 path 字符串的那个词没有任何类型检查**，而 path 是给删除确认直接展示的 |
 | T-227 | ⑥ | flowStepEnter 只登记 flow 不登记 step | 「步骤的引用有三类」必须红 | 红 · 2 条 | — | 还原。卡面验收说 step 的引用是「startStepId / next 两类」，那是只登记 flow 的版本。裁决登记两条：删掉一个步骤，指着它的 flowStepEnter 规则也会失效，删除确认必须说得出 |
 | T-227 | ⑦ | media-edit 的 refSummary 改回只认 hotspot / rule | 新加的回归必须红 | 红 · 1 条 | — | 还原。这是本卡**自己造出来的**缺陷：加了 overlay→media 出边之后，refCount 数全部而 refSummary 只认两种，一份只被覆盖层引用的媒体会显示「被引用」却说不出被谁。编辑器现有用例的样本文档不含 pages，全程绿 |
+| T-228 | ①~⑦ | 八个 v3 新默认值各改成明显错的值（fog.near / fog.density / outline.strength / outline.hiddenEdge / explode.gain / section.size / dataSource.intervalMs） | 八次全部转红 | 红 · 七条各红 1~2 条 | — | 还原。对应 v0.5 M8 那次「8 个默认值被改坏而全套测试全绿」 |
+| T-228 | ⑧ | text overlay 的 `size` 默认值 16 → 24 | 同上 | 绿 · 补了「两条路径同值」那条之后转红 1 条 | a | 已修。**`props` 整个缺席时 zod 用的是 `.default(DEFAULT_TEXT_PROPS)` 那个手写常量，`props: {}` 时才逐字段走各自的 `.default()`**——两份独立的值，可以静默分叉。原来那批「props 逐值」断言走的全是常量那一条路，所以改坏逐字段 default 一条都不红。这与 T-225 的反向比对逮到的 `hiddenEdge` / `strength` 分叉是同一形状：同一个值在仓库里写了两遍 |

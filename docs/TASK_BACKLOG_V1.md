@@ -1502,8 +1502,8 @@
   ③ `getFlowChain` 的环截断删掉 → 「环形 flow 不死循环」红（**必须有超时保护并用长度断言，
   否则它不是转红是挂住**）；④ `describeReferences` 的 `page` 标签删掉 → 断中文标签那条红。
 
-### [ ] T-228 · frozen-contract 的 v3 describe 块
-- **依赖** T-225 · **预估** 0.4d · **实际** —
+### [x] T-228 · frozen-contract 的 v3 describe 块
+- **依赖** T-225 · **预估** 0.4d · **实际** 0.5d
 - **独占** `packages/schema/test/frozen-contract.test.ts`
 - **做** 为每一个带 default 的新字段写**逐值断言**（fog 四个 / outline 两个 / section 三个 +
   plane 三个 / explode 两个 / prefab.version / overlay 四支各自 props / dataSource.intervalMs 与上下限 /
