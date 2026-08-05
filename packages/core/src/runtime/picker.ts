@@ -1,6 +1,6 @@
 import type { SceneDocument } from '@w3/schema'
 import { Raycaster, Vector2 } from 'three'
-import type { Camera, Object3D } from 'three'
+import type { Camera, Object3D, Plane, Vector3 } from 'three'
 import type { SceneGraph } from './scene-graph.js'
 
 /**
@@ -34,12 +34,30 @@ export interface PickOptions {
   readonly ignoreLocked?: boolean
 }
 
+/** 命中点贴着切面时的容差。见 `isClipped`。 */
+const CLIP_EPSILON = 1e-6
+
 export class Picker {
   private raycaster = new Raycaster()
   private pointer = new Vector2()
   private auxRoot: Object3D | null = null
+  /**
+   * T-250 · 当前生效的裁剪平面。
+   *
+   * **不做「点被剖掉的墙仍然选中墙」**：那是所有剖切功能里观感最差的一处——画面上那面墙
+   * 明明被切开了，点它却选中它。渲染器把这些像素丢了，拾取也该丢。
+   *
+   * 由 `SceneRuntime` 每次 `syncSections` 之后推进来，与写给渲染器的是**同一个数组**。
+   * 各自算一份的话，两边在浮点最后一位上分家，症状是「切口边缘点得中、点不中随机」。
+   */
+  private clipPlanes: readonly Plane[] = []
 
   constructor(private readonly graph: SceneGraph) {}
+
+  /** T-250 · 换一批裁剪平面。空数组 = 不做剖切感知。 */
+  setClipPlanes(planes: readonly Plane[]): void {
+    this.clipPlanes = planes
+  }
 
   /**
    * A second root to ray-cast, for objects that stand in for something unpickable.
@@ -126,6 +144,7 @@ export class Picker {
 
     for (const hit of hits) {
       if (!isRenderable(hit.object)) continue
+      if (this.isClipped(hit.point)) continue
       const nodeId = this.graph.nodeIdFor(hit.object)
       if (!nodeId) continue
       if (options.exclude?.has(nodeId)) continue
@@ -138,6 +157,23 @@ export class Picker {
       }
     }
     return null
+  }
+
+  /**
+   * T-250 · 这个命中点被裁掉了吗。
+   *
+   * three 的约定：`plane.distanceToPoint(p) < 0` 的一侧被丢弃。这里用 **`< -CLIP_EPSILON`**
+   * 而不是 `< 0`——命中点几乎总是落在几何体表面上，而射线求交本身带浮点误差。恰好贴着
+   * 平面的那一刀，用 `< 0` 会随机地把「刚好在平面上」的点判成被裁掉，症状是沿切口的
+   * 一条线上「点得中、点不中」交替出现。
+   *
+   * 判据在**任意一个**平面下成立就算被裁：three 的多平面裁剪是交集语义。
+   */
+  private isClipped(point: Vector3): boolean {
+    for (const plane of this.clipPlanes) {
+      if (plane.distanceToPoint(point) < -CLIP_EPSILON) return true
+    }
+    return false
   }
 
   /** Every node under the pointer, nearest first. Used by "select behind" affordances. */
@@ -160,6 +196,7 @@ export class Picker {
 
     for (const hit of this.raycaster.intersectObjects(this.roots(), true)) {
       if (!isRenderable(hit.object)) continue
+      if (this.isClipped(hit.point)) continue
       const nodeId = this.graph.nodeIdFor(hit.object)
       if (!nodeId || seen.has(nodeId)) continue
       if (options.exclude?.has(nodeId)) continue

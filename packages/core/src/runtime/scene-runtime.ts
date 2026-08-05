@@ -579,6 +579,9 @@ export class SceneRuntime implements RuntimeContext {
    */
   private syncSections(doc: SceneDocument): void {
     this.sections.sync(doc, this.renderer ?? null)
+    // T-250 · 渲染器丢掉的像素，拾取也要丢。**推的是同一个数组**——各自算一份的话，
+    // 两边在浮点最后一位上分家，症状是「切口边缘点得中、点不中随机」。
+    this.picker.setClipPlanes(this.sections.livePlanes)
   }
 
   /** 按当前文档与渲染器重算管线。文档变了、渲染器来了或走了，都要过这里。 */
