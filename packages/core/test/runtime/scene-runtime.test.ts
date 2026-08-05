@@ -1,6 +1,8 @@
 import type { Light, NodeOverrides, SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument, identityTransform } from '@w3/schema'
-import { PCFSoftShadowMap } from 'three'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { Object3D, PCFSoftShadowMap } from 'three'
 import type { SpotLight } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionRegistry, registerBuiltinActions } from '../../src/eca/actions/index.js'
@@ -8,6 +10,7 @@ import { EcaEngine } from '../../src/eca/engine.js'
 import { createMemoryResolver } from '../../src/runtime/loader.js'
 import { NullHotspotRenderer } from '../../src/runtime/hotspot-layer.js'
 import { SceneRuntime } from '../../src/runtime/scene-runtime.js'
+import type { SceneRuntimeOptions } from '../../src/runtime/scene-runtime.js'
 import type { LogLevel } from '../../src/eca/types.js'
 import type { RuntimeEvent } from '../../src/eca/types.js'
 import { describeRuntimeContract } from '../runtime-contract.js'
@@ -117,6 +120,8 @@ function makeRuntime(
   doc: SceneDocument = createGoldenPathDocument(),
   logs?: [LogLevel, string][],
   files: Map<string, ArrayBuffer> = new Map(),
+  // T-235 · composer 工厂。缺省不注入 —— 那正是「默认走直连」的形状。
+  createComposer?: SceneRuntimeOptions['createComposer'],
 ) {
   clock = 0
   const { renderer, calls, shadowMap } = fakeRenderer()
@@ -128,6 +133,7 @@ function makeRuntime(
     hotspotRenderer: new NullHotspotRenderer(),
     now: () => clock,
     onLog: (level, message) => logs?.push([level, message]),
+    ...(createComposer === undefined ? {} : { createComposer }),
   })
   return { runtime, calls, shadowMap }
 }
@@ -669,6 +675,170 @@ describe('shadows (T-132)', () => {
     expect(meshes, '这份 GLB 里 泵体 应当真的有 mesh').toBeGreaterThan(0)
 
     expect(runtime.graph.objectFor(IDS.cover)!.castShadow, '被单独关掉的节点不受父级影响').toBe(false)
+    runtime.dispose()
+  })
+})
+
+/* ========================================================================== */
+/* T-235 · 唯一渲染出口 · capturing 守卫 · chrome 注册表                        */
+/* ========================================================================== */
+
+describe('T-235 · 唯一渲染出口', () => {
+  it('源文件里 renderer?.render( 恰好出现一次', () => {
+    // 收口前是 2 处（tick 与 renderFrame 各一），加一条后处理链就要两处都记得改，
+    // 而漏掉的那一处会在某个宿主上安静地画出没有描边的画面。
+    //
+    // ADR-0025 预告了一条脚本化的检查（与出图同版本新建）。在它落地之前，这条 grep
+    // 是唯一拦着后来人再加一处的东西 —— 所以它读的是**源文件文本**，不是行为。
+    const source = readFileSync(
+      fileURLToPath(new URL('../../src/runtime/scene-runtime.ts', import.meta.url)),
+      'utf8',
+    )
+    // **先去注释再数。** 第一版没去，于是 `drawScene()` 自己那句「全文件唯一一处
+    // `renderer?.render(`」的注释被算成了第二处命中——一条检查把自己的说明文字
+    // 当成了违规。ADR-0025 预告的那条脚本化检查同样要处理这件事。
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const hits = code.match(/renderer\?\.render\(/g) ?? []
+    expect(hits, `renderer?.render( 出现了 ${hits.length} 次，应当只在 drawScene() 里有一处`).toHaveLength(1)
+  })
+
+  it('tick() 与 renderFrame() 走同一个出口', () => {
+    const { runtime, calls } = makeRuntime()
+    const before = calls.render
+    runtime.tick()
+    const afterTick = calls.render
+    runtime.renderFrame()
+    const afterFrame = calls.render
+
+    expect(afterTick - before, 'tick 画了一帧').toBe(1)
+    expect(afterFrame - afterTick, 'renderFrame 也画了一帧').toBe(1)
+    runtime.dispose()
+  })
+})
+
+describe('T-235 · capturing 守卫', () => {
+  it('出图期间 tick() 不画', () => {
+    const { runtime, calls } = makeRuntime()
+    runtime.tick()
+    const drawn = calls.render
+
+    runtime.beginCapture()
+    runtime.tick()
+    runtime.tick()
+    expect(calls.render, '出图期间画布上会是半改完的状态').toBe(drawn)
+
+    runtime.endCapture()
+    runtime.tick()
+    expect(calls.render).toBe(drawn + 1)
+    runtime.dispose()
+  })
+
+  it('出图期间的 resize 被记下来，结束时补上', () => {
+    const { runtime, calls } = makeRuntime()
+    runtime.resize(800, 600)
+    const sized = calls.setSize
+
+    runtime.beginCapture()
+    runtime.resize(100, 50)
+    expect(calls.setSize, '出图算了一半的分辨率不许被冲掉').toBe(sized)
+
+    runtime.endCapture()
+    expect(calls.setSize, '结束时要补上那一次').toBe(sized + 1)
+    runtime.dispose()
+  })
+
+  it('出图期间没有 resize 过，结束时也不多画一次', () => {
+    const { runtime, calls } = makeRuntime()
+    runtime.resize(800, 600)
+    const sized = calls.setSize
+    runtime.beginCapture()
+    runtime.endCapture()
+    expect(calls.setSize).toBe(sized)
+    runtime.dispose()
+  })
+})
+
+describe('T-235 · chrome 注册表接到运行时上', () => {
+  /**
+   * chrome 只在 `mode: 'edit'` 下存在——播放器本来就不画它，所以 `setChromeVisible`
+   * 在 play 模式下是刻意的空操作。`makeRuntime` 是 play 模式的，这里另起一个。
+   */
+  const editRuntime = () =>
+    new SceneRuntime(createGoldenPathDocument(), {
+      canvas: canvas(),
+      resolver: createMemoryResolver(new Map()),
+      mode: 'edit',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+    })
+
+  it('setEditorChromeVisible 是 setChromeVisible 的别名，两者作用相同', () => {
+    const runtime = editRuntime()
+    const extra = new Object3D()
+    extra.name = 'w3:probe'
+    const off = runtime.registerChrome(extra)
+
+    runtime.setEditorChromeVisible(false)
+    expect(extra.visible, '通过别名隐藏的也是同一批对象').toBe(false)
+
+    runtime.setChromeVisible(true)
+    expect(extra.visible).toBe(true)
+
+    off()
+    runtime.dispose()
+  })
+
+  it('反注册之后不再受开关影响', () => {
+    const runtime = editRuntime()
+    const extra = new Object3D()
+    const off = runtime.registerChrome(extra)
+    off()
+
+    runtime.setChromeVisible(false)
+    expect(extra.visible, '已经摘掉的对象不该再被翻').toBe(true)
+    runtime.dispose()
+  })
+
+  it('play 模式下开关是空操作 —— 播放器本来就没有 chrome', () => {
+    // `makeRuntime` 就是 play 模式。注册得进去（宿主不必先问自己是什么模式），
+    // 但开关不动它——播放器画面里本来就没有这些东西。
+    const { runtime } = makeRuntime()
+    const extra = new Object3D()
+    runtime.registerChrome(extra)
+    runtime.setChromeVisible(false)
+    expect(extra.visible).toBe(true)
+    runtime.dispose()
+  })
+})
+
+describe('T-235 · 管线接在运行时的三个点上', () => {
+  it('默认文档：composer 工厂一次都没被调用', () => {
+    const createComposer = vi.fn()
+    const { runtime } = makeRuntime(createGoldenPathDocument(), undefined, undefined, createComposer)
+    expect(createComposer).not.toHaveBeenCalled()
+    expect(runtime.pipelineMode).toBe('direct')
+    runtime.dispose()
+  })
+
+  it('setPostFxEnabled(true) 之后 mode 变成 composed', () => {
+    const createComposer = vi.fn(() => ({
+      passes: [] as unknown[],
+      addPass: () => {},
+      render: () => {},
+      setSize: () => {},
+      dispose: () => {},
+      renderTarget1: { samples: 4 },
+      renderTarget2: { samples: 0 },
+    }))
+    const { runtime } = makeRuntime(createGoldenPathDocument(), undefined, undefined, createComposer)
+
+    runtime.setPostFxEnabled(true)
+    expect(createComposer).toHaveBeenCalledTimes(1)
+    expect(runtime.pipelineMode).toBe('composed')
+
+    runtime.setPostFxEnabled(null)
+    expect(runtime.pipelineMode).toBe('direct')
     runtime.dispose()
   })
 })

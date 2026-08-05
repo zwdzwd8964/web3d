@@ -1652,8 +1652,8 @@
 > **渲染出口的四方争用是 v1.0 的第二顺位阻断项。** T-235 是 `scene-runtime.ts` 那条串行链的头，
 > 在它落地之前不开工后处理 / 剖切 / 爆炸任何一张。
 
-### [ ] T-235 ★ · `RenderPipeline` + 唯一渲染出口 `drawScene()` + `capturing` 守卫 + chrome 注册
-- **依赖** T-200 · T-225 · **预估** 2.8d · **实际** —
+### [x] T-235 ★ · `RenderPipeline` + 唯一渲染出口 `drawScene()` + `capturing` 守卫 + chrome 注册
+- **依赖** T-200 · T-225 · **预估** 2.8d · **实际** 2.4d
 - **独占** `packages/core/src/runtime/render-pipeline.ts`(新) · `packages/core/src/runtime/scene-runtime.ts` ·
   `packages/core/src/runtime/chrome-registry.ts`(新) · `packages/core/test/runtime/render-pipeline.test.ts`(新)
 - **做** （三合一合并卡：渲染出口收口 + 后处理管线 + `editorAux`/`registerChrome` 合成）

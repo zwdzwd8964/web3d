@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createGoldenPathDocument } from '@w3/schema'
-import { Object3D } from 'three'
 import { describe, expect, it } from 'vitest'
 import { NullHotspotRenderer } from '../../src/runtime/hotspot-layer.js'
 import { createMemoryResolver } from '../../src/runtime/loader.js'
@@ -178,10 +177,6 @@ describe('不注入时的构造参数', () => {
  * therefore both the assertion and the ledger: if it is empty, the seam list is fully wired.
  */
 const SEAMS: readonly [member: string, owner: string, invoke: (runtime: SceneRuntime) => unknown][] = [
-  ['registerChrome', 'T-235', (r) => r.registerChrome(new Object3D())],
-  ['setChromeVisible', 'T-235', (r) => r.setChromeVisible(false)],
-  ['pipelineMode', 'T-235', (r) => r.pipelineMode],
-  ['setPostFxEnabled', 'T-235', (r) => r.setPostFxEnabled(true)],
   ['setSelectionOutline', 'T-241', (r) => r.setSelectionOutline([])],
   ['setExplode', 'T-244', (r) => r.setExplode('nd_00000001', 1)],
   ['captureImage', 'T-266', (r) => r.captureImage({})],
@@ -193,8 +188,11 @@ const SEAMS: readonly [member: string, owner: string, invoke: (runtime: SceneRun
 ]
 
 describe('接缝清单', () => {
-  it('opens exactly twelve seams', () => {
-    expect(SEAMS).toHaveLength(12)
+  it('opens exactly eight seams', () => {
+    // 12 → 8：T-235 接线了 registerChrome / setChromeVisible / pipelineMode /
+    // setPostFxEnabled 四条，按 T-200 定的规矩把它们从这张表里删掉。
+    // **这张表是进度台账**：一条接缝被实现，它就从这里消失，而不是改成「已实现」。
+    expect(SEAMS).toHaveLength(8)
   })
 
   it.each(SEAMS)('%s (%s) exists and throws until it is wired', (member, owner, invoke) => {

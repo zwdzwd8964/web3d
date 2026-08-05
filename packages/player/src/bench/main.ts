@@ -181,6 +181,7 @@ async function lightingRamp(
   const spread = Math.max(1, boundingSpan(runtime.graph.root))
   const added: { removeFromParent: () => void; dispose?: () => void }[] = []
   const levels: LightLevel[] = []
+  let postFx: { composedFps: number; directFps: number; mode: string } | null = null
 
   try {
     for (const shadows of SHADOW_MODES) {
@@ -218,10 +219,31 @@ async function lightingRamp(
       }
 
       while (added.length > 0) added.pop()?.removeFromParent()
+
+      // T-235 · 顺带量一次「开 / 关后处理链」的差。
+      //
+      // 走 `setPostFxEnabled` 而不是改文档：改文档会连带触发一次补丁与一次
+      // `applyBackground`，测出来的是两件事混在一起的数。量完交还给文档（`null`）。
+      if (shadows === 'off') {
+        runtime.setPostFxEnabled(true)
+        const composed = summariseFrames(await measure(runtime, session, 600, 4))
+        runtime.setPostFxEnabled(false)
+        const direct = summariseFrames(await measure(runtime, session, 600, 4))
+        runtime.setPostFxEnabled(null)
+        postFx = { composedFps: composed.fps, directFps: direct.fps, mode: runtime.pipelineMode }
+      }
     }
   } finally {
     for (const light of added) light.removeFromParent()
     runtime.setShadowsEnabled(false)
+  }
+  // T-235 · 后处理链的开 / 关对比跟着灯光扫描一起回报。它不是一档「灯光级别」，
+  // 所以挂在返回值旁边而不是塞进 levels —— 混进去会让「第几档掉到 30fps 以下」这个
+  // 读数变成两件事的混合。
+  if (postFx) {
+    console.info(
+      `[bench] 后处理链：composed ${postFx.composedFps.toFixed(1)} fps / direct ${postFx.directFps.toFixed(1)} fps（当前 mode=${postFx.mode}）`,
+    )
   }
   return levels
 }

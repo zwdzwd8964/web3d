@@ -21,6 +21,7 @@
 |---|---|---|---|---|
 | 2026-08-03 | T-205 | — | 34 | 建表。当天实测孤儿数见提交信息。**原记作 24，与常量不符**——`MAX_EXEMPTIONS` 自 d7adf97 起就是 34，从未改过（`git log -S` 实测），是这一行写错了，T-225 订正 |
 | 2026-08-04 | T-225 | 34 | 35 | **本表唯一一次上调**。`schema:EXPLODE_MODE_LABELS` 是规划 §4.1.1 逐字冻结的一项，v1.0 内没有任何消费者、v1.2 的 T-244 爆炸面板才用得上。三条路各自的代价：删掉它 = 偏离 §4 的冻结清单；假造一个 v1.0 调用点 = 正是本守卫要拦的东西；上调 1 并登记 = 守卫完整、可逆、到期自动转红。取第三条 |
+| 2026-08-05 | T-235 | 35 | **33** | **第一次往下走。** 接线了 registerChrome / setChromeVisible / pipelineMode / setPostFxEnabled 四条接缝，四行豁免随之删除；同时为 beginCapture / endCapture 新增两行（owner T-266，出图链路才有调用方）。净 −2。**这就是棘轮该有的样子**：交付一张卡，表变短 |
 
 ## 豁免
 
@@ -50,10 +51,8 @@
 | core:RendererLike.localClippingEnabled | T-243 同批，逐材质剖切的开关留在接口上先不启用 | T-243 | v1.2 |
 | core:RendererLike.capabilities | T-262 的出图钳位公式要读 maxTextureSize 判上限 | T-262 | v1.2 |
 | core:RendererLike.setRenderTarget | T-235 的 composer 需要它切换离屏目标与画布 | T-235 | v1.2 |
-| core:SceneRuntime.registerChrome | T-235 交付渲染出口收口时把 chrome 注册接上，本卡只开签名并抛未接线 | T-235 | v1.2 |
-| core:SceneRuntime.setChromeVisible | T-235 交付，届时 setEditorChromeVisible 变成它的别名 | T-235 | v1.2 |
-| core:SceneRuntime.pipelineMode | T-235 交付后处理管线后才有 direct 与 composed 两种取值 | T-235 | v1.2 |
-| core:SceneRuntime.setPostFxEnabled | T-235 交付，只给 benchmark 页用来对比开关描边的帧率 | T-235 | v1.2 |
+| core:SceneRuntime.beginCapture | T-266 的出图八步链路在开头调它：期间 tick 不画、resize 只记不改 | T-266 | v1.2 |
+| core:SceneRuntime.endCapture | T-266 同批交付，它负责弹出被推迟的 resize | T-266 | v1.2 |
 | core:SceneRuntime.setSelectionOutline | T-241 的场景效果面板把编辑器选中态接进描边通道 | T-241 | v1.2 |
 | core:SceneRuntime.setExplode | T-244 的爆炸叠加层与 T-248 的滑块工具态调用它 | T-244 | v1.2 |
 | core:SceneRuntime.captureImage | T-266 的出图八步链路由它编排，含还原栈与重入拒绝 | T-266 | v1.2 |

@@ -278,7 +278,11 @@ describe('helpers after a graph rebuild', () => {
 describe('preview drops the editing chrome (T-182)', () => {
   it('hides the grid, and brings it back on the way out', () => {
     const runtime = makeRuntime(docWithLight(spot))
-    const grid = runtime.scene.children.find((o) => o.name === 'w3:grid')
+    // T-235 · 用 `getObjectByName`（会遍历）而不是 `children.find`（只看一层）：
+    // 网格现在挂在 chrome 注册表的 Group 下，不再是场景的直接子节点。
+    // 生产侧本来就是这么找的（editor 的 preview/controller.ts:117），只有这条测试
+    // 依赖了「直接子节点」这个从来不是契约的细节。
+    const grid = runtime.scene.getObjectByName('w3:grid')
     expect(grid, '前提：编辑态确实有网格').toBeDefined()
 
     runtime.setEditorChromeVisible(false)

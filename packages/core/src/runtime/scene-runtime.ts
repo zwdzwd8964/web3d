@@ -4,6 +4,9 @@ import { neverEnds } from '../eca/types.js'
 import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
 import type { Texture, WebGLRenderer } from 'three'
 import { createWebGLRenderer } from './renderer-like.js'
+import { ChromeRegistry } from './chrome-registry.js'
+import { RenderPipeline } from './render-pipeline.js'
+import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from '../eca/types.js'
@@ -75,6 +78,13 @@ export interface SceneRuntimeOptions {
   /** Injected so parity runs are deterministic. Production uses performance.now(). */
   readonly now?: () => number
   readonly onLog?: (level: LogLevel, message: string, data?: unknown) => void
+  /**
+   * T-235 · 造后处理 composer 的工厂，透传给 {@link RenderPipeline}。
+   *
+   * 缺省不注入 = 永远走直连路径。生产宿主（编辑器 / 播放器）注入真实现，单测注入桩：
+   * 真 `EffectComposer` 需要 WebGL 上下文，在 Node 里 new 一下就抛。
+   */
+  readonly createComposer?: RenderPipelineOptions['createComposer']
 }
 
 /** The shape every three light class shares. Duck-typed so no `instanceof` chain is needed. */
@@ -107,6 +117,18 @@ export class SceneRuntime implements RuntimeContext {
   readonly environment: EnvironmentController
   /** T-136 · edit mode only; null in play, where there is nothing to author. */
   readonly lightHelpers: LightHelperLayer | null
+  /** T-235 · 编辑期辅助物的登记处。 */
+  private readonly chrome = new ChromeRegistry()
+  private readonly pipeline: RenderPipeline
+  /**
+   * 出图进行中。
+   *
+   * 出图要临时改尺寸、像素比与可见性，然后逐帧画到离屏目标上。这期间 `tick()` 再往画布
+   * 上画一帧，画出来的是**半改完的状态**；而一次窗口 resize 会把出图算了一半的尺寸冲掉。
+   * 所以 tick 早退、resize 记下来等出图结束再补。
+   */
+  private capturing = false
+  private pendingResize: [number, number] | null = null
   /** The edit-mode ground grid, kept so preview can take it away again. */
   private grid: GridHelper | null = null
   /** T-163 · the scene's audio: what rules started and what leaving preview silences. */
@@ -216,11 +238,17 @@ export class SceneRuntime implements RuntimeContext {
     this.scene.add(this.graph.root)
     // ECA_SPEC §7 · helpers belong to editing, exactly like the grid. A published scene
     // must contain no trace of them (and the picker must not offer them to a viewer).
+    this.pipeline = new RenderPipeline({
+      ...(options.createComposer === undefined ? {} : { createComposer: options.createComposer }),
+      log: (level, message, data) => this.log(level, message, data),
+    })
+
+    // chrome 的容器进场景，同时当 picker 的 aux 槽（X-22 合成）。
+    this.scene.add(this.chrome.root)
+    this.picker.setAuxRoot(this.chrome.root)
+
     this.lightHelpers = options.mode === 'edit' ? new LightHelperLayer(this.graph) : null
-    if (this.lightHelpers) {
-      this.scene.add(this.lightHelpers.root)
-      this.picker.setAuxRoot(this.lightHelpers.root)
-    }
+    if (this.lightHelpers) this.chrome.register(this.lightHelpers.root)
     this.installLighting()
     this.syncDefaultRig(document)
     this.lightHelpers?.sync(document)
@@ -237,7 +265,7 @@ export class SceneRuntime implements RuntimeContext {
       const grid = new GridHelper(24, 48, 0x242b31, 0x1c2226)
       grid.name = 'w3:grid'
       this.grid = grid
-      this.scene.add(grid)
+      this.chrome.register(grid)
     }
   }
 
@@ -257,13 +285,66 @@ export class SceneRuntime implements RuntimeContext {
    * layer each time would drop the wireframes' warm state for no benefit.
    */
   setEditorChromeVisible(visible: boolean): void {
+    // T-235 · 别名。**编辑器继续调这个名字**（Viewport.tsx:199），内部转给注册表。
+    //
+    // 保留别名而不是让编辑器改调新名字，是被死导出闸门逼出来的：两者只能有一个有生产
+    // 调用者。这样一来 `setChromeVisible` 的调用者就是这一行，而它是真调用不是仪式——
+    // 「编辑期辅助物」这个概念的对外名字一直是 `EditorChrome`，注册表只是它的实现。
+    this.setChromeVisible(visible)
+  }
+
+  /**
+   * 登记一个编辑期辅助物，返回反注册闭包。
+   *
+   * 宿主侧的辅助物（变换手柄）由宿主注册；core 内部的（网格、灯光线框、拾取代理球）
+   * 在构造时就注册好了。**注册表是「哪些东西只在编辑时存在」的唯一真源**——
+   * 漏注册的症状是预览里多出一个播放器没有的东西，而那是 C3 分叉。
+   */
+  registerChrome(object: Object3D): () => void {
+    return this.chrome.register(object)
+  }
+
+  /**
+   * 一次性显示 / 隐藏全部编辑期辅助物。
+   *
+   * 显示时**还原每个对象隐藏那一刻的值**，不是一律 true：变换手柄的可见性由选择集
+   * 驱动（无选中时它自己是 false），一律 true 会在「退出预览且无选中」时把手柄画出来。
+   */
+  setChromeVisible(visible: boolean): void {
     if (this.options.mode !== 'edit') return
-    if (this.grid) this.grid.visible = visible
-    // One flag, two jobs: the renderer skips an invisible subtree, and so does this
-    // project's picker — `isPickable` walks every ancestor's `visible` precisely because
-    // three's raycaster does NOT. Taking the aux root off the picker as well would be a
-    // second mechanism for the same guarantee, and the one that later drifts.
-    if (this.lightHelpers) this.lightHelpers.root.visible = visible
+    this.chrome.setVisible(visible)
+  }
+
+  /** 当前渲染路径。`'composed'` 当且仅当后处理链真的建起来了。 */
+  get pipelineMode(): PipelineMode {
+    return this.pipeline.mode
+  }
+
+  /**
+   * 强制开 / 关后处理链，`null` 交还给文档。**benchmark 页专用**。
+   *
+   * 它存在的理由是让「开描边 vs 关描边」的帧率对比不必改文档——改文档会连带触发
+   * 一次补丁、一次 `sync`，测出来的是两件事混在一起的数。
+   */
+  setPostFxEnabled(enabled: boolean | null): void {
+    this.pipeline.setForced(enabled)
+    this.syncPipeline()
+  }
+
+  /**
+   * 出图开始 / 结束。owner 是 **T-266**（它编排八步出图链路）。
+   *
+   * 期间 `tick()` 不画、`resize()` 只记不改——理由见 {@link capturing} 的注释。
+   */
+  beginCapture(): void {
+    this.capturing = true
+  }
+
+  endCapture(): void {
+    this.capturing = false
+    const pending = this.pendingResize
+    this.pendingResize = null
+    if (pending) this.applyResize(pending[0], pending[1])
   }
 
   /* --- the default light rig (T-134 · D14) --------------------------------- */
@@ -378,8 +459,29 @@ export class SceneRuntime implements RuntimeContext {
    * moment any meta field changed, and the symptom — the HDRI backdrop reverting to grey
    * when you rename the project — would look like anything but a background-colour writer.
    */
+  /** 当前的 composer 上下文。没有渲染器时是 null——那时一律拆掉管线。 */
+  private composerContext(): ComposerContext | null {
+    if (this.renderer === null) return null
+    return {
+      renderer: this.renderer,
+      scene: this.scene,
+      camera: this.camera.camera,
+      width: this.width,
+      height: this.height,
+      pixelRatio: this.pixelRatio(),
+    }
+  }
+
+  /** 按当前文档与渲染器重算管线。文档变了、渲染器来了或走了，都要过这里。 */
+  private syncPipeline(): void {
+    this.pipeline.sync(this.document, this.composerContext())
+  }
+
   private applyBackground(doc: SceneDocument): void {
     this.environment.syncScene(doc)
+    // T-235 · `/meta/**` 的每一条补丁都从这里过（apply-patch 的 `case 'meta'` 是刻意
+    // fallthrough 的），所以描边开关一变，管线在同一帧就跟上。
+    this.syncPipeline()
   }
 
   /**
@@ -410,6 +512,9 @@ export class SceneRuntime implements RuntimeContext {
     // built in the constructor, long before a canvas exists, so `AssetLoaderOptions.renderer`
     // could never be set at that point — which is why the decoder was never constructed.
     this.loader.attachRenderer(renderer)
+    // T-235 · 渲染器通常**晚于**文档到达（canvas 挂载在文档加载之后）。
+    // 只在 applyBackground 里建管线的话，一份开着描边的文档在 attach 那一刻还是直连。
+    this.syncPipeline()
     const canvas = renderer.domElement
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
     // Tone mapping and the prefilter both live on the renderer, so a document that was
@@ -432,6 +537,9 @@ export class SceneRuntime implements RuntimeContext {
     if (!this.renderer) return
     // T-219 · the transcoder's worker pool and WASM belong to the renderer going away.
     this.loader.attachRenderer(null)
+    // 渲染器走了，composer 持有的 target 也必须走 —— 否则它们连着一个已经 dispose
+    // 的上下文，而挂卸 50 次之后 `renderer.info.memory.textures` 就回不到零了。
+    this.pipeline.dispose()
     this.renderer.dispose()
     this.renderer = null
   }
@@ -459,6 +567,16 @@ export class SceneRuntime implements RuntimeContext {
   }
 
   resize(width: number, height: number): void {
+    if (this.capturing) {
+      // 出图期间尺寸是被临时改过的。这一下若照做，出图算了一半的分辨率会被冲掉，
+      // 而用户拿到的是一张尺寸对不上的图。记下来，出图结束时补。
+      this.pendingResize = [width, height]
+      return
+    }
+    this.applyResize(width, height)
+  }
+
+  private applyResize(width: number, height: number): void {
     this.width = Math.max(1, width)
     this.height = Math.max(1, height)
     this.camera.setAspect(this.width / this.height)
@@ -471,6 +589,7 @@ export class SceneRuntime implements RuntimeContext {
     // three writes the DEVICE pixel count into the CSS size and a 2× screen shows a canvas
     // twice the size of its container.
     this.renderer?.setSize(this.width, this.height, false)
+    this.pipeline.setSize(this.width, this.height)
   }
 
   /**
@@ -593,7 +712,25 @@ export class SceneRuntime implements RuntimeContext {
   }
 
   /** One frame. Exposed so tests and the parity harness can step it by hand. */
+  /**
+   * T-235 · **全文件唯一一处 `renderer?.render(`。**
+   *
+   * 收口之前 `tick()` 与 `renderFrame()` 各写了一次，于是「加一条后处理链」这件事
+   * 要在两个地方都记得改，而漏掉的那一处会在某个宿主上安静地画出没有描边的画面。
+   * ADR-0025 已经预告了一条脚本化的「唯一渲染出口」检查（与出图同版本新建），
+   * 本卡先把出口收成一个。
+   */
+  private drawScene(): void {
+    if (this.pipeline.mode === 'composed') {
+      this.pipeline.render()
+      return
+    }
+    this.renderer?.render(this.scene, this.camera.camera)
+  }
+
   tick(): void {
+    // 出图进行中：画布上这一帧会是半改完的状态（尺寸、像素比、可见性都被临时改过）
+    if (this.capturing) return
     const now = this.now()
     this.tweens.update(now)
     this.clips.update(now)
@@ -605,7 +742,7 @@ export class SceneRuntime implements RuntimeContext {
       this.hotspots.update(this.document, this.camera.camera, this.width, this.height),
       this.document,
     )
-    this.renderer?.render(this.scene, this.camera.camera)
+    this.drawScene()
   }
 
   /**
@@ -630,6 +767,8 @@ export class SceneRuntime implements RuntimeContext {
     this.highlights.clearAll()
     this.materials.dispose()
     this.lightHelpers?.dispose()
+    this.pipeline.dispose()
+    this.chrome.dispose()
     // Before the graph: the environment holds a PMREM render target, which is VRAM nobody
     // else will ever free — scene.clear() only detaches it.
     this.environment.dispose()
@@ -759,7 +898,7 @@ export class SceneRuntime implements RuntimeContext {
    * would put three's own rAF loop in the way of that measurement.
    */
   renderFrame(): void {
-    this.renderer?.render(this.scene, this.camera.camera)
+    this.drawScene()
   }
 
   /* --- RuntimeContext ------------------------------------------------------ */
@@ -1126,26 +1265,6 @@ export class SceneRuntime implements RuntimeContext {
    *
    * Every entry names the card that owns it. No owner, no seam (D36's rule, applied early).
    */
-
-  /** T-235 · registers an editor-only object into the chrome group. Returns an un-register. */
-  registerChrome(_object: Object3D): () => void {
-    throw new Error(SEAM_NOT_WIRED('registerChrome', 'T-235'))
-  }
-
-  /** T-235 · shows/hides everything registered as chrome. Supersedes `setEditorChromeVisible`. */
-  setChromeVisible(_visible: boolean): void {
-    throw new Error(SEAM_NOT_WIRED('setChromeVisible', 'T-235'))
-  }
-
-  /** T-235 · whether the frame goes straight to the canvas or through the composer. */
-  get pipelineMode(): 'direct' | 'composed' {
-    throw new Error(SEAM_NOT_WIRED('pipelineMode', 'T-235'))
-  }
-
-  /** T-235 · benchmark-only override; the document is the normal driver. */
-  setPostFxEnabled(_enabled: boolean): void {
-    throw new Error(SEAM_NOT_WIRED('setPostFxEnabled', 'T-235'))
-  }
 
   /** T-241 · the editor's selection channel into the outline pass. */
   setSelectionOutline(_nodeIds: readonly string[]): void {

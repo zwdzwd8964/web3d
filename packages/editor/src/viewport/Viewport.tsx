@@ -153,7 +153,12 @@ export function Viewport() {
       gizmo.setSnap({ translate: settings.translate, rotateDeg: settings.rotate ? ANGLE_STEP_DEG : null })
     applySnap(getSnap())
     const unsubscribeSnap = onSnapChange(applySnap)
-    runtime.scene.add(gizmo.helper, gizmo.proxyObject)
+    // T-235 · 走注册表而不是 `scene.add`。
+    //
+    // 手柄与拾取代理球是**只因为有人在编辑才存在**的东西，与网格、灯光线框同一类。
+    // 直接 add 进场景意味着「预览时要藏什么」这份名单散在三个文件里，而漏掉一项的
+    // 症状是预览里多出一个播放器没有的东西——C3 分叉，且没有任何东西会报警。
+    const unregisterGizmo = [gizmo.helper, gizmo.proxyObject].map((o) => runtime.registerChrome(o))
 
     let cancelled = false
     void (async () => {
@@ -172,6 +177,7 @@ export function Viewport() {
       resize.disconnect()
       controllerRef.current?.dispose()
       controllerRef.current = null
+      for (const off of unregisterGizmo) off()
       gizmo.dispose()
       runtime.dispose()
       canvas.remove()
