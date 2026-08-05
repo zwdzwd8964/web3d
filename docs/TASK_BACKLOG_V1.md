@@ -2029,8 +2029,8 @@
   「restarts by default, and can be told not to」的测试（`actions.test.ts:76-80`）在同一变异下
   **是绿的**——**卡片提交信息里要把这个对照写出来**，它是 v0.5 教训 (a) 最好的现成反面教材。
 
-### [ ] T-254 · 动画面板：imported 建条目与编辑期预览播放（断链兑现）
-- **依赖** T-234 · T-237 · **预估** 0.8d · **实际** —
+### [x] T-254 · 动画面板：imported 建条目与编辑期预览播放（断链兑现）
+- **依赖** T-234 · T-237 · **预估** 0.8d · **实际** 1.3d
 - **独占** `packages/editor/src/panels/AnimationPanel.tsx` + 其测试 ·
   `packages/editor/src/viewport/runtime-registry.ts`（预览播放的只读钩子）
 - **做** 整条 `ClipPlayer` 栈（含 glTF 重名对象重绑算法、完整性检查、打包收集）建得很完整，

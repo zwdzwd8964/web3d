@@ -27,6 +27,32 @@ export function getActiveRuntime(): SceneRuntime | null {
   return active
 }
 
+/**
+ * T-254 · 编辑期预览播放一条动画。
+ *
+ * **不进文档、不进撤销栈**——播放进度是运行时瞬态（铁律 1 明写的那条例外）。面板不能
+ * 自己 `import { getActiveRuntime }` 之后随手调任意方法：那样一来「面板能对运行时做什么」
+ * 就没有边界了。这里只开两个方法，各自一行。
+ *
+ * 返回 false = 此刻没有活着的运行时（视口还没挂载）。调用方据此禁用按钮。
+ */
+export function previewAnimation(animationId: string): boolean {
+  const runtime = active
+  if (!runtime) return false
+  // fire-and-forget，但要自己吞掉 rejection：一次中断在浏览器里会变成一条用户
+  // 会当成 bug 报上来的控制台错误
+  void runtime.playAnimation(animationId, {}).catch(() => undefined)
+  return true
+}
+
+/** T-254 · 停掉编辑期预览。`reset: true` 让对象回到文档姿态。 */
+export function stopPreviewAnimation(animationId: string): boolean {
+  const runtime = active
+  if (!runtime) return false
+  runtime.stopAnimation(animationId, { reset: true })
+  return true
+}
+
 /** D1's fallback counter, surfaced for the status bar and for the E2E assertion. */
 export function fullRebuildCount(): number {
   return active?.fullRebuildCount ?? 0

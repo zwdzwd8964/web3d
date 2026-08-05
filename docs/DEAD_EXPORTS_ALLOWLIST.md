@@ -101,7 +101,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 - `schema:CollectionSpec.idPrefix`
 - `schema:CollectionSpec.patchPath`
 - `schema:createEmptyDocument`
-- `schema:createImportedAnimation`
 - `schema:createVariable`
 - `schema:createRule`
 - `schema:isId`
