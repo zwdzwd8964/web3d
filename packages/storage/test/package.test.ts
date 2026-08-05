@@ -1,4 +1,6 @@
-import { CURRENT_VERSION, createGoldenPathDocument } from '@w3/schema'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { CURRENT_VERSION, createGoldenPathDocument, deriveSceneId } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
@@ -11,6 +13,7 @@ import {
   createPackageResolver,
   packScene,
   referencedHashes,
+  resolveEntryScene,
   unpackScene,
 } from '../src/package.js'
 import type { PackageManifest } from '../src/package.js'
@@ -352,5 +355,125 @@ describe('T-232 · referencedHashes 走到 prefab body 与视点缩略图', () =
     // v3 把 thumbnailUrl 换成了 thumbnailAssetId，**没有任何一张卡认领这条入边**。
     // 漏了它，发布出去的包里视点缩略图是空的。
     expect([...referencedHashes(docWithPrefabAssets())]).toContain('sha256:' + '3'.repeat(64))
+  })
+})
+
+/* ========================================================================== */
+/* T-233 · manifest 冻结 · 只写被引用资产 · 老包                               */
+/* ========================================================================== */
+
+describe('T-233 · packScene 只把被引用的资产写进 zip', () => {
+  /** 黄金路径 + 一个**留在 assets 里但谁都不指**的资产，且它有字节。 */
+  function docWithOrphan() {
+    const base = createGoldenPathDocument()
+    const orphan = {
+      ...base.assets[0]!,
+      id: 'ast_orphan01',
+      name: '删过节点的残留.glb',
+      hash: ('sha256:' + '7'.repeat(64)) as (typeof base.assets)[number]['hash'],
+      url: 'blob:ast_orphan01',
+      lineageId: 'ast_orphan01',
+    }
+    return { ...base, assets: [...base.assets, orphan] }
+  }
+
+  function packWithOrphan() {
+    const doc = docWithOrphan()
+    const blobs = new Map(doc.assets.map((a) => [a.hash, new Uint8Array([1, 2, 3])]))
+    return {
+      doc,
+      bytes: packScene({
+        document: doc,
+        coreVersion: '0.0.0-test',
+        snapshotId: 'snp_a1b2c3d4',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        blobs,
+      }),
+    }
+  }
+
+  it('孤儿资产的 url 不在 zip 条目里，被引用的在', () => {
+    // **断的是产物，不是 referencedHashes 的返回值。** 这个文件里既有的两条都只断后者，
+    // 而「裁剪」这件事发生在 packScene 写 zip 的那一步——只测返回值的话，
+    // 把裁剪整个删掉它们照样绿。
+    const { doc, bytes } = packWithOrphan()
+    const names = Object.keys(unzipSync(bytes))
+
+    expect(names, '孤儿资产白白进了包').not.toContain('blob:ast_orphan01')
+    expect(names, '被引用的资产必须在').toContain(doc.assets[0]!.url)
+  })
+
+  it('manifest.assetCount 与实际写进去的资产条目数一致', () => {
+    // 裁剪之前这两个数会对不上：assetCount 数的是 needed.size，而循环写的是全部。
+    const { bytes } = packWithOrphan()
+    const entries = Object.keys(unzipSync(bytes))
+    const manifest = JSON.parse(new TextDecoder().decode(unzipSync(bytes)['manifest.json']!))
+    const assetEntries = entries.filter((n) => n !== 'manifest.json' && n !== 'scene.json' && n !== 'thumbnail.png')
+    expect(assetEntries).toHaveLength(manifest.assetCount)
+  })
+})
+
+describe('T-233 · 新包的 manifest 带三个 v1.5 字段', () => {
+  const pack = () => {
+    const doc = createGoldenPathDocument()
+    return unpackScene(
+      packScene({
+        document: doc,
+        coreVersion: '0.0.0-test',
+        snapshotId: 'snp_a1b2c3d4',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        blobs: new Map(doc.assets.map((a) => [a.hash, new Uint8Array([1])])),
+      }),
+    )
+  }
+
+  it('entrySceneId / projectName 逐字来自文档', () => {
+    const pkg = pack()
+    expect(pkg.manifest.entrySceneId).toBe(pkg.document.sceneId)
+    expect(pkg.manifest.projectName).toBe(pkg.document.name)
+  })
+
+  it('scenes 恒为一条，file 指向 scene.json', () => {
+    const pkg = pack()
+    expect(pkg.manifest.scenes).toEqual([
+      { sceneId: pkg.document.sceneId, name: pkg.document.name, file: 'scene.json' },
+    ])
+  })
+
+  it('unpackScene 把入口场景解析好放在 entry 上，新包读的是 manifest', () => {
+    const pkg = pack()
+    expect(pkg.entry).toEqual({ sceneId: pkg.document.sceneId, name: pkg.document.name, file: 'scene.json' })
+    // 直接调也一样 —— 但它的**生产调用方是 unpackScene**，不是测试
+    expect(resolveEntryScene(pkg.manifest, pkg.document)).toEqual(pkg.entry)
+  })
+})
+
+describe('T-233 · 老包（v1.0 之前打的）仍然打得开', () => {
+  const LEGACY = fileURLToPath(new URL('./fixtures/legacy-v2-single-scene.w3p', import.meta.url))
+  const open = () => unpackScene(readFileSync(LEGACY))
+
+  it('解得开，且 scene.json 被迁到了当前版本', () => {
+    const pkg = open()
+    expect(pkg.document.schemaVersion).toBe(CURRENT_VERSION)
+    expect(pkg.document.projectId).toBe('prj_s7t9v2x4')
+    expect(pkg.document.sceneId).toBe(deriveSceneId('prj_s7t9v2x4'))
+  })
+
+  it('**manifest 里没有那三个键 —— 这不是缺陷，是判据**', () => {
+    // unpackScene 不做回填：老包与新包的分界线就是这三个键的有无，回填会把它抹掉。
+    const pkg = open()
+    expect(pkg.manifest.entrySceneId).toBeUndefined()
+    expect(pkg.manifest.projectName).toBeUndefined()
+    expect(pkg.manifest.scenes).toBeUndefined()
+  })
+
+  it('entry 回落到 document 侧，而 manifest 仍然保留那个 undefined', () => {
+    const pkg = open()
+    expect(pkg.entry.sceneId).toBe(deriveSceneId('prj_s7t9v2x4'))
+    expect(pkg.entry.name).toBe(pkg.document.name)
+    // 老包没有 scenes，入口文件回落到约定的 scene.json
+    expect(pkg.entry.file).toBe('scene.json')
+    // **entry 有答案，manifest 仍然是 undefined** —— 两个问题分开问，各有各的答案
+    expect(pkg.manifest.entrySceneId).toBeUndefined()
   })
 })

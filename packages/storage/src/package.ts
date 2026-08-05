@@ -10,7 +10,8 @@ import { StorageError } from './provider.js'
  *
  * A zip holding everything needed to play the scene with no network and no server:
  *
- *   manifest.json   { schemaVersion, coreVersion, snapshotId, projectId, publishedAt, assetCount }
+ *   manifest.json   { schemaVersion, coreVersion, snapshotId, projectId, publishedAt, assetCount,
+ *                     projectName?, entrySceneId?, scenes? }
  *   scene.json      the full SceneDocument, already past validate + checkIntegrity
  *   assets/ab/12/…  only the blobs the document actually references
  *   thumbnail.png   optional
@@ -31,6 +32,25 @@ export interface PackageManifest {
   readonly publishedAt: string
   readonly assetCount: number
   readonly label?: string
+  /**
+   * 下面三个是 **v1.5 才消费、v1.0 就写**的字段（多场景包）。
+   *
+   * 现在就写进去的理由只有一个：**它们是老包与新包的分界线**。v1.5 拿到一个包时要能
+   * 回答「入口场景是哪个」，而对 v1.0 及更早打的包，manifest 里根本没有这三个键——
+   * 那时候只能回退到 `document` 侧。这个分界线越早划下，需要兜底的包就越少。
+   *
+   * 全部 optional：老包解出来它们是 `undefined`，这**不是缺陷**，是判据（见
+   * `resolveEntryScene`）。
+   */
+  readonly projectName?: string
+  readonly entrySceneId?: string
+  /**
+   * 包里每个场景一条。v1.0 恒为长度 1。
+   *
+   * `file` 是包内路径而不是场景 id 派生出来的名字——v1.5 允许一个包里放多份
+   * `scenes/xxx.json`，而路径与 id 的映射必须由 manifest 说了算，不能靠约定。
+   */
+  readonly scenes?: readonly { readonly sceneId: string; readonly name: string; readonly file: string }[]
 }
 
 export interface PackageInput {
@@ -46,6 +66,14 @@ export interface PackageInput {
 
 export interface UnpackedPackage {
   readonly manifest: PackageManifest
+  /**
+   * 入口场景，已经把 manifest 与 document 两侧合过一次（`resolveEntryScene`）。
+   *
+   * 调用方要「这个包该打开哪个场景」的确定答案时读它；要判断「这个包是什么年代打的」
+   * 时读 `manifest`。两个问题分开，是因为老包在前一个问题上有答案、在后一个问题上
+   * 恰恰要那个 `undefined`。
+   */
+  readonly entry: { readonly sceneId: string; readonly name: string; readonly file: string }
   readonly document: SceneDocument
   readonly blobs: Map<BlobHash, Uint8Array>
   readonly thumbnail?: Uint8Array
@@ -150,6 +178,11 @@ export function packScene(input: PackageInput): Uint8Array {
     projectId: input.document.projectId,
     publishedAt: input.publishedAt,
     assetCount: needed.size,
+    // v1.5 才消费，v1.0 就写 —— 见上面的字段注释。单场景时 `scenes` 也照写一条，
+    // 这样 v1.5 的读取代码不需要为「长度 1」写一条特例分支。
+    projectName: input.document.name,
+    entrySceneId: input.document.sceneId,
+    scenes: [{ sceneId: input.document.sceneId, name: input.document.name, file: SCENE_FILENAME }],
     ...(input.label === undefined ? {} : { label: input.label }),
   }
 
@@ -160,6 +193,14 @@ export function packScene(input: PackageInput): Uint8Array {
 
   for (const asset of input.document.assets) {
     if (!isBlobHash(asset.hash)) continue
+    // **只写被引用的。** 一份留在 `document.assets` 里但谁都不指的资产（导入后又删掉了
+    // 节点，记录还在）此前照样进包——包白白胖一圈，而 `manifest.assetCount` 说的是
+    // `needed.size`，两个数从此对不上。
+    //
+    // 裁剪写在这里、而不是改成 `for (const hash of needed)`：一个 hash 可以对应**多条**
+    // `assets` 记录（同一份字节以两个扩展名导入过），遍历 hash 会只写出其中一条的 url，
+    // 另一条在播放器里解析不到。
+    if (!needed.has(asset.hash)) continue
     const bytes = input.blobs.get(asset.hash)
     if (!bytes) continue
     // Keyed by the document's own url so the player resolves without a lookup table.
@@ -245,7 +286,15 @@ export function unpackScene(bytes: Uint8Array): UnpackedPackage {
   }
 
   const thumbnail = entries[THUMBNAIL_FILENAME]
-  return { manifest, document: parsed.value.document, blobs, ...(thumbnail ? { thumbnail } : {}) }
+  const document = parsed.value.document
+  return {
+    manifest,
+    document,
+    // manifest 与 document 两侧在这里合一次，结果对调用方是确定的（见 resolveEntryScene）
+    entry: resolveEntryScene(manifest, document),
+    blobs,
+    ...(thumbnail ? { thumbnail } : {}),
+  }
 }
 
 /**
@@ -273,3 +322,29 @@ export function createPackageResolver(pkg: UnpackedPackage) {
 
 /** The storage path an asset's bytes take inside a package, given its hash and filename. */
 export { hashToPath }
+
+/**
+ * 包的入口场景：manifest 说了算，老包回落到 `document`。
+ *
+ * **由 `unpackScene` 调用**，结果放在 `UnpackedPackage.entry` 上。这不是为了给测试留
+ * 一个抓手——三个 manifest 新字段（`entrySceneId` / `projectName` / `scenes`）如果没有
+ * 任何人读，它们就只是 JSON 里三个多出来的键，写与不写在行为上完全一样。
+ *
+ * `manifest` 本身**不做回填**：老包解出来 `entrySceneId` 仍是 `undefined`。那不是缺陷，
+ * 是判据——「这个包是 v1.0 之前打的」这件事只有那个键的有无能说明，回填会把它抹掉。
+ * 需要一个确定答案的调用方读 `entry`，需要判断包龄的读 `manifest`。
+ *
+ * `file` 是入口场景在包内的路径。v1.0 恒为 `scene.json`；v1.5 允许一个包里放多份
+ * `scenes/xxx.json`，那时这个映射必须由 manifest 说了算，不能靠约定。
+ */
+export function resolveEntryScene(
+  manifest: PackageManifest,
+  document: SceneDocument,
+): { sceneId: string; name: string; file: string } {
+  const sceneId = manifest.entrySceneId ?? document.sceneId
+  return {
+    sceneId,
+    name: manifest.projectName ?? document.name,
+    file: manifest.scenes?.find((scene) => scene.sceneId === sceneId)?.file ?? SCENE_FILENAME,
+  }
+}

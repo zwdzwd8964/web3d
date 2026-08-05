@@ -1600,8 +1600,8 @@
   已知盲区（T-296）。**采纳集合版而不是裸串版的理由**：裸串版本不进五个遍历点，v2 第一次写入
   就会铸 id 撞车、发布漏字节。
 
-### [ ] T-233 · `.w3p` manifest 冻结 + `packScene` 只写被引用资产 + 老包 fixture
-- **依赖** T-225 · **预估** 0.5d · **实际** —
+### [x] T-233 · `.w3p` manifest 冻结 + `packScene` 只写被引用资产 + 老包 fixture
+- **依赖** T-225 · **预估** 0.5d · **实际** 0.6d
 - **独占** `packages/storage/src/package.ts` · `packages/storage/test/fixtures/legacy-v2-single-scene.w3p`(新)
 - **做** `PackageManifest` 加 `projectName?`/`entrySceneId?`/`scenes?`（v1.5 才用，此处冻结），
   单场景时也照写；`unpackScene` 读它们，老包由 `document.sceneId` 与 `document.name` 兜底；
