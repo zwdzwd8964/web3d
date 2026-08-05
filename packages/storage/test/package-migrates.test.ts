@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { CURRENT_VERSION } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { describe, expect, it } from 'vitest'
+import { CURRENT_VERSION, migrate } from '@w3/schema'
 import { packScene, unpackScene } from '../src/package.js'
 
 /**
@@ -25,9 +25,19 @@ function blobsFor(raw: Record<string, unknown>): Map<string, Uint8Array> {
   return new Map(assets.map((a) => [a.hash, new Uint8Array([1, 2, 3])]))
 }
 
-/** 打一个包，但**包里的 scene.json 是 v2**。 */
+/**
+ * 打一个包，但**包里的 scene.json 声称是 v2**。
+ *
+ * 用「迁移到 v3 之后再把 schemaVersion 改回去」而不是直接塞 v2 原文：`packScene` 是
+ * **今天的**代码，它按 v3 的形状遍历（T-232 之后还要走 `prefabs` 与 `viewpoints`）。
+ * 真实场景里打这个包的是**旧版本的** packScene，我们模拟的是它的产物、不是它的代码。
+ * 直接塞 v2 原文会让 `document.prefabs` 是 undefined 而当场炸——那是测试装配的问题，
+ * 不是被测行为的问题。
+ */
 function packAt(schemaVersion: number): Uint8Array {
-  const raw = { ...seed(), schemaVersion }
+  const migrated = migrate(seed())
+  if (!migrated.ok) throw new Error('种子迁不动')
+  const raw = { ...migrated.value.document, schemaVersion }
   // `packScene` 的入参在类型上是 v3；这里刻意塞一份别的版本进去，模拟「旧/新版本导出的包」。
   return packScene({
     document: raw as unknown as SceneDocument,

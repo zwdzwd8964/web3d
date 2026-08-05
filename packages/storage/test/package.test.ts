@@ -280,3 +280,77 @@ describe('v0.5 资产也要进包（T-176 审查所得）', () => {
     expect(referencedHashes(unused).has(`sha256:${'b'.repeat(64)}`)).toBe(false)
   })
 })
+
+/* ========================================================================== */
+/* T-232 · prefab body 与视点缩略图引用的资产也要进包                          */
+/* ========================================================================== */
+
+describe('T-232 · referencedHashes 走到 prefab body 与视点缩略图', () => {
+  /**
+   * **两条断言必须用同一份文档。**
+   *
+   * 分成两份的话，「prefab-only 资产进了包」和「无人引用的资产没进包」会互相掩护：
+   * 一个把所有资产都收进来的实现在前一条下是绿的，而后一条用的是另一份没有 prefab
+   * 的文档，也绿。同一份文档里同时有这两种资产，才分得开。
+   */
+  function docWithPrefabAssets() {
+    const base = createGoldenPathDocument()
+    const asset = (id: string, type: string, hash: string) => ({
+      ...base.assets[0]!,
+      id,
+      type: type as (typeof base.assets)[number]['type'],
+      name: id,
+      hash,
+      url: `blob:${id}`,
+      lineageId: id,
+    })
+    return {
+      ...base,
+      assets: [
+        ...base.assets,
+        asset('ast_inpfb001', 'model', 'sha256:' + '1'.repeat(64)), // 只被 prefab 的节点引用
+        asset('ast_pfbtex01', 'texture', 'sha256:' + '2'.repeat(64)), // 只被 prefab 的材质引用
+        asset('ast_thumb001', 'image', 'sha256:' + '3'.repeat(64)), // 只被视点缩略图引用
+        asset('ast_orphan01', 'model', 'sha256:' + '4'.repeat(64)), // **谁都不引用** —— 对照组
+      ],
+      prefabs: [
+        {
+          id: 'pfb_11111111',
+          name: '标准泵组',
+          note: '',
+          version: 1,
+          nodes: [
+            {
+              ...base.nodes[1]!,
+              id: 'nd_inpfb001',
+              parent: null,
+              assetRef: { assetId: 'ast_inpfb001', objectPath: 'Root', objectName: 'Root', missing: false },
+            },
+          ],
+          materials: [
+            {
+              ...base.materials[0]!,
+              id: 'mat_inpfb01',
+              params: { ...base.materials[0]!.params, maps: { ...base.materials[0]!.params.maps, map: 'ast_pfbtex01' } },
+            },
+          ],
+        },
+      ],
+      viewpoints: base.viewpoints.map((v, i) => (i === 0 ? { ...v, thumbnailAssetId: 'ast_thumb001' } : v)),
+    } as unknown as Parameters<typeof referencedHashes>[0]
+  }
+
+  it('只被 prefab body 引用的模型与贴图进包；无人引用的仍不进', () => {
+    const hashes = referencedHashes(docWithPrefabAssets())
+    expect([...hashes], 'prefab 里的模型').toContain('sha256:' + '1'.repeat(64))
+    expect([...hashes], 'prefab 材质的贴图').toContain('sha256:' + '2'.repeat(64))
+    // 对照组：同一份文档里那个谁都不引用的资产
+    expect([...hashes], '无人引用的资产不该被打进包').not.toContain('sha256:' + '4'.repeat(64))
+  })
+
+  it('视点缩略图引用的资产也进包', () => {
+    // v3 把 thumbnailUrl 换成了 thumbnailAssetId，**没有任何一张卡认领这条入边**。
+    // 漏了它，发布出去的包里视点缩略图是空的。
+    expect([...referencedHashes(docWithPrefabAssets())]).toContain('sha256:' + '3'.repeat(64))
+  })
+})

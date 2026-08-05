@@ -127,6 +127,8 @@ export function pasteNodes(draft: SceneDocument, payload: ClipboardPayload, opti
   const assets = new Set(draft.assets.map((a) => a.id))
 
   const created: Node[] = []
+  const prefabs = new Set(draft.prefabs.map((p) => p.id))
+
   for (const node of payload.nodes) {
     const isRoot = roots.has(node.id)
     // A root keeps its original parent (the copy lands beside the original); everything
@@ -156,6 +158,15 @@ export function pasteNodes(draft: SceneDocument, payload: ClipboardPayload, opti
       ...(node.assetRef ? { assetRef: assets.has(node.assetRef.assetId) ? { ...node.assetRef } : null } : {}),
       ...(node.primitive ? { primitive: { ...node.primitive } } : {}),
       ...(node.light ? { light: { ...node.light } } : {}),
+      // v3 的四个承载体字段（T-232）。
+      //
+      // 卡面只点名 `prefabRef`，但 `...node` 对另外三个同样是**按引用共享**——
+      // 改副本的剖切尺寸会连原件一起改，而 `explodeOffset` 是个数组，共享得最彻底。
+      // 四个一起处理，不是三个加一个例外。
+      ...(node.section ? { section: { ...node.section, size: [...node.section.size] as [number, number] } } : {}),
+      ...(node.explode ? { explode: { ...node.explode, axis: [...node.explode.axis] as [number, number, number] } } : {}),
+      ...(node.explodeOffset ? { explodeOffset: [...node.explodeOffset] as [number, number, number] } : {}),
+      prefabRef: dropMissingPrefab(node.prefabRef, prefabs),
     }
     draft.nodes.push(copy)
     created.push(copy)
@@ -175,6 +186,21 @@ function dropMissingMaterial(overrides: Node['overrides'], materials: ReadonlySe
     delete copy.materialId
   }
   return copy
+}
+
+/**
+ * Strips a prefab reference the target document does not have.
+ *
+ * 形状照 `dropMissingMaterial`：粘进一个没有这个 prefab 的文档时，节点退化成一个普通
+ * 节点，而不是一条指向不存在 prefab 的悬空引用（I42 会把后者判成 error，于是「粘一下
+ * 就发布不了」）。
+ *
+ * `overridden` 是数组，必须换新引用——否则改副本的覆盖列表会连原件一起改。
+ */
+function dropMissingPrefab(ref: Node['prefabRef'], prefabs: ReadonlySet<string>): Node['prefabRef'] {
+  if (ref === null) return null
+  if (!prefabs.has(ref.prefabId)) return null
+  return { ...ref, overridden: [...ref.overridden] }
 }
 
 /** Copy + paste in one step, for Ctrl+D. Returns the new nodes, or an empty array. */

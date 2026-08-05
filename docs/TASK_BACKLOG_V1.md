@@ -1581,8 +1581,8 @@
   ③ 把「保留已有变量当前值」改成「全部重置为 default」→
   需要一条「预览中改一个变量的名字，另一个变量的值不变」的断言才抓得到，**必须专门造这个样本**。
 
-### [ ] T-232 · prefab 占位的五处遍历面
-- **依赖** T-225 · T-201 · **预估** 0.6d · **实际** —
+### [x] T-232 · prefab 占位的五处遍历面
+- **依赖** T-225 · T-201 · **预估** 0.6d · **实际** 0.6d
 - **独占** `packages/schema/test/prefab.test.ts`(新) · `packages/storage/src/package.ts`
   （`referencedHashes`）· `packages/editor/src/store/clipboard.ts`
 - **做** T-201 的注册表已经把 `collectAllIds` / I1 集合表 / 快照回滚三面自动覆盖；本卡补剩下两面：

@@ -365,3 +365,56 @@ describe('the shortcuts themselves', () => {
     expect(store.getState().canUndo).toBe(false)
   })
 })
+
+/* ========================================================================== */
+/* T-232 · 粘贴带 v3 承载体字段的节点                                          */
+/* ========================================================================== */
+
+describe('T-232 · prefabRef 与另外三个 v3 字段', () => {
+  const PREFAB = { id: 'pfb_11111111', name: '标准泵组', note: '', version: 1, nodes: [], materials: [] }
+
+  const withPrefabNode = (doc: SceneDocument, hasPrefab: boolean) =>
+    produce(doc, (draft: SceneDocument) => {
+      if (hasPrefab) draft.prefabs.push(PREFAB as never)
+      const node = draft.nodes[1]!
+      node.prefabRef = { prefabId: PREFAB.id, overridden: ['transform'] }
+      node.explodeOffset = [1, 2, 3]
+      // section 挂在**另一个**节点上：它是第四种承载体，和 assetRef 互斥（I11），
+      // 挂在同一个节点上会让下面那条「粘完零 error」红在一个与本卡无关的地方。
+      const plane = draft.nodes[2]!
+      plane.assetRef = null
+      plane.section = { scope: 'scene', size: [4, 4] }
+    })
+
+  it('目标文档有这个 prefab：引用保留，且 overridden 是新数组', () => {
+    const doc = withPrefabNode(createGoldenPathDocument(), true)
+    const payload = copyNodes(doc, [doc.nodes[1]!.id, doc.nodes[2]!.id])!
+    let created: SceneDocument['nodes'] = []
+    const next = produce(doc, (draft: SceneDocument) => {
+      created = pasteNodes(draft, payload)
+    })
+
+    expect(created[0]!.prefabRef?.prefabId).toBe(PREFAB.id)
+    expect(created[0]!.prefabRef?.overridden).toEqual(['transform'])
+    // 数组必须换新引用：共享的话，改副本的覆盖列表会连原件一起改
+    expect(created[0]!.prefabRef?.overridden).not.toBe(doc.nodes[1]!.prefabRef?.overridden)
+    expect(created[0]!.explodeOffset).not.toBe(doc.nodes[1]!.explodeOffset)
+    expect(created[1]!.section, 'section 也必须换新对象').not.toBe(doc.nodes[2]!.section)
+    expect(next.nodes.length).toBeGreaterThan(doc.nodes.length)
+  })
+
+  it('目标文档没有这个 prefab：引用被丢掉，粘完仍然零 error', () => {
+    // 保留一条悬空 prefabRef 会让 I42 判 error —— 于是「粘一下就发布不了」。
+    const source = withPrefabNode(createGoldenPathDocument(), true)
+    const payload = copyNodes(source, [source.nodes[1]!.id, source.nodes[2]!.id])!
+
+    const target = createGoldenPathDocument() // 没有 prefabs
+    let created: SceneDocument['nodes'] = []
+    const next = produce(target, (draft: SceneDocument) => {
+      created = pasteNodes(draft, payload)
+    })
+
+    expect(created[0]!.prefabRef, '悬空引用必须被丢掉').toBeNull()
+    expect(errorsOf(checkIntegrity(next))).toEqual([])
+  })
+})

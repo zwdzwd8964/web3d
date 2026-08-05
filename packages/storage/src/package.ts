@@ -68,11 +68,31 @@ const decoder = new TextDecoder()
  * map cannot bloat the package and an under-supplied one is caught at pack time rather
  * than by the player.
  */
-export function referencedHashes(document: SceneDocument): Set<BlobHash> {
-  const used = new Set<string>()
-  for (const node of document.nodes) {
+/**
+ * 从一批节点收资产引用。
+ *
+ * 抽出来是因为 v3 之后有**两处**节点数组：文档主集合与每个 prefab 的 body。两处各写
+ * 一遍，就是这条入边下一次漂移的方式——而漂移的症状是「发布出去的包少了字节」，
+ * 要到客户打开时才发现（T-176 那次是贴图，整个 v0.5 的表现力全部静默缺席）。
+ */
+function collectNodeAssetIds(nodes: SceneDocument['nodes'], used: Set<string>): void {
+  for (const node of nodes) {
     if (node.assetRef) used.add(node.assetRef.assetId)
   }
+}
+
+/** 同上，材质那一侧。 */
+function collectMaterialAssetIds(materials: SceneDocument['materials'], used: Set<string>): void {
+  for (const material of materials) {
+    for (const assetId of Object.values(material.params.maps)) {
+      if (typeof assetId === 'string') used.add(assetId)
+    }
+  }
+}
+
+export function referencedHashes(document: SceneDocument): Set<BlobHash> {
+  const used = new Set<string>()
+  collectNodeAssetIds(document.nodes, used)
   for (const animation of document.animations) {
     if (animation.kind === 'imported') used.add(animation.assetId)
   }
@@ -85,12 +105,26 @@ export function referencedHashes(document: SceneDocument): Set<BlobHash> {
   // headline feature silently absent from anything ever published. Nothing caught it
   // because a texture is not referenced the way a model is: no node points at it, only a
   // material slot does, and `meta.environment` is not a collection anybody was walking.
-  for (const material of document.materials) {
-    for (const assetId of Object.values(material.params.maps)) {
-      if (typeof assetId === 'string') used.add(assetId)
-    }
-  }
+  collectMaterialAssetIds(document.materials, used)
   if (document.meta.environment.hdriAssetId !== null) used.add(document.meta.environment.hdriAssetId)
+
+  // v3 · prefab 的 body 里有自己的一套 nodes 与 materials（T-232）。
+  //
+  // 它们与文档主集合**同一命名空间**（I42），但**不在 `document.nodes` / `document.materials`
+  // 里**——所以一份只被 prefab body 引用的模型或贴图，在这一行之前完全不会被打进包。
+  // 症状与 T-176 那次逐字相同：包建得出来、播放器打得开、东西不在。
+  for (const prefab of document.prefabs) {
+    collectNodeAssetIds(prefab.nodes, used)
+    collectMaterialAssetIds(prefab.materials, used)
+  }
+
+  // v3 · 视点缩略图（T-225 把 `thumbnailUrl` 换成了 `thumbnailAssetId`）。
+  //
+  // **没有任何一张卡认领它。** T-232 与 T-233 是仅有的两张动本文件的卡，两张的卡面都没
+  // 提到它。在这里补上并登记，比留给「以后」强——漏了它，发布出去的包里视点缩略图是空的。
+  for (const viewpoint of document.viewpoints) {
+    if (viewpoint.thumbnailAssetId !== undefined) used.add(viewpoint.thumbnailAssetId)
+  }
 
   const out = new Set<BlobHash>()
   for (const asset of document.assets) {
