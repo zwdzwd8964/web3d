@@ -1557,6 +1557,12 @@ parity 输入必须换成 `golden-path-3.json`，轨迹里必须含 `explode` �
 > （asset-pipeline I16–I19 · postfx I16–I20 · flows-pages I16–I27），且 schema-v3 的 `I??-a..l`
 > 与 flows-pages 的 I16–I27 是**同一批检查的两份写法**。已去重，编号以本表为唯一真源。
 
+> ⚠ **一次显式破例（2026-08-05，产品负责人拍板 · T-252）：I70 获批。** 「描边不吃裁剪」
+> 大概率是 v1.0 的永久已知限制（three 的 `OutlinePass` 用 ShaderMaterial 且没设 `clipping:true`），
+> 没有机械提示等于只在文档里留一句话。**破例仅此一条**——I71 起仍按
+> [ADR-0020](adr/0020-v1-拆成三级台阶.md) 登记 v2、不追加。到期版本号 `v1.0`：v1.0 收口时
+> 复核它是否仍然必要。
+
 **v1.0 段 · 30 条（I16 – I45）**——T-226 交付。
 
 | # | 检查内容 | 级别 |
