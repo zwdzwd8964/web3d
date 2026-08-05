@@ -183,3 +183,122 @@ describe('the index still says the same thing (T-184)', () => {
     expect(roots.some((n) => n.id === orphan.id), '父级不存在的节点必须还在树里找得到').toBe(true)
   })
 })
+
+/* ========================================================================== */
+/* T-226 · 其余各根轴上的线性                                                  */
+/* ========================================================================== */
+
+/**
+ * **上面那份文档只有 nodes，其余集合全是空数组。**
+ *
+ * 于是「checkIntegrity is linear」只在节点这一根轴上被证明过。而 `checkIntegrity` 里
+ * 真正的二次项从来不在节点上——规划 §4.2 点名了三处：`rules × variables`、
+ * `materials × slots × assets`、以及 `typeOf()` 每次 `find`。检查数从 15 涨到 45 之后，
+ * 没有人能靠那一条断言发现它已经不是线性的。
+ *
+ * 这里把其余的轴补上：每个集合按同一个 `count` 一起长，然后**逐个集合**数读取次数。
+ */
+function makeFullDocument(count: number): SceneDocument {
+  const doc = makeDocument(count) as any
+  const per = Math.max(2, Math.round(count / 20))
+  const pad = (n: number) => String(n).padStart(8, '0')
+
+  doc.assets = Array.from({ length: per }, (_, i) => ({
+    id: `ast_${pad(i)}`,
+    type: i % 3 === 0 ? 'texture' : 'model',
+    name: `资产 ${i}`,
+    hash: `sha256:${String(i).padStart(64, '0')}`,
+    url: `blob:ast_${pad(i)}`,
+    version: 1,
+    lineageId: `ast_${pad(i)}`,
+    stats: { tris: 1, materials: 1, textures: 1, bytes: 1, textureBytes: 1, nodes: 1, animations: [], clipDurations: {} },
+  }))
+
+  doc.materials = Array.from({ length: per }, (_, i) => ({
+    id: `mat_${pad(i)}`,
+    name: `材质 ${i}`,
+    base: 'standard',
+    preset: null,
+    params: { color: '#cccccc', metalness: 0, roughness: 1, opacity: 1, transparent: false, side: 'front',
+      emissive: '#000000', emissiveIntensity: 0,
+      maps: { map: `ast_${pad(i * 3 % per)}`, normalMap: null, roughnessMap: null, metalnessMap: null, aoMap: null, emissiveMap: null },
+      uv: { offset: [0, 0], repeat: [1, 1], rotationDeg: 0 } },
+  }))
+
+  doc.variables = Array.from({ length: per }, (_, i) => ({
+    id: `v${i}`, name: `变量 ${i}`, type: 'number', default: 0, persist: false, scope: 'scene',
+  }))
+
+  doc.hotspots = Array.from({ length: per }, (_, i) => ({
+    id: `hs_${pad(i)}`, name: `热点 ${i}`, nodeId: doc.nodes[i % doc.nodes.length].id,
+    anchor: [0, 0, 0], style: { marker: 'dot', color: '#4aa8c7' },
+    content: { type: 'text', title: 't', text: 'x', mediaId: null },
+  }))
+
+  doc.viewpoints = Array.from({ length: per }, (_, i) => ({
+    id: `vp_${pad(i)}`, name: `视点 ${i}`,
+    camera: { kind: 'perspective', position: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0], fov: 50, zoom: 1, near: 0.1, far: 1000 },
+  }))
+
+  doc.rules = Array.from({ length: per }, (_, i) => ({
+    id: `rl_${pad(i)}`, name: `规则 ${i}`, enabled: true,
+    when: { event: 'click', target: { nodeId: doc.nodes[i % doc.nodes.length].id } },
+    if: [{ op: 'eq', left: { var: `v${i % per}` }, right: { const: 1 } }],
+    ifAny: [], then: [], mode: 'sequence', onError: 'abort', reentry: 'restart',
+  }))
+
+  return doc as SceneDocument
+}
+
+/** 与上面的 `reads` 同形，但可以数任意一个集合。 */
+function readsOf(doc: SceneDocument, collection: string, run: (doc: SceneDocument) => void): number {
+  let count = 0
+  const source = (doc as unknown as Record<string, unknown[]>)[collection]!
+  const counted = {
+    ...doc,
+    [collection]: new Proxy(source, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) count++
+        return Reflect.get(target, key, receiver)
+      },
+    }),
+  } as SceneDocument
+  run(counted)
+  return count
+}
+
+const AXES = ['assets', 'materials', 'variables', 'hotspots', 'viewpoints', 'rules'] as const
+
+describe('T-226 · checkIntegrity 在每一根轴上都线性', () => {
+  const smallFull = makeFullDocument(SMALL)
+  const largeFull = makeFullDocument(LARGE)
+
+  it('前提：每个集合都真的非空，而且大的那份确实更大', () => {
+    // 扫描面下限。任何一个集合是空数组，对应那条 growth 就是 0/0，恒过。
+    for (const axis of AXES) {
+      const s = (smallFull as unknown as Record<string, unknown[]>)[axis]!
+      const l = (largeFull as unknown as Record<string, unknown[]>)[axis]!
+      expect(s.length, `${axis} 是空的`).toBeGreaterThan(0)
+      expect(l.length, `${axis} 没有跟着长`).toBeGreaterThan(s.length)
+    }
+  })
+
+  it.each(AXES)('%s 这根轴上是线性的', (axis) => {
+    const g = readsOf(largeFull, axis, (d) => void checkIntegrity(d)) / Math.max(readsOf(smallFull, axis, (d) => void checkIntegrity(d)), 1)
+    // 线性 → 2，二次 → 4。3 是同一条阈值，与上面那条 node 轴断言一致。
+    expect(g, `${axis} 轴上的读取次数增长 ${g.toFixed(3)}，看起来不是线性`).toBeLessThan(3)
+  })
+
+  it('内置变异：拿 quadraticReference 跑一遍，阈值必须咬得住', () => {
+    // 与上面 node 轴那条同理：计数器一旦失效，六条断言会一起读出 1.00 并全绿。
+    const g = readsOf(largeFull, 'rules', quadraticReferenceOnRules) / Math.max(readsOf(smallFull, 'rules', quadraticReferenceOnRules), 1)
+    expect(g, '阈值咬不住二次项，上面六条断言全部作废').toBeGreaterThanOrEqual(3)
+  })
+})
+
+/** 故意在 rules 上跑一次 O(n²)，给上面那条内置变异当对照。 */
+function quadraticReferenceOnRules(doc: SceneDocument): void {
+  for (let i = 0; i < doc.rules.length; i++) {
+    for (let j = 0; j < doc.rules.length; j++) void doc.rules[j]
+  }
+}

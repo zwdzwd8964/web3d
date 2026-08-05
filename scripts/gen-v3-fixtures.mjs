@@ -321,7 +321,19 @@ function integrationPlaceholder() {
     },
   ]
 
-  doc.viewpoints[0].thumbnailAssetId = doc.assets[0].id
+  // 缩略图必须是 image 资产（I30）。原来指的是 doc.assets[0]，那是模型——
+  // **T-226 的 I30 第一次跑就把它逮了出来**，登记在 MUTATIONS.md 里。
+  doc.assets.push({
+    ...clone(doc.assets[0]),
+    id: 'ast_thumb001',
+    type: 'image',
+    name: '视点缩略图.png',
+    hash: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+    url: 'blob:ast_thumb001',
+    lineageId: 'ast_thumb001',
+    stats: { tris: 0, materials: 0, textures: 1, bytes: 4096, textureBytes: 4096, nodes: 0, animations: [], clipDurations: {} },
+  })
+  doc.viewpoints[0].thumbnailAssetId = 'ast_thumb001'
 
   doc.assets[0].origin = {
     hash: doc.assets[0].hash,

@@ -4,6 +4,7 @@ import type { ActionRefResolver } from '../src/index-builder.js'
 import { checkIntegrity, errorsOf, formatIntegrityIssues, hasErrors, warningsOf } from '../src/integrity.js'
 import { applyMigrationChain } from '../src/migrate.js'
 import { createGoldenPathDocument } from '../src/samples.js'
+import { validate } from '../src/validate.js'
 import goldenPathTwo from './fixtures/v2/golden-path-2.json' with { type: 'json' }
 
 /**
@@ -593,5 +594,602 @@ describe('report formatting', () => {
 
   it('says so plainly when there is nothing to report', () => {
     expect(formatIntegrityIssues([])).toContain('通过')
+  })
+})
+
+/* ========================================================================== */
+/* T-226 · I16 – I45 的其余各条（I21–I28 在 integrity-explode-section.test.ts） */
+/* ========================================================================== */
+
+const levelOf = (doc: SceneDocument, code: string) => check(doc).filter((i) => i.code === code).map((x) => x.level)
+const msgOf = (doc: SceneDocument, code: string) => check(doc).filter((i) => i.code === code).map((x) => x.message).join(' | ')
+
+/** 造一条规则。golden path 的规则形状照抄，只换动作。 */
+function withActions(then: { action: string; params: Record<string, unknown> }[], name = '测试规则') {
+  return mutated((d) => {
+    d.rules.push({
+      id: 'rl_probe001',
+      name,
+      enabled: true,
+      when: { event: 'sceneReady' },
+      if: [],
+      ifAny: [],
+      then,
+      mode: 'sequence',
+      onError: 'abort',
+      reentry: 'restart',
+    })
+  })
+}
+
+describe('I16 · 线性雾的 near / far', () => {
+  it('正例：默认文档（雾关着）不报', () => {
+    expect(codes(createGoldenPathDocument())).not.toContain('I16')
+  })
+
+  it('反例：开着雾且 near >= far → error', () => {
+    const doc = mutated((d) => {
+      d.meta.fog = { ...d.meta.fog, enabled: true, type: 'linear', near: 100, far: 10 }
+    })
+    expect(levelOf(doc, 'I16')).toEqual(['error'])
+    // 措辞要带上两个数，否则用户还得自己去翻文档
+    expect(msgOf(doc, 'I16')).toContain('100')
+    expect(msgOf(doc, 'I16')).toContain('10')
+  })
+
+  it('三个子句各自都是必要条件 —— 少任何一个都不该报', () => {
+    // v0.5 E18 的教训：三个条件写成一个 && 之后，删掉其中一个子句测试照样绿
+    const near100far10 = { near: 100, far: 10 }
+    expect(codes(mutated((d) => (d.meta.fog = { ...d.meta.fog, enabled: false, type: 'linear', ...near100far10 })))).not.toContain('I16')
+    expect(codes(mutated((d) => (d.meta.fog = { ...d.meta.fog, enabled: true, type: 'exp2', ...near100far10 })))).not.toContain('I16')
+    expect(codes(mutated((d) => (d.meta.fog = { ...d.meta.fog, enabled: true, type: 'linear', near: 10, far: 100 })))).not.toContain('I16')
+  })
+
+  it('near === far 也报 —— 边界是闭的', () => {
+    expect(levelOf(mutated((d) => (d.meta.fog = { ...d.meta.fog, enabled: true, type: 'linear', near: 50, far: 50 })), 'I16')).toEqual(['error'])
+  })
+})
+
+describe('I17 · 雾色与背景色不一致', () => {
+  it('正例：雾色等于背景色时不报', () => {
+    const doc = mutated((d) => {
+      d.meta.fog = { ...d.meta.fog, enabled: true, color: d.meta.background.color }
+    })
+    expect(codes(doc)).not.toContain('I17')
+  })
+
+  it('反例：不同 → info', () => {
+    const doc = mutated((d) => {
+      d.meta.background = { type: 'color', color: '#000000' }
+      d.meta.fog = { ...d.meta.fog, enabled: true, color: '#ffffff' }
+    })
+    expect(levelOf(doc, 'I17')).toEqual(['info'])
+  })
+
+  it('大小写不同不算不一致', () => {
+    const doc = mutated((d) => {
+      d.meta.background = { type: 'color', color: '#AABBCC' }
+      d.meta.fog = { ...d.meta.fog, enabled: true, color: '#aabbcc' }
+    })
+    expect(codes(doc)).not.toContain('I17')
+  })
+})
+
+describe('I18 / I19 / I20 · 描边开关与 highlight 预设', () => {
+  const highlight = (preset: string) => ({ action: 'highlight', params: { nodeId: createGoldenPathDocument().nodes[1]!.id, preset } })
+
+  /**
+   * **黄金路径自带一个 `outline_amber` 的 highlight 动作。**
+   *
+   * 三条检查数的都是全文档，所以基线不是 0 而是 1。写这几条测试时我先按 0 写，三条
+   * 当场红——记在这里而不是把基线偷偷加进期望值里：一个「零基线」的假设错了，
+   * 后面每一条边界断言（`>= 3`、`=== 0`）都会跟着错一位。
+   */
+  const withoutBaseHighlight = (extra: (d: any) => void = () => {}) =>
+    mutated((d) => {
+      for (const rule of d.rules) rule.then = rule.then.filter((a: any) => a.action !== 'highlight')
+      extra(d)
+    })
+
+  it('前提：黄金路径确实自带一个 outline_amber', () => {
+    const presets = createGoldenPathDocument().rules.flatMap((r) => r.then).filter((a) => a.action === 'highlight')
+    expect(presets).toHaveLength(1)
+    expect((presets[0]!.params as Record<string, unknown>).preset).toBe('outline_amber')
+  })
+
+  it('I18 反例：描边关着但用了 outline_ 预设 → info', () => {
+    const doc = withActions([highlight('outline_warn')])
+    expect(levelOf(doc, 'I18')).toEqual(['info'])
+    expect(msgOf(doc, 'I18')).toContain('outline_warn')
+  })
+
+  it('I18 正例：描边开着时不报', () => {
+    const doc = mutated((d) => {
+      d.meta.effects.outline.enabled = true
+      d.rules.push({
+        id: 'rl_probe001', name: 'x', enabled: true, when: { event: 'sceneReady' }, if: [], ifAny: [],
+        then: [highlight('outline_warn')], mode: 'sequence', onError: 'abort', reentry: 'restart',
+      })
+    })
+    expect(codes(doc)).not.toContain('I18')
+  })
+
+  it('I18 不看非描边预设 —— emissive 预设不触发它', () => {
+    const doc = withoutBaseHighlight((d) => {
+      d.rules.push({
+        id: 'rl_probe001', name: 'x', enabled: true, when: { event: 'sceneReady' }, if: [], ifAny: [],
+        then: [highlight('emissive_soft')], mode: 'sequence', onError: 'abort', reentry: 'restart',
+      })
+    })
+    expect(codes(doc)).not.toContain('I18')
+  })
+
+  it('I19 反例：三种预设 → info', () => {
+    const doc = withActions([highlight('outline_a'), highlight('outline_b'), highlight('emissive_c')])
+    expect(levelOf(doc, 'I19')).toEqual(['info'])
+  })
+
+  it('I19 正例：两种不报 —— 边界是 >= 3', () => {
+    // 基线那个 outline_amber 已经去掉了，所以这里恰好是 2 种
+    const doc = withoutBaseHighlight((d) => {
+      d.rules.push({
+        id: 'rl_probe001', name: 'x', enabled: true, when: { event: 'sceneReady' }, if: [], ifAny: [],
+        then: [highlight('outline_a'), highlight('outline_b')], mode: 'sequence', onError: 'abort', reentry: 'restart',
+      })
+    })
+    expect(codes(doc)).not.toContain('I19')
+  })
+
+  it('I20 反例：描边开着但没有任何 highlight → info', () => {
+    const doc = withoutBaseHighlight((d) => (d.meta.effects.outline.enabled = true))
+    expect(levelOf(doc, 'I20')).toEqual(['info'])
+  })
+
+  it('I20 正例：有 highlight 时不报', () => {
+    const doc = mutated((d) => {
+      d.meta.effects.outline.enabled = true
+      d.rules.push({
+        id: 'rl_probe001', name: 'x', enabled: true, when: { event: 'sceneReady' }, if: [], ifAny: [],
+        then: [highlight('outline_a')], mode: 'sequence', onError: 'abort', reentry: 'restart',
+      })
+    })
+    expect(codes(doc)).not.toContain('I20')
+  })
+})
+
+describe('I29 · 热点编号重复', () => {
+  it('正例：编号不同不报', () => {
+    const doc = mutated((d) => {
+      d.hotspots[0].style.label = '1'
+      d.hotspots.push({ ...structuredClone(d.hotspots[0]), id: 'hs_second001', style: { ...d.hotspots[0].style, label: '2' } })
+    })
+    expect(codes(doc)).not.toContain('I29')
+  })
+
+  it('反例：两个热点同一个编号 → warn，且指出先来的是谁', () => {
+    const doc = mutated((d) => {
+      d.hotspots[0].style.label = '7'
+      d.hotspots.push({ ...structuredClone(d.hotspots[0]), id: 'hs_second001' })
+    })
+    expect(levelOf(doc, 'I29')).toEqual(['warn'])
+    expect(msgOf(doc, 'I29')).toContain('hotspots[0]')
+  })
+
+  it('没有编号的热点不参与去重 —— 两个 undefined 不算撞', () => {
+    const doc = mutated((d) => {
+      d.hotspots.push({ ...structuredClone(d.hotspots[0]), id: 'hs_second001' })
+    })
+    expect(codes(doc)).not.toContain('I29')
+  })
+})
+
+describe('I30 · 视点缩略图', () => {
+  it('正例：没有缩略图时不报', () => {
+    expect(codes(createGoldenPathDocument())).not.toContain('I30')
+  })
+
+  it('反例：指向不存在的资产 → error', () => {
+    expect(levelOf(mutated((d) => (d.viewpoints[0].thumbnailAssetId = 'ast_nothere1')), 'I30')).toEqual(['error'])
+  })
+
+  it('反例：指向的资产不是 image → error', () => {
+    const doc = mutated((d) => (d.viewpoints[0].thumbnailAssetId = d.assets[0].id))
+    expect(levelOf(doc, 'I30')).toEqual(['error'])
+    expect(msgOf(doc, 'I30')).toContain('model')
+  })
+})
+
+describe('I31 / I32 / I33 · 资产溯源与动画区间', () => {
+  const origin = (over: Record<string, unknown> = {}) => ({
+    hash: createGoldenPathDocument().assets[0]!.hash,
+    bytes: 1024,
+    ...over,
+  })
+
+  it('I31 正例：hash 一致、没有 transcode 记录时不报', () => {
+    expect(codes(mutated((d) => (d.assets[0].origin = origin())))).not.toContain('I31')
+  })
+
+  it('I31 反例：origin.hash 与资产 hash 不同 → error', () => {
+    const doc = mutated((d) => (d.assets[0].origin = origin({ hash: 'sha256:' + '9'.repeat(64) })))
+    expect(levelOf(doc, 'I31')).toEqual(['error'])
+  })
+
+  it('I31 反例：转码记录既没执行也没跳过 → error', () => {
+    const doc = mutated((d) => {
+      d.assets[0].origin = origin({
+        transcode: { profileId: 'p1', toolchain: 'x', finishedAt: '2026-01-01T00:00:00.000Z', ops: [], skipped: [], triangleRatio: 1 },
+      })
+    })
+    expect(levelOf(doc, 'I31')).toEqual(['error'])
+  })
+
+  it('I31 正例：跳过非空也算说明了事', () => {
+    const doc = mutated((d) => {
+      d.assets[0].origin = origin({
+        transcode: {
+          profileId: 'p1', toolchain: 'x', finishedAt: '2026-01-01T00:00:00.000Z',
+          ops: [], skipped: [{ op: 'ktx2', detail: '无贴图' }], triangleRatio: 1,
+        },
+      })
+    })
+    expect(codes(doc)).not.toContain('I31')
+  })
+
+  it('I32 正例：clipDurations 的键都在 animations 里', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.assets[0].stats.clipDurations = { Disassemble: 2.4 }
+    })
+    expect(codes(doc)).not.toContain('I32')
+  })
+
+  it('I32 反例：多出来的键 → warn', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.assets[0].stats.clipDurations = { Disassemble: 2.4, Ghost: 1 }
+    })
+    expect(levelOf(doc, 'I32')).toEqual(['warn'])
+    expect(msgOf(doc, 'I32')).toContain('Ghost')
+  })
+
+  const imported = (over: Record<string, unknown> = {}) => ({
+    kind: 'imported', id: 'anm_probe001', name: '探针', assetId: createGoldenPathDocument().assets[0]!.id,
+    clipName: 'Disassemble', speed: 1, loop: false, clampWhenFinished: true, startS: 0, endS: null, ...over,
+  })
+
+  it('I33 正例：endS 为 null 时不报', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.animations.push(imported())
+    })
+    expect(codes(doc)).not.toContain('I33')
+  })
+
+  it('I33 反例：终点不晚于起点 → error', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.animations.push(imported({ startS: 2, endS: 1 }))
+    })
+    expect(levelOf(doc, 'I33')).toEqual(['error'])
+  })
+
+  it('I33 反例：终点超过片段实际时长 → error', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.assets[0].stats.clipDurations = { Disassemble: 2.4 }
+      d.animations.push(imported({ startS: 0, endS: 9 }))
+    })
+    expect(levelOf(doc, 'I33')).toEqual(['error'])
+    expect(msgOf(doc, 'I33')).toContain('2.4')
+  })
+
+  it('I33 不知道时长时不猜 —— clipDurations 为空则只查区间自洽', () => {
+    const doc = mutated((d) => {
+      d.assets[0].stats.animations = ['Disassemble']
+      d.animations.push(imported({ startS: 0, endS: 9 }))
+    })
+    expect(codes(doc)).not.toContain('I33')
+  })
+})
+
+describe('I35 · overlay 与 step 的 id 全文档唯一', () => {
+  const page = (id: string, overlayId: string) => ({
+    id, name: '页', overlays: [{ id: overlayId, type: 'text', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl',
+      props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: null } }],
+  })
+
+  it('正例：两页各有各的 overlay id', () => {
+    expect(codes(mutated((d) => (d.pages = [page('pg_00000001', 'ov_00000001'), page('pg_00000002', 'ov_00000002')])))).not.toContain('I35')
+  })
+
+  it('反例：两页用了同一个 overlay id → error', () => {
+    const doc = mutated((d) => (d.pages = [page('pg_00000001', 'ov_00000001'), page('pg_00000002', 'ov_00000001')]))
+    expect(levelOf(doc, 'I35')).toEqual(['error'])
+  })
+
+  it('反例：overlay 与 step 撞 id 也报 —— 「全文档」不是「同类之间」', () => {
+    const doc = mutated((d) => {
+      d.pages = [page('pg_00000001', 'ov_00000001')]
+      d.flows = [{ id: 'flw_00000001', name: 'f', variableId: d.variables[0]?.id ?? 'step', startStepId: null,
+        steps: [{ id: 'ov_00000001', name: '一', next: null, onEnter: [] }] }]
+    })
+    expect(levelOf(doc, 'I35')).toEqual(['error'])
+  })
+})
+
+describe('I36 – I39 · 流程', () => {
+  const flow = (over: Record<string, unknown> = {}) => ({
+    id: 'flw_00000001', name: '拆装', variableId: 'step_var', startStepId: 'st_00000001',
+    steps: [
+      { id: 'st_00000001', name: '一', next: 'st_00000002', onEnter: [] },
+      { id: 'st_00000002', name: '二', next: null, onEnter: [] },
+    ],
+    ...over,
+  })
+  const withFlow = (over: Record<string, unknown> = {}, varType = 'string') =>
+    mutated((d) => {
+      d.variables.push({ id: 'step_var', name: '当前步骤', type: varType, default: varType === 'string' ? '' : 0, persist: false, scope: 'scene' })
+      d.flows = [flow(over)]
+    })
+
+  it('I36 正例：string 变量不报', () => {
+    expect(codes(withFlow())).not.toContain('I36')
+  })
+
+  it('I36 反例：number 变量 → error', () => {
+    expect(levelOf(withFlow({}, 'number'), 'I36')).toEqual(['error'])
+  })
+
+  it('I37 正例：入口步骤在本流程里', () => {
+    expect(codes(withFlow())).not.toContain('I37')
+  })
+
+  it('I37 反例：入口步骤不在本流程 → error', () => {
+    expect(levelOf(withFlow({ startStepId: 'st_99999999' }), 'I37')).toEqual(['error'])
+  })
+
+  it('I38 正例：链能走到终点', () => {
+    expect(codes(withFlow())).not.toContain('I38')
+  })
+
+  it('I38 反例：两步互指成环 → error', () => {
+    const doc = withFlow({
+      steps: [
+        { id: 'st_00000001', name: '一', next: 'st_00000002', onEnter: [] },
+        { id: 'st_00000002', name: '二', next: 'st_00000001', onEnter: [] },
+      ],
+    })
+    expect(levelOf(doc, 'I38')).toEqual(['error'])
+  })
+
+  it('I38 自环也算环', () => {
+    const doc = withFlow({ steps: [{ id: 'st_00000001', name: '一', next: 'st_00000001', onEnter: [] }] })
+    expect(levelOf(doc, 'I38')).toEqual(['error'])
+  })
+
+  it('I39 正例：每步至多一个前驱', () => {
+    expect(codes(withFlow())).not.toContain('I39')
+  })
+
+  it('I39 反例：两步都指向同一步 → error', () => {
+    const doc = withFlow({
+      steps: [
+        { id: 'st_00000001', name: '一', next: 'st_00000003', onEnter: [] },
+        { id: 'st_00000002', name: '二', next: 'st_00000003', onEnter: [] },
+        { id: 'st_00000003', name: '三', next: null, onEnter: [] },
+      ],
+    })
+    expect(levelOf(doc, 'I39')).toEqual(['error'])
+    expect(msgOf(doc, 'I39')).toContain('上一步')
+  })
+})
+
+describe('I40 / I41 · 覆盖层的引用', () => {
+  const withOverlay = (overlay: Record<string, unknown>, extra?: (d: any) => void) =>
+    mutated((d) => {
+      extra?.(d)
+      d.pages = [{ id: 'pg_00000001', name: '页', overlays: [overlay] }]
+    })
+
+  const addImage = (d: any) => {
+    d.assets.push({ ...structuredClone(d.assets[0]), id: 'ast_img00001', type: 'image', name: '图.png',
+      hash: 'sha256:' + '1'.repeat(64), url: 'blob:x', lineageId: 'ast_img00001' })
+    d.media.push({ id: 'med_img00001', type: 'image', assetId: 'ast_img00001', name: '图' })
+  }
+  const addAudio = (d: any) => {
+    d.media.push({ id: 'med_aud00001', type: 'audio', assetId: d.assets[0].id, name: '声' })
+  }
+
+  const imageOverlay = (mediaId: string | null) => ({
+    id: 'ov_00000001', type: 'image', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl', props: { mediaId, fit: 'contain' },
+  })
+
+  it('I40 正例：image 覆盖层指向 image 媒体', () => {
+    expect(codes(withOverlay(imageOverlay('med_img00001'), addImage))).not.toContain('I40')
+  })
+
+  it('I40 反例：指向不存在的媒体 → error', () => {
+    expect(levelOf(withOverlay(imageOverlay('med_nothere1')), 'I40')).toEqual(['error'])
+  })
+
+  it('I40 反例：image 覆盖层指向 audio → error，且说清允许什么', () => {
+    const doc = withOverlay(imageOverlay('med_aud00001'), addAudio)
+    expect(levelOf(doc, 'I40')).toEqual(['error'])
+    expect(msgOf(doc, 'I40')).toContain('image')
+  })
+
+  it('I40 · panel 支吃 image 也吃 video，与 I14 对热点面板逐字对齐', () => {
+    const panel = (mediaId: string) => ({
+      id: 'ov_00000001', type: 'panel', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl',
+      props: { title: '', text: '', mediaId, flowId: null, progress: false },
+    })
+    expect(codes(withOverlay(panel('med_img00001'), addImage))).not.toContain('I40')
+    expect(levelOf(withOverlay(panel('med_aud00001'), addAudio), 'I40')).toEqual(['error'])
+  })
+
+  it('I41 正例：flowId 指向存在的流程', () => {
+    const doc = withOverlay(
+      { id: 'ov_00000001', type: 'text', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl',
+        props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: 'flw_00000001' } },
+      (d) => {
+        d.variables.push({ id: 'sv', name: 's', type: 'string', default: '', persist: false, scope: 'scene' })
+        d.flows = [{ id: 'flw_00000001', name: 'f', variableId: 'sv', startStepId: null, steps: [] }]
+      },
+    )
+    expect(codes(doc)).not.toContain('I41')
+  })
+
+  it('I41 反例：flowId 指向不存在的流程 → error', () => {
+    const doc = withOverlay({
+      id: 'ov_00000001', type: 'text', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl',
+      props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: 'flw_nothere1' },
+    })
+    expect(levelOf(doc, 'I41')).toEqual(['error'])
+  })
+})
+
+describe('I42 · prefab', () => {
+  const prefab = (over: Record<string, unknown> = {}) => ({
+    id: 'pfb_00000001', name: '标准泵组', note: '', version: 1, nodes: [], materials: [], ...over,
+  })
+
+  it('正例：空 prefab 不报', () => {
+    expect(codes(mutated((d) => (d.prefabs = [prefab()])))).not.toContain('I42')
+  })
+
+  it('反例：prefabRef 指向不存在的 prefab → error', () => {
+    expect(levelOf(mutated((d) => (d.nodes[1].prefabRef = { prefabId: 'pfb_nothere1', overridden: [] })), 'I42')).toEqual(['error'])
+  })
+
+  it('反例：prefab 内部 id 与文档主集合撞车 → error', () => {
+    const doc = mutated((d) => {
+      d.prefabs = [prefab({ nodes: [{ ...structuredClone(d.nodes[1]), parent: null }] })]
+    })
+    expect(levelOf(doc, 'I42')).toEqual(['error'])
+    expect(msgOf(doc, 'I42')).toContain('撞车')
+  })
+
+  it('反例：prefab 内部 id 自己重复 → error', () => {
+    const doc = mutated((d) => {
+      const n = { ...structuredClone(d.nodes[1]), id: 'nd_inpfb0001', parent: null }
+      d.prefabs = [prefab({ nodes: [n, { ...n }] })]
+    })
+    expect(levelOf(doc, 'I42')).toEqual(['error'])
+  })
+})
+
+describe('I43 / I44 / I45 · openLink', () => {
+  const link = (params: Record<string, unknown>) => withActions([{ action: 'openLink', params }])
+
+  it('I43 正例：https 不报', () => {
+    expect(codes(link({ url: 'https://example.com/manual', target: '_blank' }))).not.toContain('I43')
+  })
+
+  it('I43 正例：相对路径不报', () => {
+    expect(codes(link({ url: '/docs/manual.pdf', target: '_blank' }))).not.toContain('I43')
+  })
+
+  it('I43 反例：javascript: → error，且点名协议', () => {
+    const doc = link({ url: 'javascript:alert(1)', target: '_blank' })
+    expect(levelOf(doc, 'I43')).toEqual(['error'])
+    expect(msgOf(doc, 'I43')).toContain('javascript')
+  })
+
+  it('I43 反例：data: / vbscript: / file: 一并拦', () => {
+    for (const url of ['data:text/html,<script>', 'vbscript:msgbox', 'file:///etc/passwd']) {
+      expect(levelOf(link({ url, target: '_blank' }), 'I43'), url).toEqual(['error'])
+    }
+  })
+
+  it('I44 反例：target 是 _self → info', () => {
+    expect(levelOf(link({ url: 'https://example.com', target: '_self' }), 'I44')).toEqual(['info'])
+  })
+
+  it('I44 正例：_blank 不报', () => {
+    expect(codes(link({ url: 'https://example.com', target: '_blank' }))).not.toContain('I44')
+  })
+
+  it('I45 反例：外部域名 → info', () => {
+    expect(levelOf(link({ url: 'https://example.com/x', target: '_blank' }), 'I45')).toEqual(['info'])
+  })
+
+  it('I45 正例：相对路径不报 —— 内网部署打得开', () => {
+    expect(codes(link({ url: '/docs/manual.pdf', target: '_blank' }))).not.toContain('I45')
+  })
+
+  it('C4 · 一份含 javascript: 的历史文档仍然 migrate + validate 得过', () => {
+    // 完整性检查拦得住，**schema 校验不许拦** —— 把它做成 zod 约束会让一份能打开的
+    // 文档打不开，那是 C4 的反面。
+    const doc = link({ url: 'javascript:alert(1)', target: '_blank' })
+    expect(validate(doc).ok, 'schema 校验必须放行').toBe(true)
+    expect(hasErrors(check(doc)), '完整性检查必须拦下').toBe(true)
+  })
+})
+
+describe('T-226 · 两张表同构', () => {
+  it('报出来的每一条引用错误都说中文 —— 没有一个英文 kind 泄漏出来', () => {
+    // **断的是行为，不是一个导出的常量。**
+    //
+    // 两张表（中文名 / id 集合）分头维护过一次，症状有两种：缺 label → 报错里蹦出
+    // 「引用了不存在的 overlay」这种半英文；缺 set → `sets[kind]?.has` 短路 →
+    // **每一条合法引用都被误报**。这条测试造一份「每种引用各坏一条」的文档，
+    // 然后要求每条消息都是人话。
+    const doc = mutated((d) => {
+      d.variables.push({ id: 'sv', name: 's', type: 'string', default: '', persist: false, scope: 'scene' })
+      d.pages = [
+        { id: 'pg_00000001', name: '页', overlays: [
+          { id: 'ov_00000001', type: 'text', rect: { x: 0, y: 0, w: 1, h: 1 }, anchor: 'tl',
+            props: { text: '', size: 16, color: '#ffffff', align: 'left', flowId: 'flw_nothere1' } },
+        ] },
+      ]
+      d.flows = [{ id: 'flw_00000001', name: 'f', variableId: 'sv', startStepId: null, steps: [] }]
+      d.nodes[1].prefabRef = { prefabId: 'pfb_nothere1', overridden: [] }
+      d.viewpoints[0].thumbnailAssetId = 'ast_nothere1'
+      d.rules.push(
+        { id: 'rl_pg000001', name: 'a', enabled: true, when: { event: 'pageEnter', pageId: 'pg_nothere1' },
+          if: [], ifAny: [], then: [], mode: 'sequence', onError: 'abort', reentry: 'restart' },
+        { id: 'rl_st000001', name: 'b', enabled: true,
+          when: { event: 'flowStepEnter', flowId: 'flw_nothere1', stepId: 'st_nothere1' },
+          if: [], ifAny: [], then: [], mode: 'sequence', onError: 'abort', reentry: 'restart' },
+        { id: 'rl_ov000001', name: 'c', enabled: true, when: { event: 'overlayClick', overlayId: 'ov_nothere1' },
+          if: [], ifAny: [], then: [], mode: 'sequence', onError: 'abort', reentry: 'restart' },
+      )
+    })
+
+    const refIssues = check(doc).filter((i) => i.refKind !== undefined)
+    // 扫描面下限：一条引用错误都没造出来时，下面那个循环恒真
+    expect(new Set(refIssues.map((i) => i.refKind)).size, '造出来的引用种类太少，这条断言没什么可查的').toBeGreaterThanOrEqual(6)
+    for (const issue of refIssues) {
+      expect(issue.message, `${issue.refKind} 的中文名没登记，英文 kind 泄漏进了报错`).not.toContain(`不存在的${issue.refKind}`)
+    }
+  })
+
+  it('step 引用不再被误报 —— sets 缺 step 的那个缺口', () => {
+    const doc = mutated((d) => {
+      d.variables.push({ id: 'sv', name: 's', type: 'string', default: '', persist: false, scope: 'scene' })
+      d.flows = [{ id: 'flw_00000001', name: 'f', variableId: 'sv', startStepId: 'st_00000001',
+        steps: [{ id: 'st_00000001', name: '一', next: null, onEnter: [] }] }]
+      d.rules.push({
+        id: 'rl_probe001', name: '步骤规则', enabled: true,
+        when: { event: 'flowStepEnter', flowId: 'flw_00000001', stepId: 'st_00000001' },
+        if: [], ifAny: [], then: [], mode: 'sequence', onError: 'abort', reentry: 'restart',
+      })
+    })
+    // 这条引用是**合法的**。sets['step'] 缺席时它会被报成「引用了不存在的流程步骤」。
+    expect(check(doc).filter((i) => i.refKind === 'step')).toEqual([])
+  })
+
+  it('三个新事件的引用真的被查 —— 指向不存在的目标必须报出来', () => {
+    const bad = (when: Record<string, unknown>) =>
+      mutated((d) => {
+        d.rules.push({
+          id: 'rl_probe001', name: 'x', enabled: true, when, if: [], ifAny: [], then: [],
+          mode: 'sequence', onError: 'abort', reentry: 'restart',
+        })
+      })
+    expect(codes(bad({ event: 'pageEnter', pageId: 'pg_nothere1' })), 'pageEnter').toContain('I3')
+    expect(codes(bad({ event: 'flowStepEnter', flowId: 'flw_nothere1', stepId: 'st_nothere1' })), 'flowStepEnter').toContain('I3')
+    expect(codes(bad({ event: 'overlayClick', overlayId: 'ov_nothere1' })), 'overlayClick').toContain('I3')
   })
 })

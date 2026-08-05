@@ -56,13 +56,32 @@ export interface CheckIntegrityOptions {
  * from `nested`, because `nested` records where ids live, not what a `RefKind` is called —
  * conflating the two would make `overlays` look like a reference kind, which it is not.
  */
+/**
+ * 注册表推不出来的四个引用种类。
+ *
+ * `ID_COLLECTIONS` 的 `refKind` 记的是「v2 时谁会被指」——`pages` / `flows` 当时是
+ * `null`，因为那会儿没有任何字段指向它们。v3 之后不成立了：`overlay.props.flowId` 指
+ * 流程（I41）、`pageEnter.pageId` 指页面、`overlayClick.overlayId` 指覆盖层，而 `step`
+ * 从来就不是顶层集合。
+ *
+ * **写在这里而不是去改注册表的 `refKind`**：那个字段同时被 `selectors` / `remap` /
+ * `index-builder` 读，改它是 T-227 的活，本卡只独占 `integrity.ts`。两处都要改的东西
+ * 分两张卡改，比一张卡越界改两处安全。
+ */
+const EXTRA_REF_KINDS = {
+  page: { label: '页面', ids: (doc: SceneDocument) => doc.pages.map((p) => p.id) },
+  flow: { label: '流程', ids: (doc: SceneDocument) => doc.flows.map((f) => f.id) },
+  overlay: { label: '覆盖层', ids: (doc: SceneDocument) => doc.pages.flatMap((p) => p.overlays.map((o) => o.id)) },
+  step: { label: '流程步骤', ids: (doc: SceneDocument) => doc.flows.flatMap((f) => f.steps.map((st) => st.id)) },
+} as const
+
 const KIND_LABEL: Record<string, string> = {
   ...Object.fromEntries(
     ID_COLLECTION_NAMES.map((name) => ID_COLLECTIONS[name])
       .filter((spec) => spec.refKind !== null)
       .map((spec) => [spec.refKind, spec.label]),
   ),
-  step: '流程步骤',
+  ...Object.fromEntries(Object.entries(EXTRA_REF_KINDS).map(([kind, spec]) => [kind, spec.label])),
 }
 
 export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOptions = {}): IntegrityIssue[] {
@@ -85,6 +104,14 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     if (spec.refKind === null) continue
     sets[spec.refKind] = new Set(doc[name].map((record) => record.id))
   }
+  // 与 KIND_LABEL 同一张表推出来。
+  //
+  // **`step` 之前只有 label 没有 set**，于是任何一条 step 引用走到 `requireRef` 都会
+  // 撞上 `sets['step'] === undefined` → `?.` 短路 → **必报 error**。那不是「永远通过」，
+  // 是「永远误报」，而 v1.0 之前没有任何字段指向 step，所以它一次都没被触发过。
+  for (const [kind, spec] of Object.entries(EXTRA_REF_KINDS)) {
+    sets[kind] = new Set(spec.ids(doc))
+  }
 
   const requireRef = (code: string, kind: string, id: string | null | undefined, path: string) => {
     if (id == null) return
@@ -93,10 +120,50 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     }
   }
 
-  /** v2 · the `type` a record declares about itself, for the kinds that have one. */
+  /**
+   * 四张索引，**一次建好**。
+   *
+   * 原来每处需要「按 id 取一条记录」都写 `doc.assets.find(...)`，而这些地方分别嵌在
+   * 「每个材质的每个贴图槽」「每个视点」「每条动画」的循环里——于是 assets 这根轴上
+   * 是真二次的。规划 §4.2 点名了它，T-226 的多轴 scale 测试把它量了出来：
+   * assets 轴增长 3.639、variables 轴 3.887（线性应当是 2）。
+   */
+  const nodeById = new Map(doc.nodes.map((n) => [n.id, n]))
+  const assetById = new Map(doc.assets.map((a) => [a.id, a]))
+  const mediaById = new Map(doc.media.map((m) => [m.id, m]))
+  const variableById = new Map(doc.variables.map((v) => [v.id, v]))
+  /** 父 id → 子节点，按 `order` 升序。I21 / I22 / I24 都要它。 */
+  const childrenOf = new Map<string, typeof doc.nodes[number][]>()
+  for (const n of doc.nodes) {
+    if (n.parent === null) continue
+    const list = childrenOf.get(n.parent)
+    if (list) list.push(n)
+    else childrenOf.set(n.parent, [n])
+  }
+  for (const list of childrenOf.values()) list.sort((a, b) => a.order - b.order)
+
+  /**
+   * v3 · a node's own "type", by a **priority ladder**.
+   *
+   * `assetRef` / `primitive` / `light` / `section` 至多一个非空（I11），而 `explode`
+   * 与它们正交——一个爆炸分组通常没有任何承载体。阶梯顺序 section > explodeGroup >
+   * light > node 是规划 §4.1.1 逐字定的。
+   *
+   * **它不是装饰**：`RefTarget.expectType` 的整条链都靠它。让 node 永远返回 `'node'`
+   * 会让 I28（`explode` 动作指向一个没有 explode 配置的节点）形同虚设，而那正是 T-176
+   * 那条存活 blocker 的形状。
+   */
   const typeOf = (kind: string, id: string): string | undefined => {
-    if (kind === 'asset') return doc.assets.find((a) => a.id === id)?.type
-    if (kind === 'media') return doc.media.find((m) => m.id === id)?.type
+    if (kind === 'asset') return assetById.get(id)?.type
+    if (kind === 'media') return mediaById.get(id)?.type
+    if (kind === 'node') {
+      const node = nodeById.get(id)
+      if (!node) return undefined
+      if (node.section !== null) return 'section'
+      if (node.explode !== null) return 'explodeGroup'
+      if (node.light !== null) return 'light'
+      return 'node'
+    }
     return undefined
   }
 
@@ -215,6 +282,22 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
           id: step.next,
         })
       }
+      // T-226 ③ · **onEnter 里的动作引用同样要过解析器。**
+      //
+      // 「这些动作不会被执行」（I49）与「这些动作引用了一个不存在的对象」是两件事。
+      // 后者今天完全没人查：`options.actionRefs` 只在 `rules[].then` 那个循环里被调用，
+      // 而 onEnter 是文档里第二个能藏动作参数的地方。一份 v1.2 的文档在 v1.0 编辑器里
+      // 删掉一个节点，onEnter 里指向它的引用会静默悬空到 v1.2 通电那天。
+      //
+      // 按 X-14 的裁决**仍然遍历**——字段永不获得运行时，不代表它可以藏着坏引用。
+      if (options.actionRefs) {
+        step.onEnter.forEach((action, k) => {
+          for (const target of options.actionRefs!(action)) {
+            requireRef('I3', target.kind, target.id, `flows[${i}].steps[${j}].onEnter[${k}].params`)
+          }
+        })
+      }
+
       // I49 · `onEnter` 配了动作但永不执行（ADR-0035）。
       //
       // **warn 不是 error**：C4 说一份能打开的文档永远要能打开，而这个字段自 v0 就在
@@ -239,7 +322,7 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
   doc.animations.forEach((animation, i) => {
     if (animation.kind === 'imported') {
       requireRef('I3', 'asset', animation.assetId, `animations[${i}].assetId`)
-      const asset = doc.assets.find((a) => a.id === animation.assetId)
+      const asset = assetById.get(animation.assetId)
       if (asset && asset.type !== 'model') {
         add('I3', 'error', `animations[${i}].assetId`, `导入动画必须来自模型资产（当前 type=${asset.type}）`)
       }
@@ -273,7 +356,7 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
 
   doc.rules.forEach((rule, i) => {
     checkRuleRefs(rule, `rules[${i}]`, requireRef)
-    checkRuleConditionTypes(rule, `rules[${i}]`, doc, add)
+    checkRuleConditionTypes(rule, `rules[${i}]`, doc, add, variableById)
 
     if (rule.when.event === 'animationEnd') referencedAnimations.add(rule.when.animationId)
     for (const cond of [...rule.if, ...rule.ifAny]) {
@@ -357,6 +440,9 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     if (node.assetRef !== null) carriers.push('assetRef')
     if (node.primitive !== null) carriers.push('primitive')
     if (node.light !== null) carriers.push('light')
+    // v3 · section 是第四种承载体。**explode 不在这张名单里**：爆炸分组与承载体正交，
+    // 一个分组节点通常什么都不承载，把它算进来会让每个带子件的分组都误报。
+    if (node.section !== null) carriers.push('section')
     if (carriers.length > 1) {
       add(
         'I11',
@@ -372,7 +458,7 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
   const hdriId = doc.meta.environment.hdriAssetId
   if (hdriId != null) {
     requireRef('I12', 'asset', hdriId, 'meta.environment.hdriAssetId')
-    const hdri = doc.assets.find((a) => a.id === hdriId)
+    const hdri = assetById.get(hdriId)
     if (hdri && hdri.type !== 'hdri') {
       add('I12', 'error', 'meta.environment.hdriAssetId', `环境贴图必须是 hdri 资产（当前 type=${hdri.type}）`, {
         kind: 'asset',
@@ -390,7 +476,7 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
   doc.materials.forEach((material, i) => {
     for (const [slot, assetId] of Object.entries(material.params.maps)) {
       if (assetId == null) continue
-      const asset = doc.assets.find((a) => a.id === assetId)
+      const asset = assetById.get(assetId)
       // Missing is I3's business; this check is only about the type of what IS there.
       if (asset && asset.type !== 'texture') {
         add('I13', 'error', `materials[${i}].params.maps.${slot}`, `贴图槽位必须引用 texture 资产（当前 type=${asset.type}）`, {
@@ -406,7 +492,7 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
   // loop above via `RefTarget.expectType`, because only there is the action that imposed
   // the constraint available to name in the message.
   doc.media.forEach((media, i) => {
-    const asset = doc.assets.find((a) => a.id === media.assetId)
+    const asset = assetById.get(media.assetId)
     if (asset && asset.type !== media.type) {
       add('I14', 'error', `media[${i}].assetId`, `媒体声明为 ${media.type}，但引用的资产 type=${asset.type}`, {
         kind: 'asset',
@@ -415,7 +501,6 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     }
   })
 
-  const mediaById = new Map(doc.media.map((m) => [m.id, m]))
   doc.hotspots.forEach((hotspot, i) => {
     const mediaId = hotspot.content.mediaId
     if (mediaId == null) return
@@ -430,6 +515,459 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
         { kind: 'media', id: mediaId },
       )
     }
+  })
+
+  /* ======================================================================== */
+  /* v3 增量 · I16 – I45（v1 进化规划 §4.2 · v1.0 段 30 条）                     */
+  /*                                                                          */
+  /* 分组：表现力 15（I16–I30）· 资产与动画区间 4（I31–I34）·                    */
+  /*       引用与集合 8（I35–I42）· 嵌入 3（I43–I45）                            */
+  /*                                                                          */
+  /* ⚠ **I34 不在下面**：规划 §4.2 给「clipName 不在资产的 stats.animations 里」  */
+  /*   分配了 I34，而这条检查自 v0.5 起就以 **I6** 存在（上面 animations 那一段， */
+  /*   逐字同义）。加一条 I34 只会让同一个拼写错误报两遍 error。保留 I6，此处     */
+  /*   记名不实现——**编号表与实现对不上时，对不上的那一条要被写下来，不是被补齐**。*/
+  /* ======================================================================== */
+
+  const fog = doc.meta.fog
+  const outline = doc.meta.effects.outline
+
+  /* --- I16 · 线性雾的 near/far 顺序 ----------------------------------------- */
+  // 三个子句分开写而不是 &&：measured in v0.5 E18 —— 合成一个条件之后，
+  // 「雾没开」和「雾开了但 near/far 反了」这两种情况共用一条断言，
+  // 变异检验里把 enabled 那半删掉，测试照样绿。
+  if (fog.enabled && fog.type === 'linear' && fog.near >= fog.far) {
+    add(
+      'I16',
+      'error',
+      'meta.fog',
+      `线性雾的 near（${fog.near}）不小于 far（${fog.far}），远近颠倒后整个画面会被雾色填满`,
+    )
+  }
+
+  /* --- I17 · 雾色与背景色不一致 --------------------------------------------- */
+  if (fog.enabled && doc.meta.background.type === 'color' && fog.color.toLowerCase() !== doc.meta.background.color.toLowerCase()) {
+    add(
+      'I17',
+      'info',
+      'meta.fog.color',
+      `雾色 ${fog.color} 与背景色 ${doc.meta.background.color} 不同，远处物体会淡入一个与画面底色不一样的颜色`,
+    )
+  }
+
+  /* --- I18 / I19 / I20 · 描边开关与 highlight 预设的三种错配 ----------------- */
+  //
+  // 预设名按 `outline_` 前缀匹配，**不 import core 的预设表**：那张表住在 @w3/core，
+  // 而 schema 不许依赖任何内部包（check-deps-direction）。前缀是两侧共同遵守的命名约定，
+  // 由 core 的 highlight-presets.ts 保证。
+  const highlightPresets = new Set<string>()
+  let highlightActionCount = 0
+  for (const rule of doc.rules) {
+    for (const action of rule.then) {
+      if (action.action !== 'highlight') continue
+      highlightActionCount++
+      const preset = action.params.preset
+      if (typeof preset === 'string' && preset.length > 0) highlightPresets.add(preset)
+    }
+  }
+  const outlinePresets = [...highlightPresets].filter((p) => p.startsWith('outline_'))
+
+  if (!outline.enabled && outlinePresets.length > 0) {
+    add(
+      'I18',
+      'info',
+      'meta.effects.outline.enabled',
+      `描边总开关是关的，但文档里有 ${outlinePresets.length} 种描边预设在用（${outlinePresets.join('、')}），它们会回落成自发光`,
+    )
+  }
+  if (highlightPresets.size >= 3) {
+    add(
+      'I19',
+      'info',
+      'meta.effects.outline',
+      `文档用到 ${highlightPresets.size} 种高亮预设，同一时刻最多 2 种能以描边呈现，第 3 种起回落自发光`,
+    )
+  }
+  if (outline.enabled && highlightActionCount === 0) {
+    add('I20', 'info', 'meta.effects.outline.enabled', '描边总开关开着，但全文档没有任何 highlight 动作，这条通道不会被用到')
+  }
+
+  /* --- I21 – I24 · 爆炸分组 -------------------------------------------------- */
+  doc.nodes.forEach((node, i) => {
+    if (node.explode !== null) {
+      const children = childrenOf.get(node.id) ?? []
+
+      /* I21 · 分组里没有可散开的东西 */
+      if (children.length <= 1) {
+        add(
+          'I21',
+          'warn',
+          `nodes[${i}].explode`,
+          `对象「${node.name}」配了爆炸分组，但它只有 ${children.length} 个子对象，散不开`,
+          { kind: 'node', id: node.id },
+        )
+      }
+
+      /* I22 · 径向模式下全部子件锚点重合 */
+      if (node.explode.mode === 'radial' && children.length > 1) {
+        let coincident = true
+        for (let axis = 0; axis < 3 && coincident; axis++) {
+          let min = Infinity
+          let max = -Infinity
+          for (const c of children) {
+            const v = c.transform.p[axis]!
+            if (v < min) min = v
+            if (v > max) max = v
+          }
+          if (max - min >= 1e-6) coincident = false
+        }
+        if (coincident) {
+          add(
+            'I22',
+            'warn',
+            `nodes[${i}].explode`,
+            `「${node.name}」用径向模式，但 ${children.length} 个子件的锚点全部重合，径向散开没有方向可依。` +
+              `建议改用轴向模式或为每个零件设置爆炸偏移`,
+            { kind: 'node', id: node.id },
+          )
+        }
+      }
+
+      /* I23 · 轴向模式的零向量轴 */
+      if (node.explode.mode === 'axis') {
+        const [ax, ay, az] = node.explode.axis
+        if (Math.hypot(ax, ay, az) < 1e-9) {
+          add(
+            'I23',
+            'error',
+            `nodes[${i}].explode.axis`,
+            `「${node.name}」的轴向爆炸方向是零向量，归一化时会产生 NaN 并让整个分组消失`,
+            { kind: 'node', id: node.id },
+          )
+        }
+      }
+    }
+
+    /* I24 · 爆炸偏移挂在了不属于任何分组的节点上 */
+    if (node.explodeOffset !== null) {
+      const parent = node.parent === null ? null : nodeById.get(node.parent)
+      if (parent == null || parent.explode === null) {
+        add(
+          'I24',
+          'info',
+          `nodes[${i}].explodeOffset`,
+          `「${node.name}」设了爆炸偏移，但它的父级不是爆炸分组，这个偏移不会被任何人读到`,
+          { kind: 'node', id: node.id },
+        )
+      }
+    }
+
+    /* I26 · 剖切平面被缩放过 */
+    if (node.section !== null) {
+      const [sx, sy, sz] = node.transform.s
+      if (sx !== 1 || sy !== 1 || sz !== 1) {
+        add(
+          'I26',
+          'info',
+          `nodes[${i}].transform.s`,
+          `剖切面「${node.name}」被缩放成 [${sx}, ${sy}, ${sz}]，剖切结果只看位置与朝向，缩放只影响你看得见的指示矩形`,
+          { kind: 'node', id: node.id },
+        )
+      }
+    }
+  })
+
+  /* --- I25 / I27 · 剖切平面的两条全局约束 ------------------------------------ */
+  const activeSections = doc.nodes.filter((n) => n.section !== null && n.visible)
+  if (activeSections.length > 3) {
+    add(
+      'I25',
+      'warn',
+      'nodes',
+      `启用中的剖切面有 ${activeSections.length} 个，渲染器只吃 3 条，按层级树顺序取前 3 条，其余被忽略`,
+    )
+  }
+  if (activeSections.length > 0) {
+    // `shadow` 只长在能投影的那几种灯上（ambient / hemisphere 没有），所以要先探键。
+    const shadowCasters = doc.nodes.filter((n) => n.light !== null && 'shadow' in n.light && n.light.shadow.enabled)
+    if (shadowCasters.length > 0) {
+      add(
+        'I27',
+        'warn',
+        'nodes',
+        `场景里同时有剖切面与 ${shadowCasters.length} 盏投影灯：被剖掉的部分仍然会投下影子（three 的裁剪不参与阴影贴图渲染）`,
+      )
+    }
+  }
+
+  /* --- I29 · 热点编号重复 ---------------------------------------------------- */
+  const labelSeen = new Map<string, number>()
+  doc.hotspots.forEach((hotspot, i) => {
+    const label = hotspot.style.label
+    if (label === undefined || label === '') return
+    const first = labelSeen.get(label)
+    if (first === undefined) {
+      labelSeen.set(label, i)
+      return
+    }
+    add(
+      'I29',
+      'warn',
+      `hotspots[${i}].style.label`,
+      `热点编号「${label}」重复了（hotspots[${first}] 也是它）。编号会被印进手册与验收材料`,
+      { kind: 'hotspot', id: hotspot.id },
+    )
+  })
+
+  /* --- I30 · 视点缩略图 ------------------------------------------------------ */
+  doc.viewpoints.forEach((viewpoint, i) => {
+    const assetId = viewpoint.thumbnailAssetId
+    if (assetId === undefined) return
+    requireRef('I30', 'asset', assetId, `viewpoints[${i}].thumbnailAssetId`)
+    const asset = assetById.get(assetId)
+    if (asset && asset.type !== 'image') {
+      add('I30', 'error', `viewpoints[${i}].thumbnailAssetId`, `视点缩略图必须是 image 资产（当前 type=${asset.type}）`, {
+        kind: 'asset',
+        id: assetId,
+      })
+    }
+  })
+
+  /* --- I31 / I32 / I33 · 资产溯源与动画区间 ---------------------------------- */
+  doc.assets.forEach((asset, i) => {
+    const origin = asset.origin
+    if (origin !== undefined) {
+      /* I31 · 溯源记录与资产本体对不上 */
+      if (origin.hash !== asset.hash) {
+        add(
+          'I31',
+          'error',
+          `assets[${i}].origin.hash`,
+          `资产「${asset.name}」的溯源记录指向另一份字节（origin.hash 与 asset.hash 不同），这份溯源不属于它`,
+          { kind: 'asset', id: asset.id },
+        )
+      }
+      const t = origin.transcode
+      if (t !== undefined && t.ops.length === 0 && t.skipped.length === 0) {
+        add(
+          'I31',
+          'error',
+          `assets[${i}].origin.transcode`,
+          `资产「${asset.name}」记了一次转码，但既没有执行任何操作也没有跳过任何操作——这条记录不说明任何事`,
+          { kind: 'asset', id: asset.id },
+        )
+      }
+    }
+
+    /* I32 · clipDurations 里有资产本身没有的片段 */
+    const clipNames = new Set(asset.stats.animations)
+    for (const name of Object.keys(asset.stats.clipDurations)) {
+      if (clipNames.has(name)) continue
+      add(
+        'I32',
+        'warn',
+        `assets[${i}].stats.clipDurations`,
+        `资产「${asset.name}」记了片段「${name}」的时长，但它的 animations 里没有这个片段。区间校验拿这张表当真值`,
+        { kind: 'asset', id: asset.id },
+      )
+    }
+  })
+
+  /* I33 · 动画区间自洽 */
+  doc.animations.forEach((animation, i) => {
+    if (animation.kind !== 'imported') return
+    const { startS, endS } = animation
+    if (endS === null) return
+    if (endS <= startS) {
+      add('I33', 'error', `animations[${i}].endS`, `动画「${animation.name}」的区间终点（${endS}s）不晚于起点（${startS}s）`)
+      return
+    }
+    const duration = assetById.get(animation.assetId)?.stats.clipDurations[animation.clipName]
+    if (duration !== undefined && endS > duration) {
+      add(
+        'I33',
+        'error',
+        `animations[${i}].endS`,
+        `动画「${animation.name}」的区间终点 ${endS}s 超过了片段「${animation.clipName}」的实际时长 ${duration}s`,
+      )
+    }
+  })
+
+  /* --- I35 · overlay id 与 step id 全文档唯一 -------------------------------- */
+  //
+  // 「全文档」而不是「同页 / 同流程内」：两个页面各有一个 ov_00000001 时，
+  // `overlayClick` 规则指过去是二义的，而 I1 只查顶层集合，看不见嵌套 id。
+  const nestedSeen = new Map<string, string>()
+  const claimNested = (id: string, where: string, kind: string) => {
+    const first = nestedSeen.get(id)
+    if (first === undefined) {
+      nestedSeen.set(id, where)
+      return
+    }
+    add('I35', 'error', where, `id ${id} 已经被 ${first} 用掉了，${KIND_LABEL[kind] ?? kind} id 必须全文档唯一`, {
+      kind,
+      id,
+    })
+  }
+  doc.pages.forEach((page, i) => {
+    page.overlays.forEach((overlay, j) => claimNested(overlay.id, `pages[${i}].overlays[${j}].id`, 'overlay'))
+  })
+  doc.flows.forEach((flow, i) => {
+    flow.steps.forEach((step, j) => claimNested(step.id, `flows[${i}].steps[${j}].id`, 'step'))
+  })
+
+  /* --- I36 – I39 · 流程 ------------------------------------------------------ */
+  doc.flows.forEach((flow, i) => {
+    /* I36 · 流程变量必须是 string */
+    const variable = variableById.get(flow.variableId)
+    if (variable && variable.type !== 'string') {
+      add(
+        'I36',
+        'error',
+        `flows[${i}].variableId`,
+        `流程「${flow.name}」的当前步骤存在变量「${variable.name}」里，而它是 ${variable.type} 型——步骤 id 是字符串`,
+        { kind: 'variable', id: flow.variableId },
+      )
+    }
+
+    const stepIds = new Set(flow.steps.map((st) => st.id))
+
+    /* I37 · 入口步骤必须属于本流程 */
+    if (flow.startStepId !== null && !stepIds.has(flow.startStepId)) {
+      add(
+        'I37',
+        'error',
+        `flows[${i}].startStepId`,
+        `流程「${flow.name}」的入口步骤 ${flow.startStepId} 不在本流程里`,
+        { kind: 'step', id: flow.startStepId },
+      )
+    }
+
+    /* I38 · 从入口沿 next 走成环 */
+    if (flow.startStepId !== null && stepIds.has(flow.startStepId)) {
+      const nextOf = new Map(flow.steps.map((st) => [st.id, st.next]))
+      const seen = new Set<string>()
+      let cursor: string | null = flow.startStepId
+      while (cursor !== null) {
+        if (seen.has(cursor)) {
+          add('I38', 'error', `flows[${i}].steps`, `流程「${flow.name}」的步骤链在 ${cursor} 处成环，走不到终点`, {
+            kind: 'step',
+            id: cursor,
+          })
+          break
+        }
+        seen.add(cursor)
+        cursor = nextOf.get(cursor) ?? null
+      }
+    }
+
+    /* I39 · 每个步骤至多被一个 next 指向 */
+    const inbound = new Map<string, number>()
+    for (const st of flow.steps) {
+      if (st.next === null) continue
+      inbound.set(st.next, (inbound.get(st.next) ?? 0) + 1)
+    }
+    for (const [target, count] of inbound) {
+      if (count <= 1) continue
+      add(
+        'I39',
+        'error',
+        `flows[${i}].steps`,
+        `流程「${flow.name}」里有 ${count} 个步骤都指向 ${target}，「上一步」按钮无法确定该回到哪一个`,
+        { kind: 'step', id: target },
+      )
+    }
+  })
+
+  /* --- I40 / I41 · 覆盖层的两类引用 ------------------------------------------ */
+  doc.pages.forEach((page, i) => {
+    page.overlays.forEach((overlay, j) => {
+      const at = `pages[${i}].overlays[${j}]`
+
+      if (overlay.type === 'image' || overlay.type === 'panel') {
+        const mediaId = overlay.props.mediaId
+        if (mediaId != null) {
+          requireRef('I40', 'media', mediaId, `${at}.props.mediaId`)
+          const media = mediaById.get(mediaId)
+          if (media) {
+            // 与 I14 对热点面板的规则逐字对齐：image 支只吃 image，panel 支吃 image | video
+            const allowed = overlay.type === 'image' ? ['image'] : ['image', 'video']
+            if (!allowed.includes(media.type)) {
+              add(
+                'I40',
+                'error',
+                `${at}.props.mediaId`,
+                `${overlay.type === 'image' ? '图片' : '面板'}覆盖层只能展示 ${allowed.join(' 或 ')}，「${media.name}」是 ${media.type}`,
+                { kind: 'media', id: mediaId },
+              )
+            }
+          }
+        }
+      }
+
+      if (overlay.type === 'text' || overlay.type === 'panel') {
+        if (overlay.props.flowId != null) requireRef('I41', 'flow', overlay.props.flowId, `${at}.props.flowId`)
+      }
+    })
+  })
+
+  /* --- I42 · prefab 引用与 prefab 内部 id 的命名空间 ------------------------- */
+  //
+  // prefab 里的 nodes / materials 与文档主集合**同一命名空间**（规划 §4.1.3），
+  // 所以「组内唯一」和「不与主集合撞车」是两条，缺一条都会让实例化时静默覆盖。
+  const mainIds = new Set<string>([...doc.nodes.map((n) => n.id), ...doc.materials.map((m) => m.id)])
+  doc.prefabs.forEach((prefab, i) => {
+    const inside = new Set<string>()
+    const claim = (id: string, where: string) => {
+      if (inside.has(id)) {
+        add('I42', 'error', where, `预制件「${prefab.name}」内部 id ${id} 重复`, { kind: 'prefab', id: prefab.id })
+      } else if (mainIds.has(id)) {
+        add('I42', 'error', where, `预制件「${prefab.name}」内部的 ${id} 与文档主集合里的同名 id 撞车，实例化时会互相覆盖`, {
+          kind: 'prefab',
+          id: prefab.id,
+        })
+      }
+      inside.add(id)
+    }
+    prefab.nodes.forEach((n, j) => claim(n.id, `prefabs[${i}].nodes[${j}].id`))
+    prefab.materials.forEach((m, j) => claim(m.id, `prefabs[${i}].materials[${j}].id`))
+  })
+  doc.nodes.forEach((node, i) => {
+    if (node.prefabRef === null) return
+    requireRef('I42', 'prefab', node.prefabRef.prefabId, `nodes[${i}].prefabRef.prefabId`)
+  })
+
+  /* --- I43 / I44 / I45 · openLink 的三条 ------------------------------------- */
+  //
+  // `OpenLinkParams.url` 是 `z.string().min(1)`，**零 scheme 校验**——一个
+  // `javascript:` 的 url 今天存得进、发布得出。**这三条必须留在完整性检查里而不是收进
+  // schema**：C4 说一份能打开的文档永远要能打开，把它做成 zod 约束会让一份历史文档
+  // 从「能打开但被闸门拦住」变成「打不开」。
+  const SAFE_SCHEME = /^https?:\/\//i
+  const ANY_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+  doc.rules.forEach((rule, i) => {
+    rule.then.forEach((action, j) => {
+      if (action.action !== 'openLink') return
+      const at = `rules[${i}].then[${j}].params`
+      const url = typeof action.params.url === 'string' ? action.params.url : ''
+      const target = action.params.target
+
+      /* I43 · 危险 scheme */
+      if (url !== '' && !SAFE_SCHEME.test(url) && ANY_SCHEME.test(url)) {
+        const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1] ?? '?'
+        add('I43', 'error', `${at}.url`, `规则「${rule.name}」的链接使用了 ${scheme}: 协议，只允许 http、https 或相对路径`)
+      }
+
+      /* I44 · 嵌入播放时不导航 */
+      if (target === '_self') {
+        add('I44', 'info', `${at}.target`, `规则「${rule.name}」的链接在当前窗口打开：嵌入播放时不会导航，宿主只会收到一条 openLink 事件`)
+      }
+
+      /* I45 · 外部域名 */
+      if (SAFE_SCHEME.test(url)) {
+        add('I45', 'info', `${at}.url`, `规则「${rule.name}」的链接指向外部地址 ${url}，断网或内网部署时打不开`)
+      }
+    })
   })
 
   /* --- I15 · physical-only parameters on a non-physical material ------------ */
@@ -507,6 +1045,18 @@ function checkRuleRefs(rule: Rule, base: string, requireRef: RequireRefFn): void
     case 'variableChange':
       requireRef('I4', 'variable', w.variableId, `${base}.when.variableId`)
       break
+    // v3 的三个新事件。**漏掉它们的症状是「规则配得出、存得进、发布得出、永远不触发，
+    // 而所有单测都是绿的」**——因为 `default: break` 对任何未列出的事件都安静通过。
+    case 'pageEnter':
+      requireRef('I3', 'page', w.pageId, `${base}.when.pageId`)
+      break
+    case 'flowStepEnter':
+      requireRef('I3', 'flow', w.flowId, `${base}.when.flowId`)
+      requireRef('I3', 'step', w.stepId, `${base}.when.stepId`)
+      break
+    case 'overlayClick':
+      requireRef('I3', 'overlay', w.overlayId, `${base}.when.overlayId`)
+      break
     default:
       break
   }
@@ -525,8 +1075,20 @@ function checkRuleRefs(rule: Rule, base: string, requireRef: RequireRefFn): void
 }
 
 /** I4's second half: a comparison whose literal cannot match the variable's type. */
-function checkRuleConditionTypes(rule: Rule, base: string, doc: SceneDocument, add: AddFn): void {
-  const variableById = new Map(doc.variables.map((v) => [v.id, v]))
+/**
+ * @param variableById  **调用方建好传进来**，不在这里建。
+ *
+ * 这个函数每条规则调用一次，而它原来第一行就 `new Map(doc.variables.map(...))`——
+ * 于是「规则数 × 变量数」是一个货真价实的二次项。T-226 的多轴 scale 测试实测
+ * variables 轴增长 3.887（线性应当是 2），这里是它的来源。
+ */
+function checkRuleConditionTypes(
+  rule: Rule,
+  base: string,
+  doc: SceneDocument,
+  add: AddFn,
+  variableById: ReadonlyMap<string, SceneDocument['variables'][number]>,
+): void {
 
   const literalOf = (expr: ValueExpr): string | number | boolean | undefined =>
     'const' in expr ? expr.const : undefined

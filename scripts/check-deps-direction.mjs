@@ -57,7 +57,19 @@ for (const [name, dir] of Object.entries(DIRS)) {
     }
   }
 
-  const files = collectFiles(join(ROOT, dir, 'src'), ['.ts', '.tsx', '.js'])
+  // **`test` 与 `src` 一起扫。**
+  //
+  // 原来只扫 `src`，于是「把一个 import 了 @w3/core 的测试文件放进 packages/schema/test/」
+  // 这件事，这条守卫**一个字都不会说**——实测：把 T-226 的 action-refs-gate.test.ts 拷进
+  // schema 并改成从 '@w3/core' import，扫描文件数一个没变（164 → 164），PASS 照旧。
+  //
+  // 而那正是 T-226 卡面点名要它拦住的东西：那个文件放错包，会逼出「在 schema 里手抄一份
+  // 动作表」，也就是 T-176 那条存活 blocker（测试自造假解析器）的逐字复现。
+  // 一条守卫扫不到的地方，与没有守卫没有区别。
+  const files = [
+    ...collectFiles(join(ROOT, dir, 'src'), ['.ts', '.tsx', '.js']),
+    ...collectFiles(join(ROOT, dir, 'test'), ['.ts', '.tsx', '.js']),
+  ]
   report.filesScanned += files.length
   for (const file of files) {
     for (const { spec, line } of extractImports(stripComments(readFileSync(file, 'utf8')))) {

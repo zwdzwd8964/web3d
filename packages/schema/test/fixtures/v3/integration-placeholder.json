@@ -111,6 +111,46 @@
           "finishedAt": "2026-08-04T00:00:00.000Z"
         }
       }
+    },
+    {
+      "id": "ast_thumb001",
+      "type": "image",
+      "name": "视点缩略图.png",
+      "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "url": "blob:ast_thumb001",
+      "version": 1,
+      "lineageId": "ast_thumb001",
+      "stats": {
+        "tris": 0,
+        "materials": 0,
+        "textures": 1,
+        "bytes": 4096,
+        "textureBytes": 4096,
+        "nodes": 0,
+        "animations": [],
+        "clipDurations": {}
+      },
+      "audit": {
+        "checkedAt": "2026-08-01T02:11:03.000Z",
+        "policyId": "default-v1",
+        "findings": [
+          {
+            "metric": "tris",
+            "value": 128400,
+            "limit": 300000,
+            "level": "pass",
+            "advice": ""
+          },
+          {
+            "metric": "textureBytes",
+            "value": 220200960,
+            "limit": 134217728,
+            "level": "fail",
+            "advice": "贴图显存 210MB 超出 128MB 限制。建议将 4K 贴图降至 2K，或启用 KTX2 压缩。"
+          }
+        ]
+      },
+      "thumbnailUrl": "assets/ab/12/ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890.thumb.png"
     }
   ],
   "nodes": [
@@ -354,7 +394,7 @@
         "near": 0.1,
         "far": 1000
       },
-      "thumbnailAssetId": "ast_9k2m4p7q"
+      "thumbnailAssetId": "ast_thumb001"
     }
   ],
   "variables": [

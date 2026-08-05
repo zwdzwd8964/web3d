@@ -1439,8 +1439,8 @@
 - ⚠ **单卡波次（W4）。完成后停下来汇报。** 与 v0 的 T-001、v0.5 的 T-120 同理：字段形状错了，
   后面三个台阶全建在错地基上，且这是唯一无法靠单测发现的错误类型。
 
-### [ ] T-226 · 完整性检查全域合并（I16 起，v1.0 段 30 条）
-- **依赖** T-225 · **预估** 2.4d · **实际** —
+### [x] T-226 · 完整性检查全域合并（I16 起，v1.0 段 30 条）
+- **依赖** T-225 · **预估** 2.4d · **实际** 2.6d
 - **独占** `packages/schema/src/integrity.ts` · `packages/schema/test/integrity.test.ts` ·
   `packages/schema/test/integrity-explode-section.test.ts`(新) ·
   **`packages/core/test/eca/action-refs-gate.test.ts`(新)**
