@@ -223,3 +223,68 @@ describe('T-241 · 雾段没有被描边段挤掉', () => {
     expect(store.getState().doc.meta.fog.enabled).toBe(true)
   })
 })
+
+/* --- 背景与曝光（T-242）--------------------------------------------------- */
+
+describe('T-242 · 背景与曝光段', () => {
+  it('改背景色 → `meta.background.color` 变，落一条撤销', () => {
+    // 这两个字段在 13 份设计里零认领：字段在文档里、运行时读它、导出用它、体检提它，
+    // **用户改不了它**。
+    const store = storeWithOutline(false)
+    mount(store)
+    const before = store.getState().historyDepth
+
+    change(find<HTMLInputElement>('background-color'), '#204060')
+
+    expect(store.getState().doc.meta.background.color).toBe('#204060')
+    expect(store.getState().historyDepth).toBe(before + 1)
+  })
+
+  it('切成透明 → 背景色控件收起来，字段跟着变', () => {
+    const store = storeWithOutline(false)
+    mount(store)
+
+    change(find<HTMLSelectElement>('background-type'), 'transparent')
+
+    expect(store.getState().doc.meta.background.type).toBe('transparent')
+    expect(host?.querySelector('[data-testid="background-color"]'), '透明背景没有颜色可调').toBeNull()
+  })
+
+  it('**背景类型下拉框里没有 hdri 这一档**', () => {
+    // 选中它而 `environment.hdriAssetId` 是 null，画面是一片纯黑且没有任何提示。
+    const store = storeWithOutline(false)
+    mount(store)
+    const options = [...find<HTMLSelectElement>('background-type').options].map((o) => o.value)
+    expect(options).not.toContain('hdri')
+  })
+
+  it('文档已经是 hdri 时，下拉框如实显示它，不谎报成纯色', () => {
+    const base = createGoldenPathDocument()
+    const store = createDocumentStore({
+      ...base,
+      meta: { ...base.meta, background: { ...base.meta.background, type: 'hdri' } },
+    })
+    mount(store)
+    expect(find<HTMLSelectElement>('background-type').value).toBe('hdri')
+  })
+
+  it('拖曝光 → 一次拖拽一条撤销，字段跟着走', () => {
+    const store = storeWithOutline(false)
+    mount(store)
+    const before = store.getState().historyDepth
+
+    scrub(labelOf('曝光'), [0, 30, 60])
+
+    expect(store.getState().doc.meta.environment.exposure).not.toBe(1)
+    expect(store.getState().historyDepth).toBe(before + 1)
+  })
+
+  it('没挂环境贴图时，环境光强度是禁用的，并说清为什么', () => {
+    const store = storeWithOutline(false)
+    mount(store)
+
+    const disabled = [...(host?.querySelectorAll<HTMLInputElement>('input:disabled') ?? [])]
+    expect(disabled.length, '环境光强度该被禁用').toBeGreaterThan(0)
+    expect(host?.textContent).toContain('先在资源库里挂一张环境贴图')
+  })
+})

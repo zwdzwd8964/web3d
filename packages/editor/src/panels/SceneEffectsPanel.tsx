@@ -1,5 +1,5 @@
 import { FOG_TYPES, HIDDEN_EDGE_MODES } from '@w3/schema'
-import type { Fog, HiddenEdgeMode, SceneDocument } from '@w3/schema'
+import type { Background, Fog, HiddenEdgeMode, SceneDocument } from '@w3/schema'
 import { suggestFogRange } from '@w3/core'
 import {
   applySuggestedFogRange,
@@ -9,6 +9,7 @@ import {
   setOutlineEnabled,
   setOutlineParams,
 } from '../lib/effects-edit.js'
+import { setBackgroundColor, setBackgroundType, setEnvIntensity, setExposure } from '../lib/environment-edit.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { NumberField } from '../widgets/NumberField.js'
 
@@ -29,6 +30,18 @@ const TYPE_LABELS: Record<Fog['type'], string> = {
   exp2: '指数（更像真实大气）',
 }
 
+/**
+ * T-242 · 面板给的背景类型只有两档。
+ *
+ * `hdri` 是第三档，**刻意不出现在这里**：把背景设成 hdri 而 `environment.hdriAssetId`
+ * 是 null，画面是一片纯黑且没有任何提示。它的入口在资源库的「设为环境」，那条路径会
+ * 同时把 assetId 写进去。
+ */
+const BACKGROUND_LABELS: Record<Exclude<Background['type'], 'hdri'>, string> = {
+  color: '纯色',
+  transparent: '透明（导出 PNG 时留空）',
+}
+
 /** T-241 · 被遮挡的那一段轮廓怎么画。 */
 const HIDDEN_EDGE_LABELS: Record<HiddenEdgeMode, string> = {
   hide: '不画（只画看得见的那一段）',
@@ -39,6 +52,8 @@ const HIDDEN_EDGE_LABELS: Record<HiddenEdgeMode, string> = {
 export function SceneEffectsPanel() {
   const fog = useDocumentSelector((s) => s.doc.meta.fog)
   const outline = useDocumentSelector((s) => s.doc.meta.effects.outline)
+  const background = useDocumentSelector((s) => s.doc.meta.background)
+  const environment = useDocumentSelector((s) => s.doc.meta.environment)
   const nodes = useDocumentSelector((s) => s.doc.nodes)
   const { commit, preview, previewStart, previewCommit } = useDocumentActions()
 
@@ -221,6 +236,67 @@ export function SceneEffectsPanel() {
           <div className="hint hint--warn">开启描边会用后处理管线，透明背景导出与 4× 导出不含描边</div>
         </>
       )}
+
+      <div className="subpanel__head">背景与曝光</div>
+
+      <label className="row">
+        <span>背景</span>
+        <select
+          className="field"
+          data-testid="background-type"
+          value={background.type}
+          onChange={(e) => commit('切换背景类型', (d) => setBackgroundType(d, e.target.value as Background['type']))}
+        >
+          {background.type === 'hdri' && (
+            // 已经是 hdri 就把它显示出来，否则下拉框会显示成「纯色」而文档里不是——
+            // 一个说谎的控件比没有控件更糟。**但它不出现在可选项里**（见 BACKGROUND_LABELS）。
+            <option value="hdri">环境贴图（在资源库里更换）</option>
+          )}
+          {Object.entries(BACKGROUND_LABELS).map(([type, label]) => (
+            <option key={type} value={type}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {background.type === 'color' && (
+        <label className="row">
+          <span>背景色</span>
+          <input
+            type="color"
+            data-testid="background-color"
+            value={background.color}
+            onChange={(e) => commit('调整背景色', (d) => setBackgroundColor(d, e.target.value))}
+          />
+        </label>
+      )}
+
+      <NumberField
+        label="曝光"
+        value={environment.exposure}
+        min={0.1}
+        max={4}
+        step={0.05}
+        onPreviewStart={previewStart}
+        onPreview={(v) => preview((d: SceneDocument) => setExposure(d, v))}
+        onCommit={(v) => commit('调整曝光', (d: SceneDocument) => setExposure(d, v))}
+        onPreviewEnd={() => previewCommit('调整曝光')}
+      />
+
+      <NumberField
+        label="环境光强度"
+        value={environment.intensity}
+        min={0}
+        max={4}
+        step={0.05}
+        disabled={environment.hdriAssetId === null}
+        onPreviewStart={previewStart}
+        onPreview={(v) => preview((d: SceneDocument) => setEnvIntensity(d, v))}
+        onCommit={(v) => commit('调整环境光强度', (d: SceneDocument) => setEnvIntensity(d, v))}
+        onPreviewEnd={() => previewCommit('调整环境光强度')}
+      />
+      {environment.hdriAssetId === null && <div className="hint">环境光强度要先在资源库里挂一张环境贴图才有效果</div>}
     </div>
   )
 }

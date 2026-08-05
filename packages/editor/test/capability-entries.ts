@@ -88,4 +88,57 @@ export const CAPABILITY_ENTRIES: readonly CapabilityEntry[] = [
     selector: null,
     note: 'v1.2 接线。同上：覆盖层在 v1.0 不渲染，点不到',
   },
+
+  /* --- 字段：T-242 把覆盖面从「动作 / 事件」推到「可编辑字段」---------------
+   *
+   * **这一段存在的理由，是它自己发现的那个缺口。** `meta.background.color` 与
+   * `meta.environment.exposure` 至今没有编辑器控件：字段在文档里、运行时读它、导出用它、
+   * 体检提它，13 份设计里零认领——**而只看动作与事件的覆盖面永远看不见这件事**，
+   * 因为背景色既不是动作也不是事件。这正是 T-137 那个教训的第二次实例。
+   *
+   * 覆盖面是 `meta.**` 的**每一个叶子**（由文档实例遍历得出，不是手写清单）。选 `meta`
+   * 而不是全文档：`meta` 是场景级设置块，它的每一片都是「用户应该调得到的东西」；
+   * 而 `nodes[]` / `rules[]` 这些集合的入口是层级树与规则面板，属于另一种形状。
+   */
+  { capability: 'field:meta.background.type', selector: '[data-testid="background-type"]' },
+  { capability: 'field:meta.background.color', selector: '[data-testid="background-color"]' },
+  { capability: 'field:meta.environment.exposure', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.environment.intensity', selector: '[data-testid="scene-effects-panel"] .field' },
+  {
+    capability: 'field:meta.environment.hdriAssetId',
+    selector: '[data-testid="library-panel"]',
+  },
+  { capability: 'field:meta.fog.enabled', selector: '[data-testid="fog-enabled"]' },
+  { capability: 'field:meta.fog.type', selector: '[data-testid="fog-type"]' },
+  { capability: 'field:meta.fog.color', selector: '[data-testid="fog-color"]' },
+  { capability: 'field:meta.fog.near', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.fog.far', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.fog.density', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.effects.outline.enabled', selector: '[data-testid="outline-enabled"]' },
+  { capability: 'field:meta.effects.outline.color', selector: '[data-testid="outline-color"]' },
+  { capability: 'field:meta.effects.outline.widthPx', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.effects.outline.strength', selector: '[data-testid="scene-effects-panel"] .field' },
+  { capability: 'field:meta.effects.outline.hiddenEdge', selector: '[data-testid="outline-hidden-edge"]' },
+
+  // --- 没有入口的四个。**不是「以后再说」，每一条都要说清是哪一种没有** ---
+  {
+    capability: 'field:meta.createdAt',
+    selector: null,
+    note: '按设计不可编辑：文档的出生时间由 createEmptyDocument 写一次，此后任何人都不该改它',
+  },
+  {
+    capability: 'field:meta.updatedAt',
+    selector: null,
+    note: '按设计不可编辑：由保存链路自己往前走（schema:touch，T-282 接线），给用户一个控件反而是错的',
+  },
+  {
+    capability: 'field:meta.unit',
+    selector: null,
+    note: '**无人认领的缺口**。改场景单位要把已导入资产整体重新归一化（SCHEMA_SPEC §5.2），不是一个下拉框；今天只有导入流程读它。登记在这里而不是删掉，是为了让它可数',
+  },
+  {
+    capability: 'field:meta.upAxis',
+    selector: null,
+    note: '**无人认领的缺口**。与 unit 同一处境：改朝向要重算所有节点 transform，今天只有导入流程读它',
+  },
 ]

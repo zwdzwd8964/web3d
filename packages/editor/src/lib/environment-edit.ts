@@ -1,4 +1,4 @@
-import type { SceneDocument } from '@w3/schema'
+import type { Background, SceneDocument } from '@w3/schema'
 import { DEFAULT_ENVIRONMENT } from '@w3/schema'
 
 /**
@@ -58,4 +58,37 @@ export function assignToBaseColour(draft: SceneDocument, nodeId: string, assetId
   if (!material) return false
   material.params.maps.map = assetId
   return true
+}
+
+/* --- 背景与曝光（T-242）--------------------------------------------------- */
+
+/**
+ * 换背景类型。**不清空 `color`**——在 color / transparent 之间来回切是调参时最常见的
+ * 动作，清空的话切回来用户挑的那个颜色就没了（与 `setFogType` 逐字同一条纪律）。
+ *
+ * ⚠ `hdri` 这一档在面板里不给：把背景设成 hdri 而 `environment.hdriAssetId` 是 null，
+ * 结果是一片纯黑而没有任何提示。资源库那条「设为环境」路径才是它的入口。
+ */
+export function setBackgroundType(draft: SceneDocument, type: Background['type']): void {
+  draft.meta.background = { ...draft.meta.background, type }
+}
+
+/** 改背景色。 */
+export function setBackgroundColor(draft: SceneDocument, color: string): void {
+  draft.meta.background = { ...draft.meta.background, color }
+}
+
+/**
+ * 改曝光。
+ *
+ * 它是**场景的艺术选择**，不是渲染器设置——`toneMapping` 曲线刻意不是字段
+ * （`document.ts` 的注释逐字写着理由），而 `exposure` 是。
+ */
+export function setExposure(draft: SceneDocument, exposure: number): void {
+  draft.meta.environment = { ...draft.meta.environment, exposure }
+}
+
+/** 改环境光强度。只有挂了 HDRI 时才有可见效果，面板据此禁用它。 */
+export function setEnvIntensity(draft: SceneDocument, intensity: number): void {
+  draft.meta.environment = { ...draft.meta.environment, intensity }
 }
