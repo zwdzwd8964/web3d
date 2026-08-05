@@ -228,7 +228,10 @@ export function AnimationPanel() {
                 title="在视口里试放一次，不写进文档"
                 onClick={() => previewAnimation(animation.id)}
               >
-                预览
+                {/* **不叫「预览」**：工具栏上那个「预览」是预览**模式**的开关，两者同名会让
+                    按名字找按钮的 E2E 点错人（黄金路径 II 第 ⑪ 步当场红了一次），
+                    而用户读起来也分不清「预览这条动画」与「进入预览模式」。 */}
+                试放
               </button>
               <button
                 type="button"
@@ -236,7 +239,7 @@ export function AnimationPanel() {
                 data-testid={`anim-stop-${animation.id}`}
                 onClick={() => stopPreviewAnimation(animation.id)}
               >
-                停止
+                停止试放
               </button>
               <button
                 type="button"
