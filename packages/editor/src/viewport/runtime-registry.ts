@@ -53,6 +53,22 @@ export function stopPreviewAnimation(animationId: string): boolean {
   return true
 }
 
+/**
+ * T-252 · DEV 只读探针：渲染器此刻编译过多少条着色器程序，以及裁剪平面数。
+ *
+ * 剖切与后处理两份设计**互相完全不知道对方存在**，而两处耦合只有在浏览器里才量得到：
+ * three 把裁剪平面的**数量**放进 shader program 的 cache key，所以开 / 关剖切会让每个
+ * 材质重编译一次；composer 的 pass 材质也进同一个缓存。这条探针是那次测量的读数口。
+ *
+ * 与 `__w3DevLocate` 同一条纪律：**只读**，转发运行时已有的东西，不重新实现任何计算，
+ * 生产构建里由守卫剥掉。
+ */
+export function devRenderStats(): { programs: number; clipPlanes: number } | null {
+  const runtime = active
+  if (!runtime) return null
+  return runtime.renderStats
+}
+
 /** D1's fallback counter, surfaced for the status bar and for the E2E assertion. */
 export function fullRebuildCount(): number {
   return active?.fullRebuildCount ?? 0
@@ -70,6 +86,8 @@ export function fullRebuildCount(): number {
  * the commit channel.
  */
 if (import.meta.env.DEV) {
+  // T-252 · 剖切 × 描边的两处耦合只有在浏览器里量得到，这是那次测量的读数口
+  ;(globalThis as Record<string, unknown>)['__w3DevRenderStats'] = () => devRenderStats()
   ;(globalThis as Record<string, unknown>)['__w3DevLocate'] = (nodeId: string) =>
     active?.projectToScreen(nodeId) ?? null
 

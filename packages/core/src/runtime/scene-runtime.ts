@@ -891,6 +891,23 @@ export class SceneRuntime implements RuntimeContext {
     this.syncShadows(next)
   }
 
+  /**
+   * T-252 · 两个只有在真浏览器里才有意义的读数：**编译过多少条着色器程序**、
+   * **此刻装了几条裁剪平面**。
+   *
+   * 开这个口而不是把 `renderer` 变成公开的：`renderer` 一公开，下一个人就会绕过
+   * `RendererLike` 直接调 three 的东西，而那正是 T-200 把注入缝收窄成接口时要防的。
+   * 这里只回答两个数，read-only。
+   *
+   * three 把裁剪平面的**数量**放进 shader program 的 cache key，所以 `programs` 会随
+   * 开 / 关剖切而增长——那正是 T-252 要量的东西。
+   */
+  get renderStats(): { programs: number; clipPlanes: number } {
+    const renderer = this.renderer as unknown as { info?: { programs?: unknown[] }; clippingPlanes?: unknown[] } | null
+    if (!renderer) return { programs: 0, clipPlanes: 0 }
+    return { programs: renderer.info?.programs?.length ?? 0, clipPlanes: renderer.clippingPlanes?.length ?? 0 }
+  }
+
   get fullRebuildCount(): number {
     return this.patches.fullRebuildCount
   }

@@ -276,14 +276,27 @@ export class PatchApplier {
         // Still present under a different index: this remove is the vacated slot, not a
         // deletion. Removing it here is the live-node bug in its purest form.
         if (next.nodes.some((n) => n.id === removed.id)) return this.reconcileNodes(next, prev)
-        return graph.removeNode(removed.id)
+        const gone = graph.removeNode(removed.id)
+        // 删掉的可能正是一把刀 —— 不重算的话它删了还在切
+        this.targets.applySections?.(next)
+        return gone
       }
       const added = next.nodes[index]
       if (!added) return false
       // `addNode` returns null for two different reasons — the node is already in the
       // graph (an index shift), or its parent has not been added yet (a subtree arriving
       // in one batch). Reconcile handles both, and is the only thing that can.
-      return graph.addNode(added) !== null || this.reconcileNodes(next, prev)
+      const ok = graph.addNode(added) !== null || this.reconcileNodes(next, prev)
+      // T-252 · **新增 / 删除一个节点也要重算剖切面。**
+      //
+      // 「新建剖切平面」走的正是这条 O(1) 快路：`addNode` 成功之后直接 return，
+      // `applySections` 一次都不会被调用。表现是**层级树里多了一把刀、面板参数都在、
+      // 而画面一刀没切**，且 `fullRebuildCount` 全程是 0（铁律 11 的静默失效形状）。
+      //
+      // 单测抓不到它：单测都是逐字段发补丁的，走不到这条快路。是 T-252 的 E2E 在真
+      // 浏览器里把它抓出来的——三条断言全红在 `clipPlanes === 0` 上。
+      this.targets.applySections?.(next)
+      return ok
     }
 
     const node = next.nodes[index]
@@ -481,6 +494,15 @@ export class PatchApplier {
       if (!before.has(node.id)) continue // freshly added above, already current
       if (!this.resyncNode(node, defs)) return false
     }
+    // T-243 / T-252 · **整份 `/nodes` 被替换也要重算剖切面。**
+    //
+    // 「新建剖切平面」走的正是这条路（immer 对 `draft.nodes.push` 发的是整数组替换），
+    // 而逐 index 的 `case 'section'` 在这里一次都不会被调用。漏掉的表现是：层级树里
+    // 多了一把刀、面板上参数都在、**而画面一刀没切**，且 `fullRebuildCount` 全程是 0。
+    //
+    // T-252 的 E2E 在真浏览器里把它抓了出来——三条断言全红在 `clipPlanes === 0` 上。
+    // 单测抓不到它，因为单测都是逐 index 发补丁的。
+    this.targets.applySections?.(next)
     return true
   }
 

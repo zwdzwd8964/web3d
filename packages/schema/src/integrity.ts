@@ -701,6 +701,24 @@ export function checkIntegrity(doc: SceneDocument, options: CheckIntegrityOption
     }
   }
 
+  /* --- I70 · 剖切 × 描边（T-252 实测，破例批准的编号）------------------------- */
+  //
+  // T-252 在真浏览器里量出来的：开描边之后加一把刀只改变 39012 像素，而直连路径上是
+  // 183212——差 4.7 倍，与「被剖掉的那一侧仍然画着轮廓」一致。成因在 three 里读得出来：
+  // `OutlinePass` 的 mask / depth 材质是 `ShaderMaterial` 且没设 `clipping: true`，而
+  // `WebGLRenderer` 只对非 ShaderMaterial 或 `clipping === true` 绑裁剪 uniform。
+  //
+  // 这是 v1.0 的**已知限制**，不是缺陷——修它要改 three 的 pass。所以给一条 warn：
+  // 没有机械提示的话，这件事只活在一份文档里，而用户会以为是自己配错了。
+  if (doc.meta.effects.outline.enabled && doc.nodes.some((n) => n.section !== null)) {
+    add(
+      'I70',
+      'warn',
+      'meta.effects.outline.enabled',
+      '同时开启了剖切与描边：被剖掉的那一侧仍然会画出轮廓（three 的描边通道不参与裁剪），剖面处的描边可能不正确',
+    )
+  }
+
   /* --- I29 · 热点编号重复 ---------------------------------------------------- */
   const labelSeen = new Map<string, number>()
   doc.hotspots.forEach((hotspot, i) => {

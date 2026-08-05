@@ -54,6 +54,14 @@ export function SceneEffectsPanel() {
   const outline = useDocumentSelector((s) => s.doc.meta.effects.outline)
   const background = useDocumentSelector((s) => s.doc.meta.background)
   const environment = useDocumentSelector((s) => s.doc.meta.environment)
+  /**
+   * T-252 · 场景里有没有剖切面。有的话描边段要多一句提示。
+   *
+   * 实测（`e2e/tests/section-outline.spec.ts`）：开描边之后加一把刀只改变 39012 像素，
+   * 直连路径上是 183212——被剖掉的那一侧仍然画着轮廓。成因是 three 的 `OutlinePass`
+   * 用 `ShaderMaterial` 且没设 `clipping: true`。这是 v1.0 的已知限制，与 I70 同源。
+   */
+  const hasSection = useDocumentSelector((s) => s.doc.nodes.some((n) => n.section !== null))
   const nodes = useDocumentSelector((s) => s.doc.nodes)
   const { commit, preview, previewStart, previewCommit } = useDocumentActions()
 
@@ -234,6 +242,11 @@ export function SceneEffectsPanel() {
           </label>
 
           <div className="hint hint--warn">开启描边会用后处理管线，透明背景导出与 4× 导出不含描边</div>
+          {hasSection ? (
+            <div className="hint hint--warn" data-testid="outline-section-hint">
+              场景里有剖切平面：被剖掉的那一侧仍然会画出轮廓，剖面处的描边可能不正确
+            </div>
+          ) : null}
         </>
       )}
 
