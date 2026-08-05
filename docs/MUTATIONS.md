@@ -276,3 +276,7 @@
 | T-229 | ③ | （非变异，是规划 §V14 与卡面的缺口） | §V14 要三样：常设回归 · 判定表 · **lint 守卫** | 非变异 · **卡面只列了前两样。** 三条外部读取路径里，做完卡面仍有两条只靠人记住 | 非变异 | 补了 `scripts/check-migrate-on-read.mjs` 并挂进 `check:constitution`。它按一张显式清单（不猜启发式）看守三条路径，读外部字节的模块里出现 `validate(` 即红。变异① 实测它与回归一起红 |
 | T-229 | ④ | （非变异，是卡面判别量的实测）用 `broken-v2-flows.json` 当种子，断言 projectId 与节点数 | 应当能区分「恢复正确」与「回落样例」 | 非变异 · **两种情形下都通过**：那份夹具的 projectId 是 `prj_a1b2c3d4`、3 个节点，与 `createGoldenPathDocument()` 逐字相同 | 非变异 | 改用 `golden-path-2.json`（`prj_s7t9v2x4` / 4 个节点），并补第三条正交断言 `doc.name`。D36 的 M6 形状原样出现在一张专为防它而写的卡的验收标准里 |
 | T-229 | ⑤ | （非变异，是我自己写测试时踩的）`try { return p.then(...) } finally { spy.mockRestore() }` | spy 应当看得到 `console.warn` | 非变异 · 红「一次都没调用」——`finally` 在 promise 兑现之前就同步跑掉了 | 非变异 | 改成 `await` 之后再 restore。一条断言看起来在测异步行为，实际测的是「同步块结束时的状态」 |
+| T-230 | ① | 删掉 case pages 里的 applyPages?.(next)，只留 return true | 钩子计数断言红 **而** fullRebuildCount 断言仍绿 | 红 · 2 条，全部是钩子计数那两条；「钩子缺席时路径仍算 handled」那条**仍然绿** | — | 还原。**这个对比就是本条变异的全部意义**：只断 fullRebuildCount === 0 的测试对「钩子根本没被调用」完全无观测能力，而那正是 v1.2 接线时会踩的坑 |
+| T-230 | ② | 删掉 case sceneId | 对应测试红 | 红 · 1 条 | — | 还原。两个顶层标量分开写不合并，就是为了能单独删掉一个 |
+| T-230 | ③ | （非变异，是卡面验收项的实测）「/prefabs/0/name 返回 handled」 | 应当证明本卡生效了 | 非变异 · **改动前后都绿**：T-225 已经把 prefabs 加进认领组，且 apply-patch-coverage 的 it.each 早就覆盖了它 | — | 真正新增的判别点只有四个钩子的调用计数与 /projectId、/sceneId 两条。把已经绿的项列进验收是假绿 |
+| T-230 | ④ | （非变异，是删 case id 的可观测性） | 删掉一支不可达的 case 应当可观测 | 非变异 · 不加断言的话**完全不可观测** | — | 补了一条负向断言：/id 现在必须 rebuilt === true 且 fullRebuildCount === 1。SceneDocument 顶层没有 id 字段，那一支从写下那天起就不可达，而真正存在的 projectId 反倒走 default 触发整图重建 |

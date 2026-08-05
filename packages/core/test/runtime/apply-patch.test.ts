@@ -1,7 +1,7 @@
 import type { SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
 import type { Mesh, MeshStandardMaterial } from 'three'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DocumentPatch } from '../../src/runtime/apply-patch.js'
 import { PatchApplier } from '../../src/runtime/apply-patch.js'
 import { MaterialRegistry } from '../../src/runtime/material-registry.js'
@@ -496,5 +496,78 @@ describe('a re-uploaded asset forces a rebuild (T-176 审查所得)', () => {
 
     expect(result.rebuilt).toBe(false)
     expect(applier.fullRebuildCount).toBe(0)
+  })
+})
+
+/* ========================================================================== */
+/* T-230 · v3 集合的四个钩子与两个顶层标量                                      */
+/* ========================================================================== */
+
+describe('T-230 · v3 集合钩子与顶层标量', () => {
+  const HOOKS = ['applyPages', 'applyFlows', 'applyDataSources', 'applyPrefabs'] as const
+
+  /** 四个钩子全装上，返回 applier 与那四个 spy。 */
+  function withHooks() {
+    // 复用 beforeEach 装好的 graph / registry，形状照 :278 那条既有用例。
+    const spies = {
+      applyPages: vi.fn(),
+      applyFlows: vi.fn(),
+      applyDataSources: vi.fn(),
+      applyPrefabs: vi.fn(),
+    }
+    const applier = new PatchApplier({ graph, materials: registry, rebuild: () => {}, ...spies })
+    return { applier, spies }
+  }
+
+  it.each([
+    [['pages'], 'applyPages'],
+    [['pages', 0, 'name'], 'applyPages'],
+    [['flows'], 'applyFlows'],
+    [['flows', 0, 'startStepId'], 'applyFlows'],
+    [['dataSources'], 'applyDataSources'],
+    [['dataSources', 0, 'intervalMs'], 'applyDataSources'],
+    [['prefabs'], 'applyPrefabs'],
+    [['prefabs', 0, 'name'], 'applyPrefabs'],
+  ] as const)('/%s 调对应的钩子，且**只**调它', (path, expected) => {
+    const { applier, spies } = withHooks()
+    const doc = createGoldenPathDocument()
+    const result = applier.apply([{ op: 'replace', path: [...path], value: [] }], doc, doc)
+
+    expect(result.rebuilt, '认领了就不该回落整图重建').toBe(false)
+    expect(spies[expected]).toHaveBeenCalledTimes(1)
+    expect(spies[expected]).toHaveBeenCalledWith(doc)
+    // 另外三个必须没被调 —— 「四个一起调」的实现在只断一个的测试下照样绿
+    for (const other of HOOKS) {
+      if (other === expected) continue
+      expect(spies[other], `${other} 不该为 /${path[0]} 开火`).not.toHaveBeenCalled()
+    }
+  })
+
+  it('钩子缺席时路径仍然算 handled —— 这是「认领但不做事」的全部含义', () => {
+    // **注意它与上面那条的分工**：这一条只看 fullRebuildCount，把 applyPages 的调用整个
+    // 删掉它照样绿。上面那条才是钩子的看守。两条都要有。
+    const doc = createGoldenPathDocument()
+    for (const collection of ['pages', 'flows', 'dataSources', 'prefabs']) {
+      const result = applier.apply([{ op: 'replace', path: [collection], value: [] }], doc, doc)
+      expect(result.rebuilt, collection).toBe(false)
+    }
+    expect(applier.fullRebuildCount).toBe(0)
+  })
+
+  it.each([['projectId'], ['sceneId']])('/%s 是顶层标量，认领而不重建', (key) => {
+    const doc = createGoldenPathDocument()
+    const result = applier.apply([{ op: 'replace', path: [key], value: 'x' }], doc, doc)
+    expect(result.handled).toBe(1)
+    expect(result.unhandled).toEqual([])
+    expect(result.rebuilt).toBe(false)
+    expect(applier.fullRebuildCount).toBe(0)
+  })
+
+  it('/id 现在会回落整图重建 —— SceneDocument 根本没有这个字段', () => {
+    // 没有这一条，「删掉那支不可达的 case 'id'」这个改动在测试上完全不可观测。
+    const doc = createGoldenPathDocument()
+    const result = applier.apply([{ op: 'replace', path: ['id'], value: 'x' }], doc, doc)
+    expect(result.rebuilt).toBe(true)
+    expect(applier.fullRebuildCount).toBe(1)
   })
 })

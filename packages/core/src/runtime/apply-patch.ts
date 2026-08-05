@@ -47,6 +47,23 @@ export interface PatchApplierTargets {
   readonly applyEnvironment?: (doc: SceneDocument) => void
   readonly applyNodeShadow?: (doc: SceneDocument, nodeId: string) => void
   readonly applyMedia?: (doc: SceneDocument) => void
+  /**
+   * v1.0 / schema v3 hooks. 与上面三个同形（单参 `doc`，返回 void），缺席时行为一字不变。
+   *
+   *   applyPages        `/pages/**`        —— 消费者在 **v1.2**（覆盖层渲染）
+   *   applyFlows        `/flows/**`        —— 消费者在 **v1.2**（流程运行时）
+   *   applyDataSources  `/dataSources/**`  —— 消费者在 **v1.5**（外部数据源轮询）
+   *   applyPrefabs      `/prefabs/**`      —— 消费者在 **v2**（prefab 实例化）
+   *
+   * ⚠ **本卡一个都不注入。** `scene-runtime.ts` 的装配段里这四个仍然是 undefined，
+   * 所以单测绿 ≠ 生产有效。它们现在的价值是「路径被认领」——缺了钩子的那一条
+   * `return true` 让 `/dataSources/0/intervalMs` 这种补丁不至于触发一次整图重建
+   * （1000 节点实测 97 ms）。接线各归各的卡。
+   */
+  readonly applyPages?: (doc: SceneDocument) => void
+  readonly applyFlows?: (doc: SceneDocument) => void
+  readonly applyDataSources?: (doc: SceneDocument) => void
+  readonly applyPrefabs?: (doc: SceneDocument) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -121,27 +138,47 @@ export class PatchApplier {
         return true
       // Collections with no renderer-side representation: the ECA engine and the hotspot
       // projector read them straight from the document, so there is nothing to mirror.
-      //
-      // v3 的 `dataSources` / `prefabs` 也在这一组。**认领它们、什么都不做，是正确行为而不是
-      // 偷懒**：掉进 default 会让「改一个数据源的轮询间隔」触发一次整图重建（1000 节点实测
-      // 97 ms，IMPL_NOTES T-176），而数据源和 prefab 库跟场景图没有任何关系。
       case 'media':
         // The hotspot layer and the media bus read `doc.media` directly; the pool of
         // <audio> elements is the only thing that mirrors it (T-163).
         this.targets.applyMedia?.(next)
         return true
+      // v3 的四个集合各自有一个**可选**钩子。
+      //
+      // **认领它们、（在没有钩子时）什么都不做，是正确行为而不是偷懒**：掉进 default 会让
+      // 「改一个数据源的轮询间隔」触发一次整图重建（1000 节点实测 97 ms，IMPL_NOTES T-176）。
+      // 而给它们各自一个槽位，是为了 v1.2/v1.5/v2 接线时不必再动这个 switch。
+      //
+      // 四个分开写而不是共用一个钩子：一个「四个一起调」的实现在「只断某一个被调用」的
+      // 测试下照样绿，所以测试那边也逐个断了「另外三个没被调」。
+      case 'pages':
+        this.targets.applyPages?.(next)
+        return true
+      case 'flows':
+        this.targets.applyFlows?.(next)
+        return true
+      case 'dataSources':
+        this.targets.applyDataSources?.(next)
+        return true
+      case 'prefabs':
+        this.targets.applyPrefabs?.(next)
+        return true
+      // 后面这一组没有渲染侧镜像，认领即可。
+      //
+      // **`case 'id'` 删掉了：`SceneDocument` 根本没有 `id` 字段**（顶层是
+      // schemaVersion / projectId / sceneId / name / meta + 13 个集合），所以那一支从写下
+      // 那天起就不可达。而真正存在的 `projectId` 反倒走 default —— 改一次项目 id 会触发
+      // 一次整图重建。`sceneId` 与 `projectId` 分两行写、不合并成一行：合并之后没法
+      // 单独删掉一个来做变异检验。
       case 'rules':
       case 'variables':
       case 'viewpoints':
       case 'animations':
       case 'hotspots':
-      case 'pages':
-      case 'flows':
-      case 'dataSources':
-      case 'prefabs':
       case 'name':
       case 'schemaVersion':
-      case 'id':
+      case 'sceneId':
+      case 'projectId':
         return true
       default:
         return false

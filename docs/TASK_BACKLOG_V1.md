@@ -1533,8 +1533,8 @@
   **静默回落到样例场景**（用户看到的是样例，与数据丢失无法区分，直接违 C4）。
   三条生产路径今天都改成 migrate 了，但**靠人记住，没有任何自动化守卫**。
 
-### [ ] T-230 · `apply-patch` 集合路径从 no-op 变成显式钩子
-- **依赖** T-225 · T-201 · **预估** 0.8d · **实际** —
+### [x] T-230 · `apply-patch` 集合路径从 no-op 变成显式钩子
+- **依赖** T-225 · T-201 · **预估** 0.8d · **实际** 0.7d
 - **独占** `packages/core/src/runtime/apply-patch.ts` · `packages/core/test/runtime/apply-patch.test.ts`
 - **做** `PatchApplierTargets` 加 `applyPages?`/`applyFlows?`/`applyDataSources?`/`applyPrefabs?`
   四个可选钩子，照抄 `applyEnvironment`/`applyMedia` 的槽位形状与注释体例；把
