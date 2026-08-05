@@ -1976,8 +1976,8 @@
   ② 容差 `−1e-6` 改成 `0` → 需要一条「命中点恰好落在平面上」的测试才抓得到，**必须专门造这个样本**。
 - ⚠ 不做则「点击被剖掉的墙仍会选中墙」，观感很差。
 
-### [ ] T-251 · 编辑器：剖切平面的创建入口、helper 与参数面板
-- **依赖** T-243 · T-248（共享 `Viewport.tsx`）· **预估** 2.0d · **实际** —
+### [x] T-251 · 编辑器：剖切平面的创建入口、helper 与参数面板
+- **依赖** T-243 · T-248（共享 `Viewport.tsx`）· **预估** 2.0d · **实际** 2.4d
 - **独占** `packages/core/src/runtime/section-helpers.ts`(新) ·
   `packages/editor/src/panels/SectionPanel.tsx`(新) · `packages/editor/src/panels/HierarchyTree.tsx`（新建入口）
 - **做** 层级树 / 工具栏「新建剖切平面」（与「新建灯光」同位置，一次 commit，落在相机前方一段距离）；

@@ -12,6 +12,7 @@ import { IssuePanel } from './panels/IssuePanel.js'
 import { LibraryPanel } from './panels/LibraryPanel.js'
 import { LightPanel } from './panels/LightPanel.js'
 import { SceneEffectsPanel } from './panels/SceneEffectsPanel.js'
+import { SectionPanel } from './panels/SectionPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { MediaPanel } from './panels/MediaPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
@@ -212,7 +213,13 @@ function BottomDock() {
         {tab === 'assets' && <AssetPanel />}
         {tab === 'material' && <MaterialPanel />}
         {tab === 'light' && <LightPanel />}
-        {tab === 'effects' && <SceneEffectsPanel />}
+        {tab === 'effects' && (
+          <>
+            <SceneEffectsPanel />
+            {/* T-251 · 剖切与场景效果同属「这个场景看起来怎么样」，共用一个标签页 */}
+            <SectionPanel />
+          </>
+        )}
         {tab === 'media' && <MediaPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}

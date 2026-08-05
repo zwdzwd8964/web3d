@@ -14,6 +14,7 @@ import { Vector2 } from 'three'
 import { RenderPipeline, createDefaultComposer } from './render-pipeline.js'
 import { SectionLayer, sectionFactory } from './section-layer.js'
 import { ExplodeLayer } from './explode-layer.js'
+import { SectionHelperLayer } from './section-helpers.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
@@ -138,6 +139,15 @@ export class SceneRuntime implements RuntimeContext {
   private readonly sections: SectionLayer
   /** T-244 · 爆炸叠加层。系数是运行时瞬态（D29），不进文档。 */
   private readonly explode: ExplodeLayer
+  /** T-251 · 剖切面的法线箭头。**编辑模式才建**（C1 · 编辑期家具）。 */
+  private readonly sectionHelpers: SectionHelperLayer | null
+  /**
+   * T-251 · 「暂时关闭剖切」的会话 override（[ADR-0040](../../../../docs/adr/0040-暂时关闭剖切是渲染开关不是文档编辑.md)）。
+   *
+   * `null` = 跟文档走。形状逐字抄 `setPostFxEnabled`——同一个问题在这个仓库里已经出现过
+   * 一次，答案就该长得一样。
+   */
+  private sectionsForced: boolean | null = null
   /** T-241 · 编辑期辅助物此刻可见吗。选中态描边跟着它走。 */
   private chromeVisible = true
   /** T-241 · 当前选中集。策略换成描边、或 chrome 重新可见时按它重推。 */
@@ -245,6 +255,8 @@ export class SceneRuntime implements RuntimeContext {
     })
     this.sections = new SectionLayer(this.graph)
     this.explode = new ExplodeLayer(this.graph)
+    this.sectionHelpers = this.options.mode === 'edit' ? new SectionHelperLayer(this.graph) : null
+    if (this.sectionHelpers) this.registerChrome(this.sectionHelpers.root)
 
     this.patches = new PatchApplier({
       graph: this.graph,
@@ -577,11 +589,27 @@ export class SceneRuntime implements RuntimeContext {
    * 写的是 `renderer.clippingPlanes`。**测试也要读那里**——只读 `sections.livePlanes`
    * 的断言对一个「算对了但没写给渲染器」的实现同样为真（v0.5 M11 的第四次同形）。
    */
+  /**
+   * T-251 · 强制开 / 关全部剖切，`null` 交还给文档。**编辑期专用的会话开关**。
+   *
+   * 它与「在层级树里隐藏一把刀」是两件事：后者进撤销栈、发布出去也是关的；这一个
+   * 不进文档、不进撤销栈、刷新即丢。理由与代价见 ADR-0040。
+   */
+  setSectionsEnabled(enabled: boolean | null): void {
+    this.sectionsForced = enabled
+    this.syncSections(this.document)
+  }
+
   private syncSections(doc: SceneDocument): void {
-    this.sections.sync(doc, this.renderer ?? null)
+    // T-251 · 强制关掉时按一份空文档算：**不是「算完再丢掉」**——算完再丢掉的话
+    // `livePlanes` 与渲染器上的会不一致，而 picker 读的正是 `livePlanes`（T-250）。
+    this.sections.sync(this.sectionsForced === false ? withoutSections(doc) : doc, this.renderer ?? null)
     // T-250 · 渲染器丢掉的像素，拾取也要丢。**推的是同一个数组**——各自算一份的话，
     // 两边在浮点最后一位上分家，症状是「切口边缘点得中、点不中随机」。
     this.picker.setClipPlanes(this.sections.livePlanes)
+    // 辅助物按**真文档**建，与强制开关无关：暂时关掉剖切时那把刀仍然在场景里、
+    // 仍然要能被选中和拖动，只是不切东西。
+    this.sectionHelpers?.sync(doc)
   }
 
   /** 按当前文档与渲染器重算管线。文档变了、渲染器来了或走了，都要过这里。 */
@@ -909,6 +937,8 @@ export class SceneRuntime implements RuntimeContext {
     // T-244 · **在补间与片段之后**。爆炸是叠加层：它这一帧的 base 就是补间刚写完的位置，
     // 顺序反过来会让补间把爆炸偏移覆盖掉，而症状是「一边播动画一边爆炸时零件塌回去」。
     this.explode.update(this.document, now)
+    // 拖 gizmo 时对象的世界矩阵每帧都在变，辅助物落后一帧的表现是「箭头跟着手在抖」
+    this.sectionHelpers?.update()
     this.camera.update(now)
     // After the camera and the tweens: a light being animated, or its parent being
     // dragged, has to move its helper in the SAME frame or the cone lags the light by one.
@@ -941,6 +971,7 @@ export class SceneRuntime implements RuntimeContext {
     this.explode.reset(this.document)
     // T-243 · 不还给渲染器的话，下一份文档会带着上一份的刀开场
     this.sections.dispose(this.renderer ?? null)
+    this.sectionHelpers?.dispose()
     this.camera.dispose()
     this.highlights.clearAll()
     this.materials.dispose()
@@ -1571,4 +1602,14 @@ function writeShadowFlags(root: Object3D, cast: boolean, receive: boolean): void
     if (typeof (child.userData as NodeUserData).w3NodeId === 'string') continue
     writeShadowFlags(child, cast, receive)
   }
+}
+
+/**
+ * T-251 · 一份「没有任何剖切面」的文档视图。
+ *
+ * 只给 `syncSections` 用。造一份新数组而不是在循环里加一个 if：`SectionLayer.sync` 里
+ * 那个「这份文档有没有剖切面」的缓存按对象身份比，传同一个对象再加旗标会让缓存说谎。
+ */
+function withoutSections(doc: SceneDocument): SceneDocument {
+  return { ...doc, nodes: doc.nodes.map((node) => (node.section === null ? node : { ...node, section: null })) }
 }
