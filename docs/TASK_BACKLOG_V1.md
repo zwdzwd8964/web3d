@@ -1928,13 +1928,13 @@
   ⚠ `History` 有 **500ms 同标签合并窗口**（v0.5 T-144 复盘明写这条会盖住变异），
   所以两次 commit 的标签必须不同，或测试注入固定时钟。
 
-### [ ] T-248 · 编辑器：爆炸预览工具态（滑块 + 与 gizmo/拖放的互锁）
+### [x] T-248 · 编辑器：爆炸预览工具态（滑块 + 与 gizmo/拖放的互锁）
 - ✅ **拍板（2026-08-05，产品负责人）：本卡让步。** 工具态下**允许拖动零件**，拖动即写
   `explodeOffset`（T-249 的核心动作）。原验收「工具态下 gizmo 不 attach / 拖放禁用 /
   transform 面板只读」中，**只保留「transform 面板只读」**——它防的是「用户在爆炸态下误改
   真实 transform」，而拖动写的是 `explodeOffset`，两者不是同一件事。⚠ 变异检验 ② 随之
   改写：不再断「拖不动」，改断「拖动写的是 explodeOffset 而不是 transform.p」。
-- **依赖** T-244 · T-247 · T-241 · **预估** 1.5d · **实际** —
+- **依赖** T-244 · T-247 · T-241 · **预估** 1.5d · **实际** 1.4d
 - **独占** `packages/editor/src/viewport/explode-tool.ts`(新) ·
   `packages/editor/src/viewport/ExplodeToolbar.tsx`(新) + 其测试（与 T-251 共享 `Viewport.tsx` → 排不同波次）
 - **做** 模块级会话 store（抄 `viewport/snap.ts:35-52`），滑块驱动 `runtime.setExplode(id, f, {durationS:0})`；

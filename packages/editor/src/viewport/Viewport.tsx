@@ -11,6 +11,8 @@ import { acceptsDrag, endDrag, getDrag } from './drag.js'
 import { DropController } from './drop-controller.js'
 import { boundsOfPrimitive, resolveDropPoint, restOnPoint } from './place.js'
 import { SnapToolbar } from './SnapToolbar.js'
+import { ExplodeToolbar } from './ExplodeToolbar.js'
+import { closeExplodeTool } from './explode-tool.js'
 import { ANGLE_STEP_DEG, getSnap, onSnapChange } from './snap.js'
 import { fulfilPick, isPicking } from './pick-request.js'
 import { patchesSettled } from './runtime-bridge.js'
@@ -207,6 +209,11 @@ export function Viewport() {
     // click that lands on a helper does not reach the object the viewer aimed at (C3).
     if (!ready) return
     runtimeRef.current?.setEditorChromeVisible(!previewActive)
+    // T-248 · **进预览时把爆炸工具态关掉并归零。** 它是编辑态工具：留着的话预览里看到的
+    // 是播放器不会有的姿态（播放器只认规则驱动的 explode），那正是 C3 说的分叉。
+    // 归零走运行时，不只是清 store —— 只清 store 的话零件停在炸开的位置而工具条已经
+    // 不见了，用户既看不出为什么、也没有入口收回去。
+    if (previewActive) closeExplodeTool()
   }, [previewActive, ready])
 
   useEffect(() => {
@@ -485,6 +492,7 @@ export function Viewport() {
           {space === 'world' ? '世界' : '局部'}
         </button>
         <SnapToolbar />
+        <ExplodeToolbar />
         <button type="button" className="tbtn" onClick={() => runtimeRef.current?.camera.frameAll()}>
           全览
         </button>

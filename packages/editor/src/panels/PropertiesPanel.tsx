@@ -1,8 +1,9 @@
 import type { Explode, Node, Vec3 } from '@w3/schema'
 import { EASINGS, EXPLODE_MODES, EXPLODE_MODE_LABELS } from '@w3/schema'
 import { fromEulerDegrees, toEulerDegrees } from '@w3/core'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { clearExplodeGroup, makeExplodeGroup, setExplodeAxis, setExplodeParams } from '../lib/explode-edit.js'
+import { getExplodeTool, onExplodeToolChange } from '../viewport/explode-tool.js'
 import { MIXED, commonValue, commonVectorComponents, isMixed } from '../lib/selection-values.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { CheckField, NumberField, TextField } from '../widgets/NumberField.js'
@@ -28,6 +29,17 @@ export function PropertiesPanel() {
   const { commit, preview, previewStart, previewCommit } = useDocumentActions()
 
   const selected = useMemo(() => nodes.filter((n) => selection.includes(n.id)), [nodes, selection])
+
+  /**
+   * T-248 · 爆炸预览开着时 transform 只读。
+   *
+   * 防的是「用户在爆炸态下误改真实 transform」：画面上那个零件在离原位一米远的地方，
+   * 面板里的数字却是文档值——此时点进去改一个数，改的是**原位**而不是他看着的那个位置。
+   * 拖动零件是允许的（那写的是 `explodeOffset`，T-249），两者不是同一件事。
+   */
+  const [explodeTool, setExplodeToolLocal] = useState(getExplodeTool)
+  useEffect(() => onExplodeToolChange(setExplodeToolLocal), [])
+  const transformLocked = explodeTool.groupNodeId !== null
 
   const position = useMemo(() => commonVectorComponents(selected, (n) => n.transform.p), [selected])
   const scale = useMemo(() => commonVectorComponents(selected, (n) => n.transform.s), [selected])
@@ -98,6 +110,14 @@ export function PropertiesPanel() {
           onCommit={(name) => single && editEach(`重命名 ${name}`, (node) => void (node.name = name))}
         />
 
+        {/* T-248 · 爆炸预览开着时说清楚为什么改不动，否则用户以为面板卡死了 */}
+        {transformLocked && (
+          <p className="panel__note" data-testid="transform-locked-hint">
+            爆炸预览开启中，变换只读。画面上的位置是预览姿态，此处的数字是文档里的原位——
+            要调整某个零件的爆炸位置，请拖动它并点「记录当前偏移」
+          </p>
+        )}
+
         <fieldset className="group">
           <legend>位置</legend>
           {AXES.map((axis, i) => (
@@ -105,6 +125,7 @@ export function PropertiesPanel() {
               key={axis}
               label={axis}
               value={position[i]}
+              disabled={transformLocked}
               step={0.01}
               onCommit={(v) => setAxis('p', i, v, false)}
               onPreviewStart={previewStart}
@@ -121,6 +142,7 @@ export function PropertiesPanel() {
               key={axis}
               label={axis}
               value={rotation[i]}
+              disabled={transformLocked}
               step={0.5}
               digits={2}
               onCommit={(v) => setRotationAxis(i, v, false)}
@@ -138,6 +160,7 @@ export function PropertiesPanel() {
               key={axis}
               label={axis}
               value={scale[i]}
+              disabled={transformLocked}
               step={0.01}
               min={0.0001}
               onCommit={(v) => setAxis('s', i, v, false)}
