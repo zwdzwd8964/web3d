@@ -1617,8 +1617,8 @@
   ② `entrySceneId` 从 manifest 去掉 → 老包兜底那条**不能红**（它测的是缺失路径），新包那条必须红。
   **这两条要分开写，否则一条测试同时覆盖两个方向会互相掩盖。**
 
-### [ ] T-234 · 体检指标增量 + clip 时长测量接线
-- **依赖** T-225 · T-217 · **预估** 1.2d · **实际** —
+### [x] T-234 · 体检指标增量 + clip 时长测量接线
+- **依赖** T-225 · T-217 · **预估** 1.2d · **实际** 1.3d
 - **独占** `packages/core/src/assets/policy.ts` · `packages/core/test/assets/policy.test.ts`(新) ·
   `packages/core/test/assets/pipeline.test.ts` · 编辑器资产体检模块（`auditGlb` 及其 stats 白名单）+ 其测试
 - **做** （合并卡：两件事共用同一份 stats 白名单，分开做必然打架）

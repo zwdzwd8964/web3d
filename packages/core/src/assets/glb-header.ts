@@ -1,5 +1,5 @@
 import type { AuditMeasurements } from './audit.js'
-import { estimateTextureBytes, readImageInfo } from './audit.js'
+import { estimateTextureBytes, readImageInfo, SUPPORTED_REQUIRED_EXTENSIONS } from './audit.js'
 
 /**
  * T-217 · reading a GLB's container without decoding a byte of its geometry.
@@ -51,13 +51,43 @@ export interface GltfJson {
   readonly extensionsUsed?: string[]
   readonly extensionsRequired?: string[]
   readonly meshes?: { primitives?: { mode?: number; indices?: number; attributes?: Record<string, number> }[] }[]
-  readonly accessors?: { count?: number }[]
+  // `max` 是 glTF 规范对 animation input 访问器的**强制要求**——正因如此，片段时长
+  // 不需要解 BIN chunk 就拿得到（见 `clipDurationsFromJson`）。
+  readonly accessors?: { count?: number; max?: number[] }[]
   readonly materials?: unknown[]
   readonly images?: { bufferView?: number; uri?: string; mimeType?: string }[]
   readonly textures?: unknown[]
   readonly nodes?: unknown[]
-  readonly animations?: { name?: string }[]
+  readonly animations?: { name?: string; samplers?: { input?: number }[] }[]
+  readonly buffers?: { uri?: string }[]
   readonly bufferViews?: { buffer?: number; byteOffset?: number; byteLength?: number }[]
+}
+
+/**
+ * 每条片段的时长，只读 JSON chunk。
+ *
+ * ⚠ **这里改正了一条我自己写错的注释。** T-225 在返回值那里留了「头部解析拿得到名字、
+ * 拿不到时长，时长要解 BIN chunk」。不对：glTF 规范要求 animation 的 input 访问器**必须**
+ * 带 `min`/`max`（因为播放器要靠它算时长而不必先读完整条轨道），所以 `accessors[i].max[0]`
+ * 就是那条 sampler 的结束时间，JSON chunk 里就有。那条错注释还被抄进了
+ * `docs/METRICS.md` 的趋势观察点，一并订正。
+ *
+ * 一条 animation 取它所有 sampler 的最大值：不同轨道可以在不同时刻结束，播放器播最长的那条。
+ */
+/** 与 `audit.ts` 的同名集合是**同一份**，从那边导入，不在这里再抄一遍。 */
+function clipDurationsFromJson(json: GltfJson): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const animation of json.animations ?? []) {
+    let duration = 0
+    for (const sampler of animation.samplers ?? []) {
+      if (sampler.input === undefined) continue
+      const max = (json.accessors ?? [])[sampler.input]?.max?.[0]
+      if (typeof max === 'number' && Number.isFinite(max)) duration = Math.max(duration, max)
+    }
+    const name = animation.name ?? ''
+    out[name] = Math.max(out[name] ?? 0, duration)
+  }
+  return out
 }
 
 /**
@@ -170,10 +200,17 @@ export function measureFromHeader(header: GlbHeader, bytes: ArrayBuffer, byteLen
     nodes: (json.nodes ?? []).length,
     // See note 4: `''` for an unnamed animation, matching `createAnimation(name = "")`.
     animations: (json.animations ?? []).map((a) => a.name ?? ''),
-    // v3 · 头部解析拿得到片段**名字**，拿不到**时长** —— 时长要把每条 sampler 的 input
-    // accessor 读到底取 max，而那要解 BIN chunk。这里如实留空，由真正加载完 GLB 的那一侧填。
-    clipDurations: {},
+    clipDurations: clipDurationsFromJson(json),
     maxTextureSize,
+    // 指向包外的 buffer / image。带外部 .bin 的 glTF 拷给客户就是打不开。
+    externalRefs:
+      (json.buffers ?? []).filter((b) => b.uri !== undefined && !b.uri.startsWith('data:')).length +
+      (json.images ?? []).filter((i) => i.uri !== undefined && !i.uri.startsWith('data:')).length,
+    unsupportedExtensions: (json.extensionsRequired ?? []).filter((e) => !SUPPORTED_REQUIRED_EXTENSIONS.has(e)).length,
+    // 头部这条路不解 KTX2 的超压缩方案，所以两个数相同 —— 如实相同，而不是编一个比值出来。
+    // 真正的压缩收益由 `audit.ts` 的 `measure()` 给（它有解好的 gltf-transform document）。
+    textureBytesFallback: textureBytes,
+    compressedTextureCount: (json.images ?? []).filter((i) => i.mimeType === 'image/ktx2').length,
   }
 }
 

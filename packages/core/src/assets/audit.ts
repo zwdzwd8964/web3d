@@ -18,11 +18,30 @@ import type { GlbHeader } from './glb-header.js'
  * so "we accepted this asset under Appendix A rev 1" stays answerable a year later.
  */
 
-/** Extra measurements the schema's AssetStats does not carry but the policy checks. */
+/**
+ * Extra measurements the schema's AssetStats does not carry but the policy checks.
+ *
+ * ⚠ **这些键绝不能进 `AssetStats`。** `AssetStatsSchema` 是 `.strict()`，而
+ * `checkIntegrity` 不重跑 schema 校验——多一个测量键的后果是「编辑器全绿、发布闸门拒绝」
+ * （T-176 实测过一次）。测量是过程，stats 是文档字段，两者的生命周期不同。
+ */
 export interface AuditMeasurements extends AssetStats {
   /** Longest edge of the largest texture, in pixels. */
   readonly maxTextureSize: number
+  /** 指向包外文件的 buffer / image 个数（`.bin` 与散图）。非 0 就意味着这份资产不自洽。 */
+  readonly externalRefs: number
+  /** `extensionsRequired` 里我们读不了的那些（meshopt 等）。非 0 就意味着打开会失败。 */
+  readonly unsupportedExtensions: number
+  /** 同一批贴图按未压缩（rgba8）算出来的显存。与 `textureBytes` 的比值就是压缩收益。 */
+  readonly textureBytesFallback: number
+  /** KTX2 贴图张数。为 0 时「压缩收益」那条指标不适用。 */
+  readonly compressedTextureCount: number
 }
+
+/** 贴图在显存里的格式。bpp 差 4~8 倍，按 rgba8 一刀切会让 KTX2 的收益完全看不见。 */
+export type TextureFormat = 'rgba8' | 'etc1s' | 'uastc'
+
+const TEXTURE_BPP: Record<TextureFormat, number> = { rgba8: 32, etc1s: 4, uastc: 8 }
 
 export interface AuditResult {
   readonly stats: AssetStats
@@ -49,9 +68,61 @@ export interface AuditOptions {
   readonly header?: GlbHeader
 }
 
-/** Decoded VRAM for one mip chain: w*h*4 bytes, plus ~1/3 again for the mipmaps. */
-export function estimateTextureBytes(width: number, height: number): number {
-  return Math.round(width * height * 4 * (4 / 3))
+/**
+ * Decoded VRAM for one mip chain: `w*h*bpp/8` bytes, plus ~1/3 again for the mipmaps.
+ *
+ * `format` 默认 `rgba8`，且那一支与旧式 `w*h*4*(4/3)` **逐字节相同**（4 === 32/8）——
+ * 有一条对拍断言钉住这一点，因为所有历史阈值都是按旧公式定的。
+ */
+export function estimateTextureBytes(width: number, height: number, format: TextureFormat = 'rgba8'): number {
+  return Math.round(width * height * (TEXTURE_BPP[format] / 8) * (4 / 3))
+}
+
+/**
+ * 每条动画片段的时长，从 sampler 的输入访问器量出来。
+ *
+ * **一条 animation 的时长是它所有 sampler 输入时间的最大值。** 不同 sampler 可以在不同
+ * 时刻结束（位置轨道到 2.4 秒、旋转轨道到 1.8 秒），播放器播的是最长的那条。
+ *
+ * ⚠ 这里改正了一条我自己写错的注释：T-225 在这个位置留了「时长拿不到，要解 BIN chunk」。
+ * **不对**——访问器自带 `max`，glTF 规范要求 animation input 必须有它，gltf-transform
+ * 直接给得出来。那条注释还被抄进了 `docs/METRICS.md` 的趋势观察点。
+ */
+function clipDurationsOf(document: Document): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const animation of document.getRoot().listAnimations()) {
+    let duration = 0
+    // **从 channel 走到 sampler，不用 `listSamplers()`。** 后者只列出被这个 Animation
+    // 直接持有的 sampler；实测在 gltf-transform 读回来的文档上它是空的，而 channel
+    // 一侧的 `getSampler()` 有值——于是时长会静默变成 0，而 `stats.animations` 照样对。
+    for (const channel of animation.listChannels()) {
+      const input = channel.getSampler()?.getInput()
+      if (!input) continue
+      const max = input.getMax([])[0]
+      if (typeof max === 'number' && Number.isFinite(max)) duration = Math.max(duration, max)
+    }
+    const name = animation.getName()
+    // 同名片段取较大值：glTF 不保证 name 唯一，而 `stats.animations` 也是按 name 存的
+    out[name] = Math.max(out[name] ?? 0, duration)
+  }
+  return out
+}
+
+/**
+ * 贴图的显存格式。
+ *
+ * KTX2 的 `supercompressionScheme`（头部偏移 44 的 uint32）为 1 时是 BasisLZ/ETC1S，
+ * 否则按 UASTC 算。两者 bpp 差一倍，而与 rgba8 差 8 倍与 4 倍——这正是「压缩收益」
+ * 那条指标要说的事。
+ */
+function textureFormatOf(texture: { getMimeType(): string | null; getImage(): Uint8Array | null }): TextureFormat {
+  if (texture.getMimeType() !== 'image/ktx2') return 'rgba8'
+  const image = texture.getImage()
+  if (!image || image.byteLength < 48) return 'uastc'
+  // 逐字节读而不是 `new DataView(image.buffer, …)`：`getImage()` 在不同宿主上给回来的
+  // 底层缓冲区类型不一样（Node 的 Buffer 视图会让 DataView 构造直接抛）。
+  const scheme = image[44]! | (image[45]! << 8) | (image[46]! << 16) | (image[47]! << 24)
+  return scheme === 1 ? 'etc1s' : 'uastc'
 }
 
 /**
@@ -82,6 +153,19 @@ export async function readGlb(bytes: ArrayBuffer): Promise<Document> {
  * triangles, and counting its vertices as `count / 3` would inflate the number that ends
  * up in the contract.
  */
+/**
+ * 我们真的读得了的必需扩展。**白名单，不是黑名单。**
+ *
+ * 黑名单的失效方式是安静的：明年出一个新的必需扩展，它不在黑名单里，于是被判成
+ * 「支持」，而用户拿到的是一个打不开的文件。
+ */
+export const SUPPORTED_REQUIRED_EXTENSIONS = new Set([
+  'KHR_draco_mesh_compression',
+  'KHR_texture_basisu',
+  'KHR_materials_unlit',
+  'KHR_texture_transform',
+])
+
 export function measure(document: Document, byteLength: number): AuditMeasurements {
   const root = document.getRoot()
 
@@ -99,14 +183,32 @@ export function measure(document: Document, byteLength: number): AuditMeasuremen
   }
 
   let textureBytes = 0
+  let textureBytesFallback = 0
+  let compressedTextureCount = 0
   let maxTextureSize = 0
   for (const texture of root.listTextures()) {
     const size = texture.getSize()
     if (!size) continue
     const [width, height] = size
-    textureBytes += estimateTextureBytes(width, height)
+    const format = textureFormatOf(texture)
+    if (format !== 'rgba8') compressedTextureCount++
+    textureBytes += estimateTextureBytes(width, height, format)
+    // 同一批贴图按未压缩算一遍。两个数的比值就是压缩买到了什么，
+    // 而单看 textureBytes 说不出「已经压过了」还是「本来就小」。
+    textureBytesFallback += estimateTextureBytes(width, height, 'rgba8')
     maxTextureSize = Math.max(maxTextureSize, width, height)
   }
+
+  // 指向包外的引用。一份带外部 .bin 的 glTF 拷给客户就是打不开，而它自己完全「有效」。
+  const isExternal = (uri: string | null) => uri !== null && uri !== '' && !uri.startsWith('data:')
+  const externalRefs =
+    root.listBuffers().filter((b) => isExternal(b.getURI())).length +
+    root.listTextures().filter((t) => isExternal(t.getURI())).length
+
+  // `extensionsRequired` 里我们读不了的那些。必需扩展读不了 = 整个文件打不开。
+  const unsupportedExtensions = root
+    .listExtensionsRequired()
+    .filter((e) => !SUPPORTED_REQUIRED_EXTENSIONS.has(e.extensionName)).length
 
   return {
     tris,
@@ -116,10 +218,12 @@ export function measure(document: Document, byteLength: number): AuditMeasuremen
     textureBytes,
     nodes: root.listNodes().length,
     animations: root.listAnimations().map((a) => a.getName()),
-    // v3 · 名字拿得到，时长拿不到 —— 时长要把每条 sampler 的 input accessor 读到底取 max。
-    // 如实留空，别拿 0 冒充「测过了」。
-    clipDurations: {},
+    clipDurations: clipDurationsOf(document),
     maxTextureSize,
+    externalRefs,
+    unsupportedExtensions,
+    textureBytesFallback,
+    compressedTextureCount,
   }
 }
 
@@ -128,8 +232,15 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
   const policy = options.policy ?? DEFAULT_POLICY
   const now = options.now ?? (() => new Date().toISOString())
 
-  const findings: AuditFinding[] = metricsFor(options.scope ?? 'model').map((spec) => {
-    const value = (measurements as unknown as Record<string, number>)[spec.metric] ?? 0
+  const findings: AuditFinding[] = metricsFor(options.scope ?? 'model')
+    // `applicable` 缺省恒真。**过滤发生在算 finding 之前**：不适用的指标应当整条不出现，
+    // 而不是出现且 pass —— 后者在报告里读起来像「测过了，没问题」，那是另一个意思。
+    .filter((spec) => spec.applicable?.(measurements) ?? true)
+    .map((spec) => {
+    // `measured` 在的话走它（类型检查得到的读取），否则按 metric 同名取。
+    // 后一条是历史指标的路，它的失效方式是安静的：metric 拼错 → undefined → `?? 0`
+    // → 报告里一条「0，通过」。
+    const value = spec.measured?.(measurements) ?? (measurements as unknown as Record<string, number>)[spec.metric] ?? 0
     const limit = spec.limit(policy)
     const level: AuditLevel = spec.level
       ? spec.level(value, limit)
@@ -179,7 +290,10 @@ export function grade(measurements: AuditMeasurements, options: AuditOptions = {
     textureBytes: measurements.textureBytes,
     nodes: measurements.nodes,
     animations: [...measurements.animations],
-    clipDurations: {},
+    // T-234 · 之前这里是写死的 `{}` —— 白名单把测量结果挡在了文档外面，于是
+    // `measure()` 量得再准，`stats.clipDurations` 也永远是空表。**白名单的代价就在这里**：
+    // 它拦住了泄漏，也拦住了新字段，而两者的症状完全不同（前者发布失败，后者静默为空）。
+    clipDurations: { ...measurements.clipDurations },
   }
 
   return {
@@ -350,6 +464,10 @@ export function measureImage(info: ImageInfo, byteLength: number): ImageMeasurem
     animations: [],
     clipDurations: {},
     maxTextureSize: Math.max(info.width, info.height),
+    externalRefs: 0,
+    unsupportedExtensions: 0,
+    textureBytesFallback: 0,
+    compressedTextureCount: 0,
     imageBytes: byteLength,
     hdriBytes: byteLength,
     imageSize: Math.max(info.width, info.height),
@@ -392,6 +510,10 @@ export function measureMedia(byteLength: number): MediaMeasurements {
     animations: [],
     clipDurations: {},
     maxTextureSize: 0,
+    externalRefs: 0,
+    unsupportedExtensions: 0,
+    textureBytesFallback: 0,
+    compressedTextureCount: 0,
     audioBytes: byteLength,
     videoBytes: byteLength,
   }

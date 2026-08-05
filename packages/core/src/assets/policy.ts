@@ -1,3 +1,4 @@
+import type { AuditMeasurements } from './audit.js'
 import type { AuditLevel } from '@w3/schema'
 
 /**
@@ -86,9 +87,61 @@ export interface MetricSpec {
    * yes/no question, and forcing it into a comparison would make the stored `limit` a lie.
    */
   readonly level?: (value: number, limit: number) => AuditLevel
+  /**
+   * 这条指标对这份资产**适用吗**。缺省恒适用。
+   *
+   * 与 `level` 的区别是「不出现」与「出现且 pass」：一份没有任何 KTX2 贴图的模型，
+   * 「压缩收益」那条不该显示成「1:1，通过」——那读起来像「压过了但没省」。
+   * 它应该整条不出现。
+   */
+  readonly applicable?: (measurements: AuditMeasurements) => boolean
+  /**
+   * 这条指标读 measurements 的哪个字段。缺省按 `metric` 同名取。
+   *
+   * **写出来的价值是让这条绑定被类型检查看见。** 缺省那条路是
+   * `(measurements as Record<string, number>)[spec.metric]`——一个字符串下标，
+   * `metric` 拼错时安静地取到 `undefined`，然后 `?? 0` 把它变成一个看起来很正常的
+   * 「0，通过」。新指标一律写它。
+   */
+  readonly measured?: (measurements: AuditMeasurements) => number
 }
 
 export const METRICS: readonly MetricSpec[] = [
+  {
+    metric: 'externalRefs',
+    label: '外部引用文件',
+    measured: (m) => m.externalRefs,
+    // 上限恒为 0：一份指向包外 .bin 或散图的 glTF，拷给客户就是打不开。
+    limit: () => 0,
+    unit: 'count',
+    scopes: ['model'],
+    level: (value) => (value > 0 ? 'fail' : 'pass'),
+    advice: (value) =>
+      `这份模型引用了 ${value} 个外部文件（.bin 或散图）。请重新导出为**自包含的 .glb**（导出选项里勾「嵌入贴图 / 二进制」），否则换一台机器就打不开`,
+  },
+  {
+    metric: 'unsupportedExtensions',
+    label: '不支持的必需扩展',
+    measured: (m) => m.unsupportedExtensions,
+    limit: () => 0,
+    unit: 'count',
+    scopes: ['model'],
+    level: (value) => (value > 0 ? 'fail' : 'pass'),
+    advice: (value) =>
+      `这份模型要求 ${value} 个我们读不了的扩展（常见的是 EXT_meshopt_compression）。请改用 **Draco** 压缩重新导出——必需扩展读不了等于整个文件打不开，不是渲染差一点`,
+  },
+  {
+    metric: 'textureBytesFallback',
+    label: '贴图压缩收益',
+    measured: (m) => m.textureBytesFallback,
+    limit: (p) => p.maxTextureBytes,
+    unit: 'bytes',
+    scopes: ['model'],
+    // 一张 KTX2 都没有时整条不出现。显示成「1:1 通过」会读成「压过了但没省」。
+    applicable: (m) => m.compressedTextureCount > 0,
+    level: () => 'pass',
+    advice: (value) => `按未压缩计算这批贴图要占 ${formatBytes(value)} 显存；KTX2 压缩后是实际值那一栏`,
+  },
   {
     metric: 'bytes',
     label: '文件大小',

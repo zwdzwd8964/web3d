@@ -296,3 +296,11 @@
 | T-233 | ③ | `resolveEntryScene` 去掉 `?? pkg.document.sceneId` 兜底 | 老包那条必须红 | 红 · 1 条（只有老包那条） | — | 还原 |
 | T-233 | ④ | （非变异，是卡面三项互斥）「用**当前构建**打一个单场景 .w3p 存成 fixture」 vs 文件名 `legacy-v2-…` vs 验收「迁移到 v3 后 sceneId === deriveSceneId(projectId)」与「manifest.entrySceneId 为 undefined」 | 三者应当能同时成立 | 非变异 · **互斥**：当前构建写的是 `schemaVersion: 3` 和三个新 manifest 字段，打不出老包 | — | 改成手工拼一份 v1.0 之前形状的 manifest（六个键，一个不多），生成器 `make-legacy-package.mjs` 一次性执行、产物提交。这份 fixture 的全部价值恰恰在于它**没有**那三个键 |
 | T-233 | ⑤ | （非变异，是卡面写法的代价）「`packScene` 的资产循环改为遍历 `needed`」 | 应当等价于加裁剪 | 非变异 · **不等价**：一个 hash 可以对应多条 `assets` 记录（同一份字节以两个扩展名导入过），遍历 hash 只会写出其中一条的 url，另一条在播放器里解析不到 | — | 保留按 `assets` 遍历，在 `isBlobHash` 之后加一行 `needed.has` 守卫。理由写进代码注释与本行 |
+| T-234 | ① | `TEXTURE_BPP` 的 `etc1s` 从 4 改成 32 | KTX2 显存那条红 | 红 · 1 条 | — | 还原 |
+| T-234 | ② | 去掉 `grade()` 里的 `applicable` 过滤 | 「无 KTX2 时不含该行」红 | 红 · 1 条 | — | 还原。`applicable` 与 `level` 的区别是「不出现」与「出现且 pass」：一份没压过的模型显示「压缩收益 1:1，通过」，读起来像「压过了但没省」 |
+| T-234 | ③ | 白名单改回黑名单（`const { maxTextureSize: _d, ...rest }`） | `strict().parse` 那条红 | 红 · 3 条，含既有的「the stats it stores match the schema」 | — | 还原。四个新测量键会一起漏进文档，而 `AssetStatsSchema` 是 `.strict()`——症状是「编辑器全绿、发布闸门拒绝」（T-176 实测过一次） |
+| T-234 | ④ | `clipDurations` 从白名单去掉（改回写死 `{}`） | 发布回归必须转红 | 红 · 2 条（两条测量路各一条） | — | 还原。**卡面这条的字面版本做不到**：`clipDurations` 早就在 `AssetStats` 里（T-225 加的），去掉它 `strict().parse` 不会红，红的是「时长真的被量出来了」那两条 |
+| T-234 | ⑤ | `glb-header` 的 `clipDurations` 改回空表 | 两条测量路的对拍必须红 | 红 · 3 条，其中两条是**既有的**「agrees with the document route on a … GLB」整对象对拍 | — | 还原。既有那两条对拍是白捡的看守：它比对两条路的整个 measurements 对象，任何一侧漏一个字段都红 |
+| T-234 | ⑥ | （非变异，是本卡最实质的发现） | `measure()` 量出的时长应当能到达文档 | **红 · `stats.clipDurations` 永远是空表**——`grade()` 的白名单里那一项是写死的 `{}` | 非变异 | **白名单拦住了泄漏，也拦住了新字段，而两者的症状完全不同**：前者发布失败（吵），后者静默为空（不吵）。T-225 把 `clipDurations` 加进 `AssetStats` 时没人动这里，于是它从加进来那天起就是死字段 |
+| T-234 | ⑦ | （非变异，是我自己写错的一条注释）T-225 在 `audit.ts` 与 `glb-header.ts` 两处都写了「时长要解 BIN chunk，头部拿不到」 | 那应当是事实 | **非变异 · 不是事实**：glTF 规范要求 animation 的 input 访问器必须带 `min`/`max`，正是为了让播放器不读完整条轨道就算得出时长 | 非变异 | 两处注释与 `docs/METRICS.md` 的趋势观察点一并订正。头部快路径现在只读 JSON chunk 就量得出时长，与 document 路对拍误差 < 1e-4 |
+| T-234 | ⑧ | （非变异，是 `listSamplers()` 的实测行为）`clipDurationsOf` 用 `animation.listSamplers()` | 应当列出这条动画的 sampler | **非变异 · 空数组**，而同一条动画的 `listChannels()` 有值 | 非变异 | 改走 channel → `getSampler()`。失效方式是静默的：时长变成 0，而 `stats.animations` 照样正确，两个字段一个对一个错 |

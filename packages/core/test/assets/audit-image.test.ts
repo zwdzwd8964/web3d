@@ -204,9 +204,14 @@ describe('auditImage', () => {
 })
 
 describe('policy scopes', () => {
-  it('keeps the model metric set exactly as it was', () => {
-    // Every pre-v0.5 caller passes no scope and must still grade the same seven metrics.
+  it('the model metric set is exactly these ten, in this order', () => {
+    // 原来是七条，T-234 加了三条（externalRefs / unsupportedExtensions /
+    // textureBytesFallback）。**顺序也断**：报告按这个顺序渲染，而前三条是「打不开」
+    // 级别的问题，排在「渲染差一点」级别的前面是刻意的。
     expect(metricsFor('model').map((m) => m.metric)).toEqual([
+      'externalRefs',
+      'unsupportedExtensions',
+      'textureBytesFallback',
       'bytes',
       'tris',
       'materials',
@@ -215,6 +220,12 @@ describe('policy scopes', () => {
       'maxTextureSize',
       'nodes',
     ])
+  })
+
+  it('新增的三条不进 describePolicy —— 它们都有自定义 level，不是阈值', () => {
+    // describePolicy 渲染的是「X ≤ 上限」那种句子，而 externalRefs 的上限恒为 0、
+    // textureBytesFallback 根本不是一条阈值。七行那条断言因此不受影响。
+    expect(describePolicy(undefined, 'model').split(String.fromCharCode(10))).toHaveLength(7)
   })
 
   it('describePolicy can render one scope at a time, and skips threshold-less checks', () => {

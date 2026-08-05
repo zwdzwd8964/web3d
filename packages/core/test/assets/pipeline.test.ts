@@ -1,3 +1,4 @@
+import { measureFromHeader, readGlbHeader } from '../../src/assets/glb-header.js'
 import { CURRENT_VERSION, createSequentialIdFactory, DEFAULT_FOG, DEFAULT_EFFECTS, AssetStatsSchema } from '@w3/schema'
 import { Box3, Matrix4, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
@@ -150,6 +151,10 @@ describe('T-050 · audit', () => {
         animations: [],
         clipDurations: {},
         maxTextureSize: 4096,
+        externalRefs: 0,
+        unsupportedExtensions: 0,
+        textureBytesFallback: 0,
+        compressedTextureCount: 0,
       },
       { now: at },
     )
@@ -179,6 +184,10 @@ describe('T-050 · audit', () => {
         animations: [],
         clipDurations: {},
         maxTextureSize: 0,
+        externalRefs: 0,
+        unsupportedExtensions: 0,
+        textureBytesFallback: 0,
+        compressedTextureCount: 0,
       },
       { now: at },
     )
@@ -407,5 +416,86 @@ describe('the pipeline feeds the renderer', () => {
     // Every node resolved to real asset geometry — none fell back to a placeholder.
     for (const node of nodes) expect(graph.isPlaceholder(node.id)).toBe(false)
     expect(graph.objectFor(nodes.find((n) => n.name === 'Body')!.id)!.position.y).toBe(2)
+  })
+})
+
+/* ========================================================================== */
+/* T-234 · clip 时长真的被量出来了                                             */
+/* ========================================================================== */
+
+describe('T-234 · clipDurations', () => {
+  it('从 sampler 的输入访问器量出时长，误差 < 0.01 秒', async () => {
+    // **这条断言推翻了一句我自己写的注释。** T-225 在 audit.ts 与 glb-header.ts 两处都
+    // 留了「时长要解 BIN chunk，头部拿不到」——不对：glTF 规范要求 animation 的 input
+    // 访问器必须带 min/max，正是为了让播放器不读完整条轨道就能算出时长。
+    const result = await auditGlb(await buildPumpGlb({ animationName: '拆装', animationSeconds: 2.4 }), { now: at })
+    expect(result.stats.animations).toEqual(['拆装'])
+    expect(result.stats.clipDurations['拆装']).toBeCloseTo(2.4, 2)
+  })
+
+  it('没有动画的模型，clipDurations 是空表而不是 { "": 0 }', async () => {
+    const r = await auditGlb(await buildPumpGlb(), { now: at })
+    expect(r.stats.clipDurations).toEqual({})
+  })
+
+  it('头部快路径（measureFromHeader）量出同一个数', async () => {
+    // 两条测量路必须给出同一个答案。它们的实现完全不同——一条走 gltf-transform 的
+    // 解好的 document，一条只读 JSON chunk——而消费者分不出自己拿到的是哪一条。
+    const bytes = await buildPumpGlb({ animationName: '拆装', animationSeconds: 2.4 })
+    const header = readGlbHeader(bytes)!
+    const fromHeader = measureFromHeader(header, bytes, bytes.byteLength)
+    const fromDocument = (await auditGlb(bytes, { now: at })).stats
+
+    expect(fromHeader.clipDurations['拆装']).toBeCloseTo(fromDocument.clipDurations['拆装']!, 4)
+  })
+})
+
+describe('T-234 · 四个测量键不进文档', () => {
+  it('AssetStatsSchema.strict() 接受 grade 出来的 stats —— 五档 scope 都是', async () => {
+    // `AssetStatsSchema` 是 `.strict()` 而 `checkIntegrity` 不重跑 schema 校验。
+    // 这个组合炸过一次（T-176）：多一个测量键 → 编辑器全绿 → **发布闸门拒绝**。
+    // 所以凡是往 stats 里塞新数字的卡，验收必须是「发布一次」（validate 级）。
+    const bytes = await buildPumpGlb({ animationName: '拆装', animationSeconds: 1 })
+    for (const scope of ['model', 'image', 'hdri', 'audio', 'video'] as const) {
+      const { stats } = await auditGlb(bytes, { now: at, scope })
+      expect(() => AssetStatsSchema.strict().parse(stats), scope).not.toThrow()
+    }
+  })
+
+  it('measurements 上有四个新键，stats 上一个都没有', async () => {
+    const { stats, measurements } = await auditGlb(await buildPumpGlb(), { now: at })
+    for (const key of ['externalRefs', 'unsupportedExtensions', 'textureBytesFallback', 'compressedTextureCount']) {
+      expect(measurements, `measurements 少了 ${key}`).toHaveProperty(key)
+      expect(stats, `${key} 漏进了文档 —— 发布闸门会拒绝`).not.toHaveProperty(key)
+    }
+    expect(stats).not.toHaveProperty('maxTextureSize')
+  })
+})
+
+describe('T-234 · 压缩收益那条指标的适用性', () => {
+  it('没有 KTX2 时，findings 里整条不出现', async () => {
+    // 不是「出现且 pass」：一份没压过的模型显示「压缩收益 1:1，通过」，读起来像
+    // 「压过了但没省」，那是另一个意思。
+    const { audit } = await auditGlb(await buildPumpGlb({ withTexture: { width: 32, height: 16 } }), { now: at })
+    expect(audit.findings.map((f) => f.metric)).not.toContain('textureBytesFallback')
+  })
+
+  it('未压缩贴图的两个数相等 —— 比值 1:1 正是「没压过」的定义', async () => {
+    const { measurements } = await auditGlb(await buildPumpGlb({ withTexture: { width: 32, height: 16 } }), { now: at })
+    expect(measurements.textureBytes).toBe(measurements.textureBytesFallback)
+    expect(measurements.compressedTextureCount).toBe(0)
+  })
+
+  it('estimateTextureBytes 的 rgba8 分支与旧公式逐字节相同', () => {
+    // 所有历史阈值都是按旧公式 `w*h*4*(4/3)` 定的。这条对拍是加 format 参数的前提。
+    for (const [w, h] of [[1, 1], [64, 64], [2048, 1024], [4096, 4096]]) {
+      expect(estimateTextureBytes(w!, h!), `${w}x${h}`).toBe(Math.round(w! * h! * 4 * (4 / 3)))
+    }
+    // 压缩格式确实更小：etc1s 是 rgba8 的 1/8，uastc 是 1/4。
+    // **比值断言不能用整数相等**：两边各自 round 过一次，先除后乘会差几个字节
+    // （实测 5592408 vs 5592405）。这里断比值，不断字节。
+    const rgba8 = estimateTextureBytes(1024, 1024)
+    expect(rgba8 / estimateTextureBytes(1024, 1024, 'etc1s')).toBeCloseTo(8, 3)
+    expect(rgba8 / estimateTextureBytes(1024, 1024, 'uastc')).toBeCloseTo(4, 3)
   })
 })
