@@ -15,6 +15,17 @@ export const playAnimation = defineAction<z.infer<typeof PlayParams>>({
   type: 'playAnimation',
   schema: PlayParams,
   async handler(ctx, p, signal) {
+    // T-253 · `restart: false` 从前是一条**从未被执行过**的分支：两个运行时的 `play()`
+    // 都无条件先停上一次，所以不管这个参数是什么，结果都是重播——与 UI 文案
+    // 「若正在播放则从头开始」正相反。
+    //
+    // 收口成与文案一致：**已经在播就什么都不做，本步立即结束**。
+    // ⚠ `await` 与否都不再等待已在跑的那一次——我们没有持有它的 promise。
+    // 这一句要回写进 ECA_SPEC §4.2（T-296）。
+    if (!p.restart && ctx.isAnimationPlaying(p.animationId)) {
+      ctx.log('debug', `动画「${p.animationId}」已在播放，restart:false 时本步跳过`)
+      return
+    }
     if (p.restart) ctx.stopAnimation(p.animationId, { reset: true })
     const done = ctx.playAnimation(p.animationId, { signal })
     if (p.await) {

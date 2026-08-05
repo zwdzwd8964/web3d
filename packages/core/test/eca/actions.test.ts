@@ -74,8 +74,67 @@ describe('animation actions', () => {
   })
 
   it('playAnimation restarts by default, and can be told not to', async () => {
+    // ⚠ **这条测试是 T-253 的反面教材，留着当对照组。** 它的名字说测了两件事，实际只传了
+    // `restart: true`，而且只断「还在播」——把 `if (p.restart)` 改成恒真，它照样绿。
+    // 真正测 `restart: false` 的那条在下面，v0.5 教训 (a) 的现成实例。
     await run('playAnimation', { animationId: IDS.animation, await: false, restart: true })
     expect(ctx.isAnimationPlaying(IDS.animation)).toBe(true)
+    await ctx.clock.settle()
+  })
+
+  it('**T-253 · `restart:false` 时不打断也不重播，播放进度不被重置**', async () => {
+    // 只断「还在播」是不够的：重播之后它也还在播。断的是**进度没有被清零**。
+    //
+    // ⚠ headless 的 `timeOf` 不跟踪飞行中的进度（只在结束 / reset / seek 三处写），
+    // 所以这里先 `seekAnimation` 把播放头放到一个已知位置，再看第二次 play 有没有把它
+    // 抹掉——`restart:true` 走的 `stopAnimation({reset:true})` 正是会抹掉它的那一步。
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+    await run('seekAnimation', { animationId: IDS.animation, time: 0.4 })
+    expect(ctx.timeOf(IDS.animation), '前提：播放头真的被放到了 0.4').toBe(0.4)
+
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(true)
+    expect(ctx.timeOf(IDS.animation), '被重播了 —— 进度回到了 0').toBe(0.4)
+    await ctx.clock.settle()
+  })
+
+  it('T-253 · 对照：`restart:true` 确实会把进度清零', async () => {
+    // 反向证明上一条断的那个量真的会动。少了它，上一条对一个「timeOf 永远返回 0.4」的
+    // 实现同样成立。
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+    await run('seekAnimation', { animationId: IDS.animation, time: 0.4 })
+
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: true })
+
+    expect(ctx.timeOf(IDS.animation)).toBe(0)
+    await ctx.clock.settle()
+  })
+
+  it('T-253 · `restart:false` 且没在播时照常起播', async () => {
+    // 反向：跳过只在「已经在播」时发生。少了这条，一个「restart:false 就永远不播」的
+    // 实现在上一条下面同样绿。
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(false)
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+    expect(ctx.isAnimationPlaying(IDS.animation)).toBe(true)
+    await ctx.clock.settle()
+  })
+
+  it('T-253 · `restart:false` 跳过时记一条 debug', async () => {
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+    const before = ctx.logs.length
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+
+    expect(ctx.logs.slice(before).some((l) => l.level === 'debug' && l.message.includes('restart:false'))).toBe(true)
+    await ctx.clock.settle()
+  })
+
+  it('T-253 · `restart:false` + `await:true` 时**本步立即结束**，不等已在跑的那一次', async () => {
+    // 我们没有持有已在跑那一次的 promise，所以等不了。这一句要回写进 ECA_SPEC §4.2。
+    await run('playAnimation', { animationId: IDS.animation, await: false, restart: false })
+    const { done } = await run('playAnimation', { animationId: IDS.animation, await: true, restart: false })
+    await expect(Promise.resolve(done)).resolves.toBeUndefined()
+    expect(ctx.isAnimationPlaying(IDS.animation), '而那一次仍在跑').toBe(true)
     await ctx.clock.settle()
   })
 
