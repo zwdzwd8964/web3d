@@ -1551,8 +1551,8 @@
   「已处理」return true，忘了换成真消费者时症状是「改了覆盖层预览没反应」而铁律 11 的 E2E 断言
   全绿，这是这条纪律最好的教材。② 删 `case 'sceneId'` → 对应测试红。
 
-### [ ] T-231 · `/variables` 补丁路径与 `setVar` 未声明变量的裁决
-- **依赖** T-225 · T-230（`apply-patch.ts` 同文件 → 排其后）· **预估** 0.5d · **实际** —
+### [x] T-231 · `/variables` 补丁路径与 `setVar` 未声明变量的裁决
+- **依赖** T-225 · T-230（`apply-patch.ts` 同文件 → 排其后）· **预估** 0.5d · **实际** 0.7d
 - **独占** `packages/core/src/runtime/apply-patch.ts`（仅 variables 段）·
   `packages/core/src/eca/headless.ts`（`setVar` 分支）· `packages/core/src/runtime/scene-runtime.ts`
   （`setVar` 分支）· `packages/core/test/runtime/variables-patch.test.ts`(新) · `docs/ECA_SPEC.md` §9.2

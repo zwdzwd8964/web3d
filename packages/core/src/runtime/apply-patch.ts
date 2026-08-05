@@ -64,6 +64,15 @@ export interface PatchApplierTargets {
   readonly applyFlows?: (doc: SceneDocument) => void
   readonly applyDataSources?: (doc: SceneDocument) => void
   readonly applyPrefabs?: (doc: SceneDocument) => void
+  /**
+   * `/variables/**` —— **与上面四个不同，这一个在 v1.0 就有生产消费者。**
+   *
+   * 运行时把变量的**当前值**存在一个 Map 里，而文档里存的是 `default`。编辑器新建一个
+   * 变量时，如果没人告诉运行时，那个变量在预览里就不存在——一条写它的规则会撞上
+   * 「写入了未声明的变量」并被忽略，而 `fullRebuildCount` 全程是 0（铁律 11 的
+   * 「静默失效」形状：没有回落，所以没有告警，功能就是不工作）。
+   */
+  readonly applyVariables?: (doc: SceneDocument) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -170,8 +179,10 @@ export class PatchApplier {
       // 那天起就不可达。而真正存在的 `projectId` 反倒走 default —— 改一次项目 id 会触发
       // 一次整图重建。`sceneId` 与 `projectId` 分两行写、不合并成一行：合并之后没法
       // 单独删掉一个来做变异检验。
-      case 'rules':
       case 'variables':
+        this.targets.applyVariables?.(next)
+        return true
+      case 'rules':
       case 'viewpoints':
       case 'animations':
       case 'hotspots':

@@ -208,6 +208,8 @@ export class SceneRuntime implements RuntimeContext {
       // would put an await in every editor keystroke's path.
       applyEnvironment: (doc) => void this.environment.apply(doc),
       applyNodeShadow: (doc, nodeId) => this.syncNodeShadowFlags(doc, nodeId),
+      // T-231 · 文档里的变量集合变了，运行时的当前值表要跟上。
+      applyVariables: (doc) => this.syncVariables(doc),
       log: (level, message, data) => this.log(level, message, data),
     })
 
@@ -788,6 +790,34 @@ export class SceneRuntime implements RuntimeContext {
       return 0
     }
     return value
+  }
+
+  /**
+   * T-231 · 把文档的变量集合同步到运行时的当前值表。
+   *
+   * **已经存在的变量保留当前值，不回到 `default`。** 这是整个方法里唯一需要想清楚的一件事：
+   * 用户在预览里把「当前步骤」推到第 3 步，然后去变量面板改了另一个变量的名字——
+   * immer 会为此发一条 `/variables/1/name` 的补丁。若这里按 `default` 重建整张表，
+   * 那一下会把第 3 步弹回第 1 步，而用户完全不知道自己碰了什么。
+   *
+   * 新变量取 `default`；文档里已经没有的变量删掉。删除记 `debug` 不记 `warn`——
+   * 删一个变量是用户刚刚做的事，他不需要被告知；真正该说话的是**引用它的规则**，
+   * 那是 checkIntegrity 的 I3。
+   *
+   * `scope` 在 v1.0 没有任何消费者（v1.5 的 project 级变量才通电），所以这里不看它。
+   */
+  private syncVariables(doc: SceneDocument): void {
+    const declared = new Set<string>()
+    for (const variable of doc.variables) {
+      declared.add(variable.id)
+      if (this.variables.has(variable.id)) continue
+      this.variables.set(variable.id, variable.default as VariableValue)
+    }
+    for (const id of [...this.variables.keys()]) {
+      if (declared.has(id)) continue
+      this.variables.delete(id)
+      this.log('debug', `变量「${id}」已从文档中移除，运行时值一并清除`)
+    }
   }
 
   setVar(id: string, value: VarValue): void {

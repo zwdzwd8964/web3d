@@ -280,3 +280,7 @@
 | T-230 | ② | 删掉 case sceneId | 对应测试红 | 红 · 1 条 | — | 还原。两个顶层标量分开写不合并，就是为了能单独删掉一个 |
 | T-230 | ③ | （非变异，是卡面验收项的实测）「/prefabs/0/name 返回 handled」 | 应当证明本卡生效了 | 非变异 · **改动前后都绿**：T-225 已经把 prefabs 加进认领组，且 apply-patch-coverage 的 it.each 早就覆盖了它 | — | 真正新增的判别点只有四个钩子的调用计数与 /projectId、/sceneId 两条。把已经绿的项列进验收是假绿 |
 | T-230 | ④ | （非变异，是删 case id 的可观测性） | 删掉一支不可达的 case 应当可观测 | 非变异 · 不加断言的话**完全不可观测** | — | 补了一条负向断言：/id 现在必须 rebuilt === true 且 fullRebuildCount === 1。SceneDocument 顶层没有 id 字段，那一支从写下那天起就不可达，而真正存在的 projectId 反倒走 default 触发整图重建 |
+| T-231 | ① | 删掉 `case variables` 里的 `applyVariables?.(next)` | 钩子计数断言红，而 `fullRebuildCount` 断言仍绿 | 红 · 5 条（3 条钩子计数 + 2 条同步行为） | — | 还原。**这条路径静默失效的形状就在这里**：`/variables` 一直被认领着，所以钩子没接上时没有回落、没有告警，`fullRebuildCount` 全程是 0——铁律 11 的告警机制对这一类失效完全看不见 |
+| T-231 | ② | `syncVariables` 删掉 `if (this.variables.has(id)) continue`，改成全部按 `default` 重建 | 「保留当前值」那两条必须红 | 红 · 2 条 | — | 还原。**需要一份两个变量的文档才抓得到**：只有 1 个变量时，「改一个不相干的变量名」这个场景根本造不出来。黄金路径只有 1 个，所以本文件自带一份两变量的夹具 |
+| T-231 | ③ | 把 `headless` 的 `setVar` 未声明分支从 `error` 降成 `warn` | 两个运行时同形那条必须红 | 红 · 1 条 | — | 还原。**不能写成 `expect(headlessErrors[0]).toEqual(sceneErrors[0])`**：两边都空时那是 `undefined === undefined`，恒过，而「两边都不说话」正是这条断言要防的失效之一。改成各自先断「恰好一条 error」，再断措辞逐字相同 |
+| T-231 | ④ | （非变异，是卡面前提的实测）卡面要求「把 `setVar` 对未声明变量的行为在两个运行时里做成同形」 | 两边应当不一致 | 非变异 · **两边今天已经逐字相同**（`scene-runtime.ts:796` 与 `headless.ts:204` 都是 `error` + 同一句措辞） | — | 本卡的实际产出因此变成「把这个已成立的性质钉住」而不是「把它做出来」，并补进 ECA_SPEC §9.2 的 B15。卡面写死的行号也漂了 113 行（`:683` → `:796`） |
