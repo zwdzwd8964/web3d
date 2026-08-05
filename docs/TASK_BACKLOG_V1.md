@@ -1910,8 +1910,8 @@
 - **变异检验** ① 删 `else void done.catch(...)` → 未处理拒绝那条红；
   ② 拿掉 `expectType` → T-226 的生产解析器那条 integrity 必须红。
 
-### [ ] T-247 · 编辑器：爆炸分组的创建入口与参数面板
-- **依赖** T-225 · **预估** 1.5d · **实际** —
+### [x] T-247 · 编辑器：爆炸分组的创建入口与参数面板
+- **依赖** T-225 · **预估** 1.5d · **实际** 1.6d
 - **独占** `packages/editor/src/lib/explode-edit.ts`(新) ·
   `packages/editor/src/panels/PropertiesPanel.tsx`（爆炸分区）+ 其测试
 - **做** 选中任意节点时出现「设为爆炸分组」按钮（一次 commit 写默认配置）；已是分组时显示模式下拉

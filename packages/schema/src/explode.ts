@@ -38,3 +38,12 @@ export const ExplodeSchema = z
   })
   .strict()
 export type Explode = z.infer<typeof ExplodeSchema>
+
+/**
+ * 「设为爆炸分组」写下去的那一份。
+ *
+ * 与上面每个字段的 `.default(...)` **同一处真源**——由 zod 自己解析空对象得出，不是
+ * 另抄一遍。抄一遍的结果是 schema 改了默认值而面板没跟上，两处各说各的
+ * （T-215 的高亮预设正是这么漂的）。
+ */
+export const DEFAULT_EXPLODE: Explode = ExplodeSchema.parse({})

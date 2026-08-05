@@ -1,6 +1,8 @@
-import type { Node, Vec3 } from '@w3/schema'
+import type { Explode, Node, Vec3 } from '@w3/schema'
+import { EASINGS, EXPLODE_MODES, EXPLODE_MODE_LABELS } from '@w3/schema'
 import { fromEulerDegrees, toEulerDegrees } from '@w3/core'
 import { useMemo } from 'react'
+import { clearExplodeGroup, makeExplodeGroup, setExplodeAxis, setExplodeParams } from '../lib/explode-edit.js'
 import { MIXED, commonValue, commonVectorComponents, isMixed } from '../lib/selection-values.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { CheckField, NumberField, TextField } from '../widgets/NumberField.js'
@@ -167,7 +169,136 @@ export function PropertiesPanel() {
           </dl>
         )}
         {isMixed(visible) && <p className="panel__note">部分对象可见性不同</p>}
+
+        {/* T-247 · 爆炸分区。**只在单选时出现**：爆炸参数是分组自己的，多选下
+            「改一个参数写给所有选中的分组」在语义上说不通（每组的成员完全不同）。 */}
+        {single && (
+          <section className="subpanel" data-testid="explode-section">
+            <div className="subpanel__head">爆炸视图</div>
+            {single.explode === null ? (
+              <button
+                type="button"
+                className="tbtn"
+                data-testid="explode-make"
+                onClick={() => commit('设为爆炸分组', (d) => makeExplodeGroup(d, single.id))}
+              >
+                设为爆炸分组
+              </button>
+            ) : (
+              <ExplodeFields
+                nodeId={single.id}
+                explode={single.explode}
+                onCommit={(label, patch) => commit(label, (d) => setExplodeParams(d, single.id, patch))}
+                onAxis={(axis, value) => commit('调整排布轴', (d) => setExplodeAxis(d, single.id, axis, value))}
+                onPreviewStart={previewStart}
+                onPreview={(patch) => preview((d) => setExplodeParams(d, single.id, patch))}
+                onPreviewEnd={previewCommit}
+                onClear={() => commit('取消爆炸分组', (d) => clearExplodeGroup(d, single.id))}
+              />
+            )}
+          </section>
+        )}
       </div>
     </aside>
+  )
+}
+
+/**
+ * 爆炸参数的那几个控件。
+ *
+ * **每个数值控件都带 min/max**——v0.5 的 T-176 抓到过 `rotationDeg` 与灯光 intensity 的
+ * 「存得下、打不开」：面板让用户写进一个 schema 拒绝的值，文档保存成功，下次打开
+ * `validate()` 判红，而错误信息指向一个用户根本不知道自己动过的字段。
+ */
+function ExplodeFields(props: {
+  nodeId: string
+  explode: Explode
+  onCommit: (label: string, patch: Partial<Explode>) => void
+  onAxis: (axis: 0 | 1 | 2, value: number) => void
+  onPreviewStart: () => void
+  onPreview: (patch: Partial<Explode>) => void
+  onPreviewEnd: (label: string) => void
+  onClear: () => void
+}) {
+  const { explode } = props
+  return (
+    <>
+      <label className="row">
+        <span>模式</span>
+        <select
+          className="field"
+          data-testid="explode-mode"
+          value={explode.mode}
+          onChange={(e) => props.onCommit('切换爆炸模式', { mode: e.target.value as Explode['mode'] })}
+        >
+          {EXPLODE_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {EXPLODE_MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {explode.mode === 'radial' ? (
+        <NumberField
+          label="散开倍率"
+          value={explode.gain}
+          min={0}
+          max={20}
+          step={0.1}
+          onPreviewStart={props.onPreviewStart}
+          onPreview={(v) => props.onPreview({ gain: v })}
+          onCommit={(v) => props.onCommit('调整散开倍率', { gain: v })}
+          onPreviewEnd={() => props.onPreviewEnd('调整散开倍率')}
+        />
+      ) : (
+        <>
+          {AXES.map((axis, i) => (
+            <NumberField
+              key={axis}
+              label={`排布轴 ${axis}`}
+              value={explode.axis[i] ?? 0}
+              min={-1}
+              max={1}
+              step={0.1}
+              onCommit={(v) => props.onAxis(i as 0 | 1 | 2, v)}
+            />
+          ))}
+          <NumberField
+            label="间距"
+            value={explode.spacing}
+            min={0}
+            max={1000}
+            step={0.05}
+            onPreviewStart={props.onPreviewStart}
+            onPreview={(v) => props.onPreview({ spacing: v })}
+            onCommit={(v) => props.onCommit('调整爆炸间距', { spacing: v })}
+            onPreviewEnd={() => props.onPreviewEnd('调整爆炸间距')}
+          />
+        </>
+      )}
+
+      <label className="row">
+        <span>缓动</span>
+        <select
+          className="field"
+          data-testid="explode-easing"
+          value={explode.easing}
+          onChange={(e) => props.onCommit('调整爆炸缓动', { easing: e.target.value as Explode['easing'] })}
+        >
+          {EASINGS.map((easing) => (
+            <option key={easing} value={easing}>
+              {easing}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <button type="button" className="tbtn" data-testid="explode-clear" onClick={props.onClear}>
+        取消爆炸分组
+      </button>
+      {/* 说清楚它不会顺手删数据——否则用户不敢点 */}
+      <div className="hint">取消分组不会删除各零件已记录的爆炸偏移</div>
+    </>
   )
 }
