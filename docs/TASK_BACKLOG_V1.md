@@ -1782,8 +1782,8 @@
   ③ **两头都要断言**（v0.5 E18 教训 2）：先证明开雾后真的变了，再证明关掉后回到 null——
   只比较两端的测试对「中间什么都没发生」完全无感；④ `disableFogOn` 改成空操作 → chrome 那条红。
 
-### [ ] T-240 · 描边：`OutlineLayer` + 高亮策略化 + `highlightOf` 上契约
-- **依赖** T-235 · T-215 · **预估** 2.0d · **实际** —
+### [x] T-240 · 描边：`OutlineLayer` + 高亮策略化 + `highlightOf` 上契约
+- **依赖** T-235 · T-215 · **预估** 2.0d · **实际** 2.2d
 - **独占** `packages/core/src/runtime/outline-layer.ts`(新) · `packages/core/src/runtime/highlight.ts` ·
   `packages/core/src/eca/types.ts`（列 T）· `packages/core/src/eca/headless.ts` ·
   `packages/core/test/runtime-contract.ts` · `packages/core/test/runtime/highlight.test.ts`

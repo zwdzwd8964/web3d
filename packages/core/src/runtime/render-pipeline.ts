@@ -23,6 +23,8 @@ import type { RendererLike } from './renderer-like.js'
 export interface ComposerLike {
   readonly passes: unknown[]
   addPass(pass: unknown): void
+  /** T-240 · 描边层在某个预设的选中集清空时把那条 pass 摘掉，把名额还回去。 */
+  removePass(pass: unknown): void
   render(deltaS?: number): void
   setSize(width: number, height: number): void
   dispose(): void
@@ -75,6 +77,17 @@ export class RenderPipeline {
    */
   get passes(): readonly unknown[] {
     return this.composer?.passes ?? []
+  }
+
+  /**
+   * 当前的 composer，直连时为 null。
+   *
+   * T-240 的 `OutlineLayer` 要往里 `addPass` / `removePass`。**只暴露这两个动作所需的
+   * 那一小片**（`OutlineComposerLike`），而不是整个 composer——后者会让描边层拿到
+   * `render()`，于是「谁负责画这一帧」这件事又有了第二个答案。
+   */
+  get composerHandle(): { addPass(pass: unknown): void; removePass(pass: unknown): void } | null {
+    return this.composer
   }
 
   /**

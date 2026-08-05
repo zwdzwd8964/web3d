@@ -24,6 +24,7 @@ function fakeComposer(): ComposerLike & { calls: Record<string, number> } {
     calls,
     passes,
     addPass: (p) => void passes.push(p),
+    removePass: () => {},
     render: () => void calls.render++,
     setSize: () => void calls.setSize++,
     dispose: () => void calls.dispose++,

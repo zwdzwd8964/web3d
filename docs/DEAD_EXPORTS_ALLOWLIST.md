@@ -22,6 +22,7 @@
 | 2026-08-03 | T-205 | — | 34 | 建表。当天实测孤儿数见提交信息。**原记作 24，与常量不符**——`MAX_EXEMPTIONS` 自 d7adf97 起就是 34，从未改过（`git log -S` 实测），是这一行写错了，T-225 订正 |
 | 2026-08-04 | T-225 | 34 | 35 | **本表唯一一次上调**。`schema:EXPLODE_MODE_LABELS` 是规划 §4.1.1 逐字冻结的一项，v1.0 内没有任何消费者、v1.2 的 T-244 爆炸面板才用得上。三条路各自的代价：删掉它 = 偏离 §4 的冻结清单；假造一个 v1.0 调用点 = 正是本守卫要拦的东西；上调 1 并登记 = 守卫完整、可逆、到期自动转红。取第三条 |
 | 2026-08-05 | T-235 | 35 | **33** | **第一次往下走。** 接线了 registerChrome / setChromeVisible / pipelineMode / setPostFxEnabled 四条接缝，四行豁免随之删除；同时为 beginCapture / endCapture 新增两行（owner T-266，出图链路才有调用方）。净 −2。**这就是棘轮该有的样子**：交付一张卡，表变短 |
+| 2026-08-05 | T-240 | 33 | 35 | **第二次上调，与 T-225 同一种情形。** `highlightOf` 是规划 §4 冻结的 v1.0 三项 `RuntimeContext` 增量之一，而 v1 的条件表里没有一条读得到高亮状态——它与早就躺在遗留基线上的 `materialOf` 逐字同形：接口上有读者、规则里还没有。三条路：删掉它 = 偏离 §4 冻结清单且 T-294 的 parity 轨迹没了比对项；在 `highlight()` 里塞一句 `this.highlightOf(...)` 当调用点 = 假造调用点，正是本守卫要拦的（那处真正的去重守卫已经落在 `OutlineLayer.apply` 里，它不需要 `highlightOf`）；上调 2 并登记 = 守卫完整、到期自动转红。取第三条 |
 
 ## 豁免
 
@@ -62,6 +63,8 @@
 | core:SceneRuntime.isPageVisible | T-307 同批交付，它是条件求值那一侧的入口 | T-307 | v1.5 |
 | core:SceneRuntime.swapDocument | T-429 的多场景切换按七步清场顺序换文档 | T-429 | v1.5 |
 | schema:EXPLODE_MODE_LABELS | T-244 的爆炸叠加层要给两种模式显示中文名，标签表与 EXPLODE_MODES 同源才不会漏一支 | T-244 | v1.2 |
+| core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 |
+| core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 |
 
 ## v0 / v0.5 遗留基线
 

@@ -2,7 +2,7 @@ import type { Light, NodeOverrides, SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument, identityTransform } from '@w3/schema'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Object3D, PCFSoftShadowMap } from 'three'
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PCFSoftShadowMap } from 'three'
 import type { SpotLight } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionRegistry, registerBuiltinActions } from '../../src/eca/actions/index.js'
@@ -825,6 +825,7 @@ describe('T-235 · 管线接在运行时的三个点上', () => {
     const createComposer = vi.fn(() => ({
       passes: [] as unknown[],
       addPass: () => {},
+      removePass: () => {},
       render: () => {},
       setSize: () => {},
       dispose: () => {},
@@ -934,6 +935,203 @@ describe('T-239 · registerChrome 顺手关掉雾', () => {
       }
     })
     if (graphMaterials > 0) expect(foggy, '场景图的材质被顺手关掉了雾').toBe(graphMaterials)
+    runtime.dispose()
+  })
+})
+
+/* ========================================================================== */
+/* T-240 · 高亮的两种画法，在真运行时上                                        */
+/* ========================================================================== */
+
+describe('T-240 · 描边开关决定高亮怎么画', () => {
+  const SHADED = 'nd_shade001'
+
+  /** 黄金路径 + 一个图元节点。图元是唯一同步就能 materialise 出真网格的载体。 */
+  const shadedDoc = (outline: boolean): SceneDocument => {
+    const base = createGoldenPathDocument()
+    return {
+      ...base,
+      meta: { ...base.meta, effects: { outline: { ...base.meta.effects.outline, enabled: outline } } },
+      nodes: [
+        ...base.nodes,
+        {
+          section: null,
+          explode: null,
+          explodeOffset: null,
+          prefabRef: null,
+          id: SHADED,
+          name: '标记球',
+          parent: null,
+          order: 9100,
+          assetRef: null,
+          primitive: { kind: 'sphere', radius: 0.2 },
+          light: null,
+          transform: { p: [0, 1, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+          visible: true,
+          locked: false,
+          overrides: {},
+        },
+      ],
+    }
+  }
+
+  const fakeOutlinePass = () => ({
+    selectedObjects: [] as Object3D[],
+    edgeStrength: 0,
+    edgeThickness: 0,
+    pulsePeriod: 3,
+    visibleEdgeColor: { set: () => {} },
+    hiddenEdgeColor: { set: () => {} },
+    dispose: () => {},
+  })
+
+  const fakeComposer = () => ({
+    passes: [] as unknown[],
+    addPass(p: unknown) {
+      this.passes.push(p)
+    },
+    removePass(p: unknown) {
+      const i = this.passes.indexOf(p)
+      if (i >= 0) this.passes.splice(i, 1)
+    },
+    render: () => {},
+    setSize: () => {},
+    dispose: () => {},
+    renderTarget1: { samples: 4 },
+    renderTarget2: { samples: 0 },
+  })
+
+  /** 一个装好了描边工厂的运行时。`outline` 决定文档里那个开关。 */
+  function outlineRuntime(outline: boolean, logs?: [LogLevel, string][]) {
+    const passes: ReturnType<typeof fakeOutlinePass>[] = []
+    const runtime = new SceneRuntime(shadedDoc(outline), {
+      canvas: canvas(),
+      resolver: createMemoryResolver(new Map()),
+      mode: 'play',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+      onLog: (level, message) => logs?.push([level, message]),
+      createComposer: fakeComposer,
+      createOutlinePass: () => {
+        const p = fakeOutlinePass()
+        passes.push(p)
+        return p
+      },
+    })
+    // 契约 harness 同款：构造函数不建图，`load` 才建，而 `load` 是异步的、这里又没有
+    // 资产要加载。图元节点在 `build` 里同步 materialise 成真网格，正是本组需要的。
+    runtime.graph.build(runtime.doc)
+    return { runtime, passes }
+  }
+
+  const materialOf = (runtime: SceneRuntime, nodeId: string) =>
+    (runtime.graph.objectFor(nodeId) as Mesh).material as MeshStandardMaterial
+
+  it('outline.enabled 为 false：走自发光，材质的 emissive 被写', () => {
+    const { runtime, passes } = outlineRuntime(false)
+    const before = materialOf(runtime, SHADED).emissive.getHexString()
+
+    runtime.highlight(SHADED, 'outline_amber')
+
+    expect(runtime.highlightOf(SHADED)).toBe('outline_amber')
+    expect(materialOf(runtime, SHADED).emissive.getHexString()).not.toBe(before)
+    expect(passes, '关着的时候一条 pass 都不该被造出来').toHaveLength(0)
+    runtime.dispose()
+  })
+
+  it('outline.enabled 为 true：材质不被写，对象进了 pass 的 selectedObjects', () => {
+    const { runtime, passes } = outlineRuntime(true)
+    const before = materialOf(runtime, SHADED).emissive.getHexString()
+
+    runtime.highlight(SHADED, 'outline_amber')
+
+    expect(runtime.highlightOf(SHADED)).toBe('outline_amber')
+    expect(materialOf(runtime, SHADED).emissive.getHexString(), '描边不碰材质').toBe(before)
+    expect(passes).toHaveLength(1)
+    expect(passes[0]!.selectedObjects).toContain(runtime.graph.objectFor(SHADED))
+    runtime.dispose()
+  })
+
+  it('中途打开描边：已经高亮的那个被重画，材质还原、对象进 pass', () => {
+    // 不重画的话，开关那一瞬间已高亮的节点会「消失」，而用户没有取消过高亮。
+    const { runtime, passes } = outlineRuntime(false)
+    const before = materialOf(runtime, SHADED).emissive.getHexString()
+    runtime.highlight(SHADED, 'outline_red')
+    expect(materialOf(runtime, SHADED).emissive.getHexString()).not.toBe(before)
+
+    runtime.setPostFxEnabled(true)
+
+    expect(runtime.pipelineMode).toBe('composed')
+    expect(runtime.highlightOf(SHADED), '换画法不等于取消高亮').toBe('outline_red')
+    expect(materialOf(runtime, SHADED).emissive.getHexString(), '自发光那份要被撤掉').toBe(before)
+    expect(passes[0]!.selectedObjects).toContain(runtime.graph.objectFor(SHADED))
+    runtime.dispose()
+  })
+
+  it('再关回去：对象从 pass 里摘掉，材质重新被写', () => {
+    const { runtime, passes } = outlineRuntime(true)
+    runtime.highlight(SHADED, 'outline_red')
+    const lit = materialOf(runtime, SHADED).emissive.getHexString()
+
+    runtime.setPostFxEnabled(false)
+
+    expect(runtime.pipelineMode).toBe('direct')
+    expect(runtime.highlightOf(SHADED)).toBe('outline_red')
+    expect(passes[0]!.selectedObjects).toEqual([])
+    expect(materialOf(runtime, SHADED).emissive.getHexString()).not.toBe(lit)
+    runtime.dispose()
+  })
+
+  it('没注入 createOutlinePass 时，哪怕 composed 也走自发光', () => {
+    // 真 `OutlinePass` 要 WebGL 上下文。一个没注入它的宿主不该因为文档开了描边就崩。
+    const runtime = new SceneRuntime(shadedDoc(true), {
+      canvas: canvas(),
+      resolver: createMemoryResolver(new Map()),
+      mode: 'play',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+      createComposer: fakeComposer,
+    })
+    runtime.graph.build(runtime.doc)
+    const before = (runtime.graph.objectFor(SHADED) as Mesh & { material: MeshStandardMaterial }).material.emissive.getHexString()
+
+    runtime.highlight(SHADED, 'outline_amber')
+
+    expect(runtime.pipelineMode).toBe('composed')
+    expect(runtime.highlightOf(SHADED)).toBe('outline_amber')
+    expect((runtime.graph.objectFor(SHADED) as Mesh & { material: MeshStandardMaterial }).material.emissive.getHexString()).not.toBe(before)
+    runtime.dispose()
+  })
+
+  it('unlit 材质：自发光模式下失败并报出「材质不支持自发光」，描边模式下成功', () => {
+    // 卡面 ④。原来这种情况报的是「没有可着色的几何体」——处置办法完全不同：
+    // 节点没有问题，把描边打开就好，而那句文案会让用户去改一个没毛病的节点。
+    const logs: [LogLevel, string][] = []
+    const off = outlineRuntime(false, logs)
+    const unlit = off.runtime.graph.objectFor(SHADED) as Mesh
+    unlit.material = new MeshBasicMaterial({ color: 0x334455 })
+
+    off.runtime.highlight(SHADED, 'outline_amber')
+    expect(off.runtime.highlightOf(SHADED)).toBeNull()
+    expect(logs.some(([level, m]) => level === 'warn' && m.includes('材质不支持自发光'))).toBe(true)
+    expect(logs.some(([, m]) => m.includes('没有可着色的几何体')), '别再报成分组节点').toBe(false)
+    off.runtime.dispose()
+
+    const on = outlineRuntime(true)
+    const unlit2 = on.runtime.graph.objectFor(SHADED) as Mesh
+    unlit2.material = new MeshBasicMaterial({ color: 0x334455 })
+    on.runtime.highlight(SHADED, 'outline_amber')
+    expect(on.runtime.highlightOf(SHADED), '描边这条路不碰材质，unlit 也画得上').toBe('outline_amber')
+    on.runtime.dispose()
+  })
+
+  it('未知预设报的是预设名，不是几何体', () => {
+    const logs: [LogLevel, string][] = []
+    const { runtime } = outlineRuntime(false, logs)
+    runtime.highlight(SHADED, 'outline_chartreuse')
+    expect(logs.some(([level, m]) => level === 'warn' && m.includes('未知的高亮预设'))).toBe(true)
     runtime.dispose()
   })
 })

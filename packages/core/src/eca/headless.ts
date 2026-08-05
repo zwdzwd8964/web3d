@@ -1,4 +1,6 @@
 import type { Light, SceneDocument } from '@w3/schema'
+import { HIGHLIGHT_PRESETS } from '../highlight-presets.js'
+
 import { AbortError, neverEnds } from './types.js'
 import type { LogLevel, RuntimeContext, RuntimeEvent, SubtreeOption, VarValue } from './types.js'
 
@@ -329,6 +331,13 @@ export class HeadlessRuntime implements RuntimeContext {
   }
 
   highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void {
+    // T-240 · 未知预设一律拒收。SceneRuntime 从 T-040 起就这么做（画不出来的东西不许
+    // 记成生效），headless 这边一直照单全收——直到 `highlightOf` 上了契约才看得见这处分叉。
+    // 留着的话，`highlightOf(x) === '写错的名字'` 这类条件在预览里为假、在播放器里为真。
+    if (preset !== null && !(preset in HIGHLIGHT_PRESETS)) {
+      this.log('warn', `无法高亮对象「${nodeId}」：未知的高亮预设「${preset}」`)
+      return
+    }
     for (const id of this.subtree(nodeId, options?.includeDescendants)) {
       if (preset === null) this.highlights.delete(id)
       else this.highlights.set(id, preset)

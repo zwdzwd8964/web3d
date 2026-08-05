@@ -117,6 +117,44 @@ function litDocument(): SceneDocument {
   }
 }
 
+/**
+ * T-240 · 一个真的画得出来的节点，供高亮那几条用。
+ *
+ * 黄金路径文档里没有这样的节点：`nd_pump` 是分组节点，`nd_body` / `nd_cover` 挂着资产
+ * 而契约的 harness 从不真的加载资产（那是 loader 的测试，不是契约的），于是它们在
+ * SceneRuntime 一侧都是空 Group。**对着空 Group 断言「高亮成功」会必红，而且红的原因
+ * 与被测语义无关。** 图元节点是这里唯一能同步materialise 出真网格 + `MeshStandardMaterial`
+ * 的载体，与 `litDocument()` 给灯光加一个节点是同一个套路。
+ */
+const SHADED_ID = 'nd_shade001'
+
+function shadedDocument(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  return {
+    ...doc,
+    nodes: [
+      ...doc.nodes,
+      {
+        section: null,
+        explode: null,
+        explodeOffset: null,
+        prefabRef: null,
+        id: SHADED_ID,
+        name: '标记球',
+        parent: null,
+        order: 9100,
+        assetRef: null,
+        primitive: { kind: 'sphere', radius: 0.2 },
+        light: null,
+        transform: { p: [0, 1, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
+        visible: true,
+        locked: false,
+        overrides: {},
+      },
+    ],
+  }
+}
+
 /** `animationEnd` events only, narrowed so `completed` is reachable without a cast. */
 const animationEnds = (events: readonly RuntimeEvent[], animationId?: string) =>
   events.filter((e): e is Extract<RuntimeEvent, { event: 'animationEnd' }> =>
@@ -128,6 +166,7 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
   const setupLit = () => makeCtx(litDocument())
   const setupWithMedia = () => makeCtx(mediaDocument())
   const setupLooping = () => makeCtx(loopDocument())
+  const setupShaded = () => makeCtx(shadedDocument())
 
   it(`${label}: variables start at their document defaults`, () => {
     expect(setup().ctx.getVar('step')).toBe(1)
@@ -300,17 +339,52 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
   })
 
   it(`${label}: resetScene returns everything to the document`, () => {
-    const { ctx } = setup()
+    const { ctx } = setupShaded()
     ctx.setVar('step', 7)
     ctx.setVisible(IDS.cover, false)
-    ctx.highlight(IDS.cover, 'outline_red')
+    ctx.highlight(SHADED_ID, 'outline_red')
     ctx.openPanel(IDS.hotspot)
+
+    // T-240 · 前提断言。少了这条，下面那句 `highlightOf === null` 对一个「从来没高亮上」
+    // 的运行时同样为真——resetScene 什么都不做也能绿。
+    expect(ctx.highlightOf(SHADED_ID), '高亮先得真的加上，reset 才谈得上把它撤掉').toBe('outline_red')
 
     ctx.resetScene()
 
     expect(ctx.getVar('step')).toBe(1)
     expect(ctx.isVisible(IDS.cover)).toBe(true)
     expect(ctx.isPanelOpen(IDS.hotspot)).toBe(false)
+    expect(ctx.highlightOf(SHADED_ID), 'resetScene 要把高亮也撤掉').toBeNull()
+  })
+
+  /* --- T-240 · highlightOf ------------------------------------------------ */
+
+  it(`${label}: highlightOf 报出刚写进去的预设名，取消后回到 null`, () => {
+    const { ctx } = setupShaded()
+    expect(ctx.highlightOf(SHADED_ID)).toBeNull()
+
+    ctx.highlight(SHADED_ID, 'outline_amber')
+    expect(ctx.highlightOf(SHADED_ID)).toBe('outline_amber')
+
+    // 换一种预设：报的是新的那种，不是第一次那种
+    ctx.highlight(SHADED_ID, 'outline_red')
+    expect(ctx.highlightOf(SHADED_ID)).toBe('outline_red')
+
+    ctx.highlight(SHADED_ID, null)
+    expect(ctx.highlightOf(SHADED_ID)).toBeNull()
+  })
+
+  it(`${label}: highlightOf 只认被点名的那个节点`, () => {
+    // 「返回最后一次高亮过的预设名，不管问的是谁」这种实现在上一条下面是绿的。
+    const { ctx } = setupShaded()
+    ctx.highlight(SHADED_ID, 'outline_amber')
+    expect(ctx.highlightOf(IDS.hotspot)).toBeNull()
+  })
+
+  it(`${label}: 未知预设不会被记成高亮`, () => {
+    const { ctx } = setupShaded()
+    ctx.highlight(SHADED_ID, 'outline_chartreuse')
+    expect(ctx.highlightOf(SHADED_ID), '画不出来的预设不该报成已生效').toBeNull()
   })
 
   it(`${label}: now() is monotonic`, async () => {

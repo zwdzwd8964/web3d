@@ -53,6 +53,14 @@ export interface RuntimeContext {
   setMaterial(nodeId: string, materialId: string | null): void
   /** null clears the highlight. */
   highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void
+  /**
+   * T-240 · 这个节点当前的高亮预设名，没有就是 `null`。
+   *
+   * **规则要读得到自己写过的高亮**——「已经高亮过就不再高亮」这类条件今天写不出来，
+   * 因为状态只在运行时里、文档里没有（高亮是运行时瞬态，铁律 1 的那个例外）。
+   * 两个运行时必须给出同一个答案，否则预览与播放的规则会走不同分支（C3）。
+   */
+  highlightOf(nodeId: string): string | null
   getNodeProp(nodeId: string, key: string): VarValue
   resetScene(): void
 

@@ -111,6 +111,7 @@ describe('T-236 · OutputPass 固定在链尾', () => {
     return {
       passes,
       addPass: (p) => void passes.push(p),
+      removePass: () => {},
       render: () => {},
       setSize: () => {},
       dispose: () => {},
@@ -223,6 +224,7 @@ describe('T-236 · 两条路径读的是同一组渲染器状态', () => {
       createComposer: (ctx) => ({
         passes: [],
         addPass: () => {},
+        removePass: () => {},
         render: () => void ctx.renderer.render(ctx.scene, ctx.camera),
         setSize: () => {},
         dispose: () => {},

@@ -1,10 +1,13 @@
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { neverEnds } from '../eca/types.js'
-import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
-import type { Texture, WebGLRenderer } from 'three'
+import { AmbientLight, Box3, Color, DirectionalLight, GridHelper, Object3D, PCFSoftShadowMap, Scene, Vector3 } from 'three'
+import type { Mesh, Texture, WebGLRenderer } from 'three'
 import { createWebGLRenderer } from './renderer-like.js'
 import { ChromeRegistry } from './chrome-registry.js'
+import { EmissiveStrategy, HIGHLIGHT_PRESETS } from './highlight.js'
+import { OutlineLayer } from './outline-layer.js'
+import type { OutlineLayerOptions } from './outline-layer.js'
 import { disableFogOn } from './environment.js'
 import { RenderPipeline } from './render-pipeline.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
@@ -86,6 +89,13 @@ export interface SceneRuntimeOptions {
    * 真 `EffectComposer` 需要 WebGL 上下文，在 Node 里 new 一下就抛。
    */
   readonly createComposer?: RenderPipelineOptions['createComposer']
+  /**
+   * T-240 · 造一条 `OutlinePass`。**不注入 = 永远走自发光高亮。**
+   *
+   * 与 `createComposer` 同一个理由：真 pass 要 WebGL 上下文，Node 里 new 一下就抛。
+   * 而把它做成注入口的另一半价值是「删掉 addPass」这条变异在单测里观测得到。
+   */
+  readonly createOutlinePass?: OutlineLayerOptions['createPass']
 }
 
 /** The shape every three light class shares. Duck-typed so no `instanceof` chain is needed. */
@@ -485,6 +495,41 @@ export class SceneRuntime implements RuntimeContext {
   /** 按当前文档与渲染器重算管线。文档变了、渲染器来了或走了，都要过这里。 */
   private syncPipeline(): void {
     this.pipeline.sync(this.document, this.composerContext())
+    this.syncHighlightStrategy()
+  }
+
+  /**
+   * T-240 · 高亮的画法跟着管线走。
+   *
+   * 描边通道在时用 `OutlineLayer`，不在时用自发光。**切换会把当前这批高亮重画一遍**
+   * （`HighlightLayer.setStrategy` 负责），否则开关描边的那一瞬间已经高亮的节点会
+   * 「消失」，而用户没有取消过高亮。
+   *
+   * 没有注入 `createOutlinePass` 时永远走自发光——真 `OutlinePass` 要 WebGL 上下文，
+   * 而单测与 headless 都没有。
+   */
+  private syncHighlightStrategy(): void {
+    const wantsOutline = this.pipeline.mode === 'composed' && this.options.createOutlinePass !== undefined
+    if (wantsOutline === (this.highlights.strategyKind === 'outline')) return
+
+    if (!wantsOutline) {
+      this.highlights.setStrategy(new EmissiveStrategy(this.graph, this.materials))
+      return
+    }
+    const composer = this.pipeline.composerHandle
+    if (composer === null) return
+    this.highlights.setStrategy(
+      new OutlineLayer({
+        composer,
+        scene: this.scene,
+        camera: this.camera.camera,
+        graph: this.graph,
+        fallback: new EmissiveStrategy(this.graph, this.materials),
+        createPass: this.options.createOutlinePass!,
+        settings: () => this.document.meta.effects.outline,
+        log: (level, message, data) => this.log(level, message, data),
+      }),
+    )
   }
 
   private applyBackground(doc: SceneDocument): void {
@@ -1085,21 +1130,35 @@ export class SceneRuntime implements RuntimeContext {
     return { intensity: light.intensity, color: `#${light.color.getHexString()}` }
   }
 
+  /** T-240 · 见 `RuntimeContext.highlightOf`。状态在高亮层里，不在文档里。 */
+  highlightOf(nodeId: string): string | null {
+    return this.highlights.presetOf(nodeId)
+  }
+
   highlight(nodeId: string, preset: string | null, options?: SubtreeOption): void {
     const applied = this.highlights.set(nodeId, preset, options ?? {})
     if (!applied && preset !== null) {
-      // Almost always: the node has no renderable geometry — a grouping node, or a
-      // placeholder whose asset is missing or still loading (D5). Emissive highlighting
-      // has nothing to write to. Say so; a rule step that reports success while the user
-      // sees nothing is the worst of both.
-      const placeholder = this.graph.isPlaceholder(nodeId)
-      this.log(
-        'warn',
-        placeholder
-          ? `无法高亮对象「${nodeId}」：其资产尚未加载或映射已失效，当前是占位节点`
-          : `无法高亮对象「${nodeId}」：该节点没有可着色的几何体（分组节点或未知预设「${preset}」）`,
-      )
+      this.log('warn', `无法高亮对象「${nodeId}」：${this.highlightFailureReason(nodeId, preset)}`)
     }
+  }
+
+  /**
+   * T-240 · 高亮失败时到底是哪一种失败。
+   *
+   * 原来只有两档（占位 / 「没有可着色的几何体」），第二档把三件不同的事糊在一起：分组
+   * 节点、写错的预设名、**以及 unlit 材质**。最后那件的处置办法与前两件完全不同——它不
+   * 是文档做错了，是自发光这条路画不了它，把描边打开就好。措辞里必须说得出这一句，
+   * 否则用户会去改一个没有问题的节点。
+   */
+  private highlightFailureReason(nodeId: string, preset: string): string {
+    if (!(preset in HIGHLIGHT_PRESETS)) return `未知的高亮预设「${preset}」`
+    if (this.graph.isPlaceholder(nodeId)) return '其资产尚未加载或映射已失效，当前是占位节点'
+    const mesh = this.graph.objectFor(nodeId) as Mesh | undefined
+    const material = mesh?.isMesh && !Array.isArray(mesh.material) ? (mesh.material as { emissive?: unknown }) : null
+    if (material && !(material.emissive instanceof Color)) {
+      return `其材质不支持自发光（如 unlit / MeshBasicMaterial），当前高亮画法画不了它；开启描边（meta.effects.outline）后可高亮`
+    }
+    return `该节点没有可着色的几何体（分组节点）`
   }
 
   getNodeProp(nodeId: string, key: string): VarValue {
