@@ -1836,8 +1836,8 @@
   ② 把 T-205 的体检覆盖面从「可编辑字段」退回「动作 / 事件」→ **必须证明它看不见这个缺口**
   （背景色不是动作也不是事件），据此把覆盖面钉死在字段级。
 
-### [ ] T-243 · 剖切承载体 + `SectionLayer` + 渲染器接线
-- **依赖** T-225 · T-235 · **预估** 2.0d · **实际** —
+### [x] T-243 · 剖切承载体 + `SectionLayer` + 渲染器接线
+- **依赖** T-225 · T-235 · **预估** 2.0d · **实际** 2.1d
 - **独占** `packages/core/src/runtime/section-layer.ts`(新) · `packages/core/src/runtime/carrier-types.ts` ·
   `packages/core/src/runtime/scene-graph.ts` · `packages/core/src/runtime/apply-patch.ts`（node patch 三 case）·
   `packages/core/test/runtime/section-layer.test.ts`(新)

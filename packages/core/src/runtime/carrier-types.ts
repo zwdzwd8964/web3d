@@ -72,3 +72,16 @@ export const PLACEHOLDER_LIGHT_FACTORY: LightFactory = {
   update: () => true,
   dispose: () => undefined,
 }
+
+/**
+ * T-243 · 剖切承载体的占位工厂。
+ *
+ * 与上面两个同一个理由：一个没装剖切工厂的宿主（今天的部分单测、将来的无头导出）
+ * 仍然要让节点存在、保住 transform、能按 id 找到、能改父子。**平面照样会被算出来**——
+ * `SectionLayer` 读的是 Object3D 的世界矩阵，与它长什么样无关。看不见的只是那块指示矩形。
+ */
+export const PLACEHOLDER_SECTION_FACTORY = {
+  create: () => new Group(),
+  update: () => true,
+  dispose: () => {},
+}

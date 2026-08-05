@@ -2,7 +2,8 @@ import type { Node, SceneDocument } from '@w3/schema'
 import { getCarrier } from '@w3/schema'
 import { Group, Mesh, Object3D, Quaternion, Vector3 } from 'three'
 import type { CarrierUserData, LightFactory, PrimitiveFactory } from './carrier-types.js'
-import { PLACEHOLDER_LIGHT_FACTORY, PLACEHOLDER_PRIMITIVE_FACTORY } from './carrier-types.js'
+import { PLACEHOLDER_LIGHT_FACTORY, PLACEHOLDER_PRIMITIVE_FACTORY, PLACEHOLDER_SECTION_FACTORY } from './carrier-types.js'
+import type { SectionFactory } from './section-layer.js'
 import type { AssetSource, NodeUserData } from './types.js'
 import { EMPTY_ASSET_SOURCE } from './types.js'
 
@@ -26,6 +27,8 @@ export interface SceneGraphOptions {
   /** v0.5 · supplied by SceneRuntime. Defaults build empty groups (see carrier-types.ts). */
   readonly primitives?: PrimitiveFactory
   readonly lights?: LightFactory
+  /** v1.0 · T-243 · 第四种承载体。缺省与上面两个一样：建一个空 Group。 */
+  readonly sections?: SectionFactory
 }
 
 export class SceneGraph {
@@ -37,12 +40,14 @@ export class SceneGraph {
   private materialised = new Map<string, boolean>()
   private primitives: PrimitiveFactory
   private lights: LightFactory
+  private sections: SectionFactory
 
   constructor(options: SceneGraphOptions = {}) {
     this.root.name = 'w3:document-root'
     this.assets = options.assets ?? EMPTY_ASSET_SOURCE
     this.primitives = options.primitives ?? PLACEHOLDER_PRIMITIVE_FACTORY
     this.lights = options.lights ?? PLACEHOLDER_LIGHT_FACTORY
+    this.sections = options.sections ?? PLACEHOLDER_SECTION_FACTORY
   }
 
   setAssetSource(source: AssetSource): void {
@@ -126,9 +131,14 @@ export class SceneGraph {
         ? this.primitives.create(node.primitive)
         : carrier === 'light' && node.light
           ? this.lights.create(node.light)
-          : source
-            ? materialise(source)
-            : new Group()
+          : // T-243 · 第四种承载体。它与 primitive / light 同级，**不是**辅助物：
+            // 剖切面在文档里、在层级树里、有 transform、能被 gizmo 拖，
+            // 而 chrome（grid / gizmo / 灯光线框）三样都不是。
+            carrier === 'section' && node.section
+            ? this.sections.create(node.section)
+            : source
+              ? materialise(source)
+              : new Group()
 
     // Three different empty groups, and conflating them would be a bug the user sees:
     //  - no carrier at all: the user made a grouping node. Nothing is wrong.
@@ -208,6 +218,14 @@ export class SceneGraph {
   }
 
   /** v0.5 · the same for a light carrier. A `kind` change is structural. */
+  /** T-243 · 剖切面的尺寸变了。结构性变化时换对象，与 primitive 逐字同形。 */
+  setSection(nodeId: string, node: Node): boolean {
+    const object = this.objects.get(nodeId)
+    if (!object || !node.section) return false
+    if (getCarrier(node) === 'section' && this.sections.update(object, node.section)) return true
+    return this.replaceObject(nodeId, node)
+  }
+
   setLight(nodeId: string, node: Node): boolean {
     const object = this.objects.get(nodeId)
     if (!object) return false

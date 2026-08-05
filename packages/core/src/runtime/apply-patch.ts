@@ -82,6 +82,16 @@ export interface PatchApplierTargets {
    * 不交回去的话下一次播放会安静地继续播老片段。谁改了谁负责通知。
    */
   readonly applyAnimations?: (animationIds: readonly string[]) => void
+  /**
+   * T-243 · `/nodes/**` 里任何可能改变剖切结果的东西变了：section 块、transform、
+   * visible、parent，以及整份 `/nodes` 被替换。
+   *
+   * **给整份文档而不是给一个 nodeId**：平面是一个全局集合（渲染器只吃前 3 条，按文档序），
+   * 改一个节点的可见性会改变**其余平面的名次**。逐节点增量在这里是错的抽象。
+   */
+  readonly applySections?: (doc: SceneDocument) => void
+  /** T-243 · 爆炸分组的参数或逐件偏移变了。消费者是 T-244 的叠加层。 */
+  readonly applyExplode?: (doc: SceneDocument) => void
   readonly log?: (level: 'debug' | 'warn' | 'error', message: string, data?: unknown) => void
 }
 
@@ -286,17 +296,31 @@ export class PatchApplier {
     const [field, sub] = rest
 
     switch (field) {
-      case 'transform':
+      case 'transform': {
         // Covers both `/transform` and `/transform/p`: the node's whole transform is
         // re-applied either way, and it is three numbers.
-        return graph.setTransform(node.id, node)
-      case 'visible':
-        return graph.setVisible(node.id, node.visible)
+        const ok = graph.setTransform(node.id, node)
+        // T-243 · 拖一把剖切刀就是在改它的 transform，而平面**就是**那个 transform。
+        // 不在这里重算的话，拖动时指示矩形动了、切面不动。
+        this.targets.applySections?.(next)
+        return ok
+      }
+      case 'visible': {
+        const ok = graph.setVisible(node.id, node.visible)
+        // 启停剖切走的正是 `node.visible`（X-03 的整个便宜之处）。而且隐藏的是**父节点**
+        // 时同样要重算——世界可见性变了。
+        this.targets.applySections?.(next)
+        return ok
+      }
       case 'name':
         graph.setName(node.id, node.name)
         return true
-      case 'parent':
-        return graph.setParent(node.id, node.parent)
+      case 'parent': {
+        const ok = graph.setParent(node.id, node.parent)
+        // 换父节点 = 换世界矩阵，平面跟着走
+        this.targets.applySections?.(next)
+        return ok
+      }
       case 'order':
         // Sibling order is a document concern; three renders by scene-graph order, which
         // does not affect appearance. Nothing to do, and that is not a fallback.
@@ -311,6 +335,21 @@ export class PatchApplier {
         // Same, and it is the path that carries `/light/shadow/bias` and
         // `/light/intensity` — every `setLight` action and every slider drag.
         return graph.setLight(node.id, node)
+      // T-243 · v3 的三个节点字段。三个分开写、不合并成一行：合并之后没法单独删掉
+      // 一个来做变异检验（与 `sceneId` / `projectId` 那一对同一条纪律）。
+      case 'section':
+        // 覆盖 `/section` 整块与 `/section/size/0`：承载体两种都要重读，
+        // 由工厂决定是不是原地改。**平面本身由 `applySections` 重算**，见下。
+        this.targets.applySections?.(next)
+        return graph.setSection(node.id, node)
+      case 'explode':
+        // 分组参数（模式 / 轴 / 中心）。T-244 的叠加层消费它；本卡先认领，
+        // 掉进 default 会让「改一下爆炸轴」触发一次整图重建。
+        this.targets.applyExplode?.(next)
+        return true
+      case 'explodeOffset':
+        this.targets.applyExplode?.(next)
+        return true
       case 'overrides': {
         if (sub === 'castShadow' || sub === 'receiveShadow') {
           // v1 defined these and nothing read them; v2's shadow pipeline (T-132) does.
@@ -445,7 +484,17 @@ export class PatchApplier {
     const nodeId = node.id
     const { graph, materials } = this.targets
     const carrierOk =
-      node.primitive !== null ? graph.setPrimitive(nodeId, node) : node.light !== null ? graph.setLight(nodeId, node) : true
+      node.primitive !== null
+        ? graph.setPrimitive(nodeId, node)
+        : node.light !== null
+          ? graph.setLight(nodeId, node)
+          : // T-243 · 第四种承载体也要在这里同步。`resyncNode` 是「整份 /nodes 被替换」
+            // 那条路的收口，而导入、删节点、保存视点三种日常操作都走它——漏掉的话
+            // 剖切面从那一刻起就不再同步，**而 `fullRebuildCount` 全程是 0**
+            // （铁律 11 的静默失效形状：没有回落，所以没有告警，功能就是不工作）。
+            node.section !== null
+            ? graph.setSection(nodeId, node)
+            : true
 
     // `applyToNode`'s return value is deliberately dropped, for the same reason the
     // `overrides` branch above drops it: it answers false for a node with no mesh — a

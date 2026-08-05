@@ -12,6 +12,7 @@ import { disableFogOn } from './environment.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { Vector2 } from 'three'
 import { RenderPipeline, createDefaultComposer } from './render-pipeline.js'
+import { SectionLayer, sectionFactory } from './section-layer.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
 import { AbortError } from '../eca/types.js'
@@ -132,6 +133,8 @@ export class SceneRuntime implements RuntimeContext {
   readonly lightHelpers: LightHelperLayer | null
   /** T-235 · 编辑期辅助物的登记处。 */
   private readonly chrome = new ChromeRegistry()
+  /** T-243 · 剖切平面层。它读场景图的世界矩阵，写渲染器的 clippingPlanes。 */
+  private readonly sections: SectionLayer
   /** T-241 · 编辑期辅助物此刻可见吗。选中态描边跟着它走。 */
   private chromeVisible = true
   /** T-241 · 当前选中集。策略换成描边、或 chrome 重新可见时按它重推。 */
@@ -182,7 +185,7 @@ export class SceneRuntime implements RuntimeContext {
     // and nothing connected them. Neither card's tests could see it, because each was
     // testing its own half against a stand-in of the other. Both halves are asserted
     // wired in `scene-runtime.test.ts` and `primitive-factory.test.ts`.
-    this.graph = new SceneGraph({ lights: lightFactory, primitives: primitiveFactory })
+    this.graph = new SceneGraph({ lights: lightFactory, primitives: primitiveFactory, sections: sectionFactory })
     // Injected so the whole cache — keying, ref counting, disposal — runs in plain Node
     // (C8). Absent outside a browser, where there is nothing to decode into.
     const decode = options.decodeTexture ?? browserTextureDecoder()
@@ -237,6 +240,8 @@ export class SceneRuntime implements RuntimeContext {
       log: (level, message, data) => this.log(level, message, data),
       ...(options.compileEnvMap ? { compile: options.compileEnvMap } : {}),
     })
+    this.sections = new SectionLayer(this.graph)
+
     this.patches = new PatchApplier({
       graph: this.graph,
       materials: this.materials,
@@ -256,6 +261,8 @@ export class SceneRuntime implements RuntimeContext {
       applyAnimations: (ids) => {
         for (const id of ids) this.clips.releaseFor(id)
       },
+      // T-243 · 剖切面是一个全局集合，逐节点增量在这里是错的抽象（见钩子的注释）。
+      applySections: (doc) => this.syncSections(doc),
       log: (level, message, data) => this.log(level, message, data),
     })
 
@@ -537,6 +544,16 @@ export class SceneRuntime implements RuntimeContext {
     }
   }
 
+  /**
+   * T-243 · 按文档与场景图重算裁剪平面，并写到渲染器上。
+   *
+   * 写的是 `renderer.clippingPlanes`。**测试也要读那里**——只读 `sections.livePlanes`
+   * 的断言对一个「算对了但没写给渲染器」的实现同样为真（v0.5 M11 的第四次同形）。
+   */
+  private syncSections(doc: SceneDocument): void {
+    this.sections.sync(doc, this.renderer ?? null)
+  }
+
   /** 按当前文档与渲染器重算管线。文档变了、渲染器来了或走了，都要过这里。 */
   private syncPipeline(): void {
     this.pipeline.sync(this.document, this.composerContext())
@@ -625,6 +642,11 @@ export class SceneRuntime implements RuntimeContext {
     // T-235 · 渲染器通常**晚于**文档到达（canvas 挂载在文档加载之后）。
     // 只在 applyBackground 里建管线的话，一份开着描边的文档在 attach 那一刻还是直连。
     this.syncPipeline()
+    // T-243 · 同一个理由：一份带剖切面的文档在 attach 之前算过一次平面，但那时没有
+    // 渲染器可写。**并且要先打开 localClippingEnabled**——three 默认不做局部裁剪，
+    // 少了这一行 clippingPlanes 写进去也不生效，而画面看起来「就是没剖」。
+    renderer.localClippingEnabled = true
+    this.syncSections(this.document)
     const canvas = renderer.domElement
     this.resize(canvas.clientWidth || 1, canvas.clientHeight || 1)
     // Tone mapping and the prefilter both live on the renderer, so a document that was
@@ -787,6 +809,8 @@ export class SceneRuntime implements RuntimeContext {
     // After the graph is rebuilt every Object3D is new and carries three's defaults, so
     // the flags have to be written again even if the on/off state did not move.
     this.syncShadows(doc, true)
+    // T-243 · 整图重建之后每个 Object3D 都是新的，平面挂在世界矩阵上，必须重算。
+    this.syncSections(doc)
     this.resetRuntimeState()
   }
 
@@ -881,6 +905,8 @@ export class SceneRuntime implements RuntimeContext {
     this.waits.clear()
     this.tweens.stopAll()
     this.clips.dispose()
+    // T-243 · 不还给渲染器的话，下一份文档会带着上一份的刀开场
+    this.sections.dispose(this.renderer ?? null)
     this.camera.dispose()
     this.highlights.clearAll()
     this.materials.dispose()
@@ -1261,6 +1287,8 @@ export class SceneRuntime implements RuntimeContext {
     // (B13, extended to lights in v0.5).
     this.graph.build(this.document)
     this.materials.applyAll(this.document, this.graph)
+    // 每个 Object3D 都是新的（与 syncShadows 同一个理由），平面要按新的世界矩阵重算
+    this.syncSections(this.document)
     // Every Object3D is new again, carrying three's defaults — the same reason `rebuild`
     // forces this. Without it, exiting preview silently turns every shadow off.
     this.syncShadows(this.document, true)
