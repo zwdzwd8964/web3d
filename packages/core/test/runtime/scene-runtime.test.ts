@@ -457,7 +457,11 @@ describe('RuntimeContext behaviours', () => {
 describe('the shared RuntimeContext contract', () => {
   describeRuntimeContract('scene-runtime', (doc) => {
     clock = 0
+    // T-245 · 契约要比「两侧 error 日志措辞相同」，而这个 harness 此前不传 onLog——
+    // 那条验收在今天的契约套件里根本观测不到。
+    const logs: { level: string; message: string }[] = []
     const runtime = new SceneRuntime(doc, {
+      onLog: (level, message) => logs.push({ level, message }),
       canvas: canvas(),
       // Resolves ANY url to empty bytes. The contract is about media semantics — started,
       // stopped, silenced on reset — not about storage, and a resolver that refuses every
@@ -488,6 +492,8 @@ describe('the shared RuntimeContext contract', () => {
       },
       lightOf: (nodeId: string) => runtime.lightOf(nodeId),
       events: () => seen,
+      explodeOf: (groupNodeId: string) => runtime.explodeOf(groupNodeId),
+      logs: () => logs,
     }
   })
 })

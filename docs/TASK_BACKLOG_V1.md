@@ -1879,8 +1879,8 @@
   ③ 中断改成回零 → 「停在中途」红；④ 缓存失效改成永不失效 → 需要一条「改了子件 `transform.p`
   之后偏移跟着变」的测试才抓得到。
 
-### [ ] T-245 · `RuntimeContext.setExplode` 双实现 + 契约套件扩展
-- **依赖** T-244 · T-203 · **预估** 1.0d · **实际** —
+### [x] T-245 · `RuntimeContext.setExplode` 双实现 + 契约套件扩展
+- **依赖** T-244 · T-203 · **预估** 1.0d · **实际** 1.1d
 - **独占** `packages/core/src/eca/types.ts`（列 T）· `packages/core/src/eca/headless.ts` ·
   `packages/core/test/runtime-contract.ts`
 - **做** 双实现；**headless 的 `getNodeProp('positionY')` 改为加上爆炸偏移**；

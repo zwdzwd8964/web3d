@@ -37,6 +37,22 @@ export interface ContractHarness {
    * this file had to.
    */
   events(): readonly RuntimeEvent[]
+  /**
+   * T-245 · 这个爆炸分组此刻的系数。
+   *
+   * 与 `lightOf` 同一条理由走 harness 而不是 `RuntimeContext`：**它其实在两侧都有**
+   * （`explodeOf` 是规划 §4 冻结的读者），但让契约通过 harness 拿，测试就不必为了
+   * 读一个数而 cast 穿 unknown。
+   */
+  explodeOf(groupNodeId: string): number
+  /**
+   * T-245 · 这个运行时报过的每一条日志。
+   *
+   * 「两侧 error 日志措辞相同」是这一批里唯一一条**比字符串**的契约断言，而两个运行时
+   * 报日志的路子完全不同（headless 往数组里推，SceneRuntime 走 `onLog` 回调）。
+   * 不给 harness 开这条缝的话，那条验收在今天的契约套件里根本观测不到。
+   */
+  logs(): readonly { level: string; message: string }[]
 }
 
 /** A spot light node, so the light half of the contract has something to point at. */
@@ -155,6 +171,60 @@ function shadedDocument(): SceneDocument {
   }
 }
 
+/**
+ * T-245 · 一个真的会散开的爆炸分组。
+ *
+ * ⚠ **锚点必须互不相同。** 黄金路径那三个节点的 `transform.p` 全是 `[0,0,0]`，而 radial
+ * 位移是 `(锚点 − 质心) × gain`——锚点全重合时位移**恒为零**，于是「完成后两侧 positionY
+ * 逐位相等」会退化成 `0 === 0`，而卡面变异 ① 在那种文档上是绿的。这份 fixture 存在的
+ * 全部理由就是让那条断言有判别力。
+ */
+const EXPLODE_GROUP = 'nd_exgrp001'
+const EXPLODE_MEMBER = 'nd_exmem002'
+
+function explodeDocument(): SceneDocument {
+  const doc = createGoldenPathDocument()
+  const shared = {
+    section: null,
+    explodeOffset: null,
+    prefabRef: null,
+    assetRef: null,
+    primitive: null,
+    light: null,
+    visible: true,
+    locked: false,
+    overrides: {},
+    parent: null as string | null,
+    transform: { p: [0, 0, 0] as [number, number, number], r: [0, 0, 0, 1] as [number, number, number, number], s: [1, 1, 1] as [number, number, number] },
+  }
+  const member = (id: string, order: number, p: [number, number, number]) => ({
+    ...shared,
+    id,
+    name: `零件 ${order}`,
+    parent: EXPLODE_GROUP,
+    order,
+    explode: null,
+    primitive: { kind: 'box' as const, size: [0.2, 0.2, 0.2] as [number, number, number] },
+    transform: { ...shared.transform, p },
+  })
+  return {
+    ...doc,
+    nodes: [
+      ...doc.nodes,
+      {
+        ...shared,
+        id: EXPLODE_GROUP,
+        name: '爆炸组',
+        order: 8000,
+        explode: { mode: 'radial' as const, gain: 2, axis: [0, 1, 0] as [number, number, number], spacing: 0.5, easing: 'linear' as const },
+      },
+      member('nd_exmem001', 1, [0, 0, 0]),
+      member(EXPLODE_MEMBER, 2, [0, 1, 0]),
+      member('nd_exmem003', 3, [0, 2, 0]),
+    ],
+  } as SceneDocument
+}
+
 /** `animationEnd` events only, narrowed so `completed` is reachable without a cast. */
 const animationEnds = (events: readonly RuntimeEvent[], animationId?: string) =>
   events.filter((e): e is Extract<RuntimeEvent, { event: 'animationEnd' }> =>
@@ -167,6 +237,7 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
   const setupWithMedia = () => makeCtx(mediaDocument())
   const setupLooping = () => makeCtx(loopDocument())
   const setupShaded = () => makeCtx(shadedDocument())
+  const setupExplode = () => makeCtx(explodeDocument())
 
   it(`${label}: variables start at their document defaults`, () => {
     expect(setup().ctx.getVar('step')).toBe(1)
@@ -355,6 +426,63 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
     expect(ctx.isVisible(IDS.cover)).toBe(true)
     expect(ctx.isPanelOpen(IDS.hotspot)).toBe(false)
     expect(ctx.highlightOf(SHADED_ID), 'resetScene 要把高亮也撤掉').toBeNull()
+  })
+
+  /* --- T-245 · setExplode ------------------------------------------------- */
+
+  it(`${label}: 起始系数是 0`, () => {
+    expect(setupExplode().explodeOf(EXPLODE_GROUP)).toBe(0)
+  })
+
+  it(`${label}: setExplode(1, {durationS:0.5}) 在 499ms 未完成、500ms 完成`, async () => {
+    const h = setupExplode()
+    let done = false
+    void h.ctx.setExplode(EXPLODE_GROUP, 1, { durationS: 0.5 }).then(() => {
+      done = true
+    })
+
+    await h.advance(499)
+    expect(done, '提前完成了').toBe(false)
+    await h.advance(1)
+    expect(done).toBe(true)
+    expect(h.explodeOf(EXPLODE_GROUP)).toBe(1)
+  })
+
+  it(`${label}: **完成之后两侧 positionY 逐位相等**`, async () => {
+    // 必须在爆炸**完成之后**读。factor=0 时两侧当然相等，那条断言什么都不测——
+    // 卡面变异 ① 点名的正是这个形状。
+    const h = setupExplode()
+    // 成员 2 的锚点恰在质心上（y=1），位移为零——**故意不用它做主断言**。
+    // 用一个位移非零的成员，否则这条契约在「headless 只读文档」的实现下也是绿的。
+    expect(h.ctx.getNodeProp(EXPLODE_MEMBER, 'positionY')).toBeCloseTo(1, 6)
+
+    await h.ctx.setExplode(EXPLODE_GROUP, 1)
+
+    // 质心 y = (0+1+2)/3 = 1，gain = 2 → 成员 3 的位移 y = (2 − 1) × 2 = 2
+    const third = h.ctx.getNodeProp('nd_exmem003', 'positionY')
+    expect(third, '位移是零，这条断言什么都没测').not.toBe(2)
+    expect(third).toBeCloseTo(2 + (2 - 1) * 2, 6)
+  })
+
+  it(`${label}: 目标不是爆炸分组 → 不抛、系数 0、error 日志措辞相同`, async () => {
+    const h = setupExplode()
+    await expect(h.ctx.setExplode(EXPLODE_MEMBER, 1)).resolves.toBeUndefined()
+
+    expect(h.explodeOf(EXPLODE_MEMBER)).toBe(0)
+    const errors = h.logs().filter((l) => l.level === 'error')
+    expect(errors.map((l) => l.message)).toContain(`爆炸目标「${EXPLODE_MEMBER}」不是爆炸分组，已跳过`)
+  })
+
+  it(`${label}: resetScene 之后系数归 0 且 positionY 回文档值`, async () => {
+    const h = setupExplode()
+    const before = h.ctx.getNodeProp('nd_exmem003', 'positionY')
+    await h.ctx.setExplode(EXPLODE_GROUP, 1)
+    expect(h.ctx.getNodeProp('nd_exmem003', 'positionY')).not.toBe(before)
+
+    h.ctx.resetScene()
+
+    expect(h.explodeOf(EXPLODE_GROUP)).toBe(0)
+    expect(h.ctx.getNodeProp('nd_exmem003', 'positionY')).toBeCloseTo(before as number, 6)
   })
 
   /* --- T-240 · highlightOf ------------------------------------------------ */

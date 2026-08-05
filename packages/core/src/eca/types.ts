@@ -79,6 +79,18 @@ export interface RuntimeContext {
    * light goes back to 3" true (B13, extended to lights in v0.5).
    */
   setLight(nodeId: string, patch: { intensity?: number; color?: string }): void
+  /**
+   * T-245 · 把一个爆炸分组推到 `factor`。`factor: 0` 即复原。
+   *
+   * 目标不是爆炸分组时 **skip + error 日志**（B9，与 `setLight` 逐字一致），**不抛**：
+   * 一条规则里写错了目标，整条规则链不该因此断掉。
+   *
+   * 系数是运行时瞬态（D29），文档里没有它——「发布出去默认就是爆炸态」由一条
+   * `sceneReady → explode(...)` 规则表达，顺带还得到「进场缓缓炸开」。
+   */
+  setExplode(groupNodeId: string, factor: number, options?: { durationS?: number; signal?: AbortSignal }): Promise<void>
+  /** T-245 · 这个分组此刻的系数。没炸过就是 0。 */
+  explodeOf(groupNodeId: string): number
 
   // ---- media (v0.5 · T-163) ----
   /**

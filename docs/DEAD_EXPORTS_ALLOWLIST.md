@@ -78,7 +78,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 
 | symbol | reason | owner | expires | spec |
 |---|---|---|---|---|
-| core:SceneRuntime.explodeOf | T-245 的契约套件按它断「结束后 explodeOf(id)===factor」，规划 §4 的 explode 动作行逐字点名了它；与 highlightOf 同一形状——接口上有读者、规则里还没有 | T-245 | v1.2 | 规划§4 |
 | core:SceneRuntime.captureImage | T-266 的出图八步链路由它编排，含还原栈与重入拒绝 | T-266 | v1.2 | 规划§4 |
 | core:SceneRuntime.flyToView | T-337 的相机路径巡游按采样函数逐帧驱动相机 | T-337 | v1.5 | 规划§4 |
 | core:SceneRuntime.showPage | T-307 给覆盖层三方法做双实现与契约套件时接上 | T-307 | v1.5 | 规划§4 |

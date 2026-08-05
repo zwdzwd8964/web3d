@@ -1,4 +1,5 @@
 import type { Light, SceneDocument } from '@w3/schema'
+import { explodeOffsets } from '@w3/schema'
 import { HIGHLIGHT_PRESETS } from '../highlight-presets.js'
 
 import { AbortError, neverEnds } from './types.js'
@@ -141,6 +142,8 @@ export class HeadlessRuntime implements RuntimeContext {
   /** v0.5 · which clips are playing, and with what. No decoder, and none needed (D19). */
   private playingMedia = new Map<string, { loop: boolean; volume: number }>()
   private highlights = new Map<string, string>()
+  /** T-245 · 每个爆炸分组此刻的系数。与 SceneRuntime 一样是瞬态，不进文档（D29）。 */
+  private explodeFactors = new Map<string, number>()
   private panels = new Set<string>()
   private playing = new Map<string, { cancel: () => void; loop: boolean }>()
   private animationTime = new Map<string, number>()
@@ -179,6 +182,53 @@ export class HeadlessRuntime implements RuntimeContext {
 
   get openPanels(): string[] {
     return [...this.panels]
+  }
+
+  /** T-245 · 见 `RuntimeContext.explodeOf`。 */
+  explodeOf(groupNodeId: string): number {
+    return this.explodeFactors.get(groupNodeId) ?? 0
+  }
+
+  /**
+   * T-245 · 与 SceneRuntime 同一份语义，只是没有场景图。
+   *
+   * 过渡走 `clock.schedule`（铁律 6：ECA 里不许有真实时间），中断冻结在当前系数并
+   * reject `AbortError`——与真运行时逐字一致，这正是契约套件要比的东西。
+   */
+  async setExplode(
+    groupNodeId: string,
+    factor: number,
+    options: { durationS?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const node = this.doc.nodes.find((n) => n.id === groupNodeId)
+    if (!node || node.explode === null) {
+      this.log('error', `爆炸目标「${groupNodeId}」不是爆炸分组，已跳过`)
+      return
+    }
+    if (options.signal?.aborted) throw new AbortError()
+
+    const durationMs = Math.max(0, options.durationS ?? 0) * 1000
+    if (durationMs === 0) {
+      this.explodeFactors.set(groupNodeId, factor)
+      return
+    }
+
+    const from = this.explodeOf(groupNodeId)
+    const entry = this.clock.schedule(durationMs, () => {
+      // 中断冻结在当前系数：按已走过的时间比例插值，与真运行时的 ease 采样同形。
+      // **不回零**——回零在用户眼里是一次闪回，读起来像 bug 而不像「停下了」。
+      const elapsed = Math.min(1, Math.max(0, (this.clock.now() - startedAt) / durationMs))
+      this.explodeFactors.set(groupNodeId, from + (factor - from) * elapsed)
+    })
+    const startedAt = this.clock.now()
+    const onAbort = () => entry.cancel()
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+    try {
+      await entry.promise
+      this.explodeFactors.set(groupNodeId, factor)
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort)
+    }
   }
 
   highlightOf(nodeId: string): string | null {
@@ -356,11 +406,28 @@ export class HeadlessRuntime implements RuntimeContext {
       case 'materialId':
         return this.materials.get(nodeId) ?? node.overrides.materialId ?? ''
       case 'positionY':
-        return node.transform.p[1]
+        // T-245 · **加上爆炸偏移**。SceneRuntime 读的是活的 `object.position.y`，
+        // 静止时两者相等、动过就分叉；爆炸视图大规模移动 transform，正好把这条踩响。
+        // ⚠ 补间那一半仍然分叉（headless 没有补间采样值），登记在 IMPL_NOTES §3。
+        return node.transform.p[1] + this.explodeShiftY(node)
       default:
         this.log('warn', `未知的对象属性 ${key}`)
         return 0
     }
+  }
+
+  /**
+   * 这个节点此刻被它所属分组的爆炸推了多少（Y 分量）。
+   *
+   * 位移由 `explodeOffsets` 算——**与 SceneRuntime 共用同一份纯函数**，这是两侧
+   * positionY 能逐位相等的唯一原因。各自实现一份的话，差的是浮点误差，而症状是
+   * parity 在第三位小数上红。
+   */
+  private explodeShiftY(node: { id: string; parent: string | null }): number {
+    if (node.parent === null) return 0
+    const factor = this.explodeOf(node.parent)
+    if (factor === 0) return 0
+    return (explodeOffsets(this.doc, node.parent).get(node.id)?.[1] ?? 0) * factor
   }
 
   resetScene(): void {
@@ -378,6 +445,8 @@ export class HeadlessRuntime implements RuntimeContext {
     // through MediaBus, and the contract test is what caught them disagreeing.
     this.playingMedia.clear()
     this.highlights.clear()
+    // T-245 · B13：退出预览把爆炸也收回去。少了这一行，positionY 在 reset 之后仍带着偏移。
+    this.explodeFactors.clear()
     this.panels.clear()
     this.animationTime.clear()
     this.currentViewpoint = null

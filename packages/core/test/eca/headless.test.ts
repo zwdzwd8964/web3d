@@ -20,6 +20,8 @@ describe('HeadlessRuntime', () => {
       },
       lightOf: (nodeId) => ctx.lightOf(nodeId),
       events: () => seen,
+      explodeOf: (groupNodeId) => ctx.explodeOf(groupNodeId),
+      logs: () => ctx.logs,
     }
   })
 })

@@ -115,6 +115,19 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 
 ---
 
+### T-245 · `getNodeProp('positionY')` 两侧仍有一半分叉
+
+两个运行时读的不是同一个东西：`SceneRuntime` 读活的 `object.position.y`，
+`HeadlessRuntime` 读 `node.transform.p[1]`。静止时相等、动过就分叉。
+
+T-245 **只补了爆炸这一半**（headless 的 positionY 现在加上 `explodeOffsets × factor`，
+与真运行时共用同一份纯函数，所以逐位相等）。补的理由是爆炸视图大规模移动 transform，
+这条分叉会天天踩响。
+
+**补间那一半照旧分叉**：headless 没有补间采样值，一条 tween 播到一半时两侧的 positionY
+不同。而 parity 脚本里**也没有**「tween 之后读 positionY」的步骤，所以今天没有任何机械
+证据会红。等 T-294 把那个步骤加进 parity 输入之后再补。
+
 ### T-243 · 「启用中的剖切面」两处判据不同（[ADR-0039](adr/0039-剖切面的启用判定用世界可见性.md)）
 
 `integrity.ts` 的 I25 用节点**自身**的 `visible` 数「启用中」的剖切面；运行时
