@@ -54,6 +54,8 @@ function stubRenderer(): { renderer: RendererLike; probes: string[] } {
     shadowMap: { enabled: false, type: 0 },
     toneMapping: 0,
     toneMappingExposure: 1,
+    // T-236 · OutputPass.js:97 是唯一读者
+    outputColorSpace: 'srgb',
     setRenderTarget: () => {},
     domElement: { clientWidth: 800, clientHeight: 600 } as HTMLCanvasElement,
     dispose: () => {},

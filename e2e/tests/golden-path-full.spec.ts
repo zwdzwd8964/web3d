@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { colourBuckets } from './pixel-stats.js'
 import type { Page } from '@playwright/test'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -79,23 +80,6 @@ async function renderedMaterial(page: Page, nodeId: string): Promise<{ roughness
 }
 
 /** Distinct colour buckets on the canvas. Three means "background and grid only". */
-async function colourBuckets(page: Page, selector = 'canvas'): Promise<number> {
-  return page.evaluate((sel) => {
-    const canvas = document.querySelector(sel) as HTMLCanvasElement | null
-    if (!canvas) return -1
-    const scratch = document.createElement('canvas')
-    scratch.width = canvas.width
-    scratch.height = canvas.height
-    const ctx = scratch.getContext('2d')!
-    ctx.drawImage(canvas, 0, 0)
-    const { data } = ctx.getImageData(0, 0, scratch.width, scratch.height)
-    const buckets = new Set<string>()
-    for (let i = 0; i < data.length; i += 4 * 37) {
-      buckets.add(`${data[i]! >> 4},${data[i + 1]! >> 4},${data[i + 2]! >> 4}`)
-    }
-    return buckets.size
-  }, selector)
-}
 
 test.beforeEach(async ({ page }) => {
   await resetStorage(page, 'w3-e2e-full-cleaned')

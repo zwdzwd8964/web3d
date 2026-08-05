@@ -1693,8 +1693,8 @@
   改引擎渲染管线 = 分诊 Q4 + **ADR-0021**（撤销 D20，并逐项回答 R07 三条腿）。
   **所有规划文档都没点破这一条**：「v1 接 OutlineEffect schema 不变」为真，但不代表改动小。
 
-### [ ] T-236 · 后处理链的色调映射与色彩空间回归
-- **依赖** T-235 · **预估** 0.6d · **实际** —
+### [x] T-236 · 后处理链的色调映射与色彩空间回归
+- **依赖** T-235 · **预估** 0.6d · **实际** 0.8d
 - **独占** `packages/core/test/runtime/tone-mapping-regression.test.ts`(新) ·
   `e2e/tests/postfx-tone.spec.ts`(新) · `packages/core/src/runtime/render-pipeline.ts`（仅 `OutputPass` 配置段）
 - **做** three 渲染到 RenderTarget 时会**关掉 toneMapping 并退回线性色彩空间**——接上 EffectComposer

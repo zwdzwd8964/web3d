@@ -72,6 +72,8 @@ function makeStub(): {
     shadowMap: { enabled: false, type: 0 },
     toneMapping: 0,
     toneMappingExposure: 1,
+    // T-236 · OutputPass.js:97 是唯一读者
+    outputColorSpace: 'srgb',
     setRenderTarget: () => {},
     domElement: fakeCanvas(),
     dispose: () => {

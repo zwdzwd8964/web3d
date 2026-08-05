@@ -7,6 +7,7 @@ import {
   NoToneMapping,
   PMREMGenerator,
   RGBAFormat,
+  SRGBColorSpace,
 } from 'three'
 import type { Scene, Texture, WebGLRenderer } from 'three'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
@@ -155,6 +156,13 @@ export class EnvironmentController {
     if (!renderer) return
     renderer.toneMapping = env.hdriAssetId === null ? NoToneMapping : ACESFilmicToneMapping
     renderer.toneMappingExposure = env.exposure
+    // T-236 · **把「输出是 sRGB」这个假设写出来，而不是靠 three 的默认值。**
+    //
+    // 今天它与 three 的默认一致，所以这一行是个 no-op——但整条后处理链都建立在它之上：
+    // `OutputPass` 读它来决定要不要做线性→sRGB 转换（OutputPass.js:97）。three 改过一次
+    // 这个 API 的名字与语义（`outputEncoding` → `outputColorSpace`），而那种变化的症状是
+    // 画面整体偏灰、没有任何报错。假设写出来，下一次升级时它至少会以类型错误的形式出现。
+    renderer.outputColorSpace = SRGBColorSpace
   }
 
   /**

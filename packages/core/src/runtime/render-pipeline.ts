@@ -1,5 +1,9 @@
 import type { SceneDocument } from '@w3/schema'
-import type { Camera, Scene } from 'three'
+import { HalfFloatType, UnsignedByteType, WebGLRenderTarget } from 'three'
+import type { Camera, Scene, WebGLRenderer } from 'three'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import type { RendererLike } from './renderer-like.js'
 
 /**
@@ -63,6 +67,17 @@ export class RenderPipeline {
   }
 
   /**
+   * 当前的 pass 链，直连时为空。
+   *
+   * 暴露它是为了让「`OutputPass` 固定在链尾」这件事可断言。**链尾不是风格问题**：
+   * `OutputPass` 负责把线性空间的结果做色调映射并转回 sRGB，排在它后面的 pass 拿到的
+   * 是已经转换过的颜色，再处理一次就是二次转换——画面整体偏灰，而所有单测全绿。
+   */
+  get passes(): readonly unknown[] {
+    return this.composer?.passes ?? []
+  }
+
+  /**
    * 按文档建 / 拆 composer。可以反复调用，只在需要变时动作。
    *
    * @param doc 当前文档
@@ -115,4 +130,46 @@ export class RenderPipeline {
     this.composer?.dispose()
     this.composer = null
   }
+}
+
+/**
+ * 默认工厂：一条 `RenderPass → OutputPass` 的最小链。
+ *
+ * ## 两个 target 的 samples 必须分别设
+ *
+ * `rt1` 建成 `samples: 4`（MSAA），而 **`rt2` 必须显式设回 0**。
+ * `EffectComposer` 用 `rt1.clone()` 造 `rt2`，而 `WebGLRenderTarget.copy()` 会把
+ * `samples` 一起复制过去——于是两个多重采样目标之间的每一次 `swapBuffers` 都要做一次
+ * resolve，白白多一遍带宽。只在 `rt1` 上开 MSAA、`rt2` 当普通中转，是 three 自己
+ * 示例里的做法。
+ *
+ * ## 浮点缓冲不是必需品
+ *
+ * `HalfFloatType` 让色调映射前的中间结果保住高光细节。`EXT_color_buffer_float` 缺失时
+ * 降级成 `UnsignedByteType` 并**说一声**——不降级会让 composer 在建 target 那一步就抛，
+ * 用户看到的是黑屏；静默降级则会让「为什么这台机器上高光是灰的」永远查不出来。
+ */
+export function createDefaultComposer(ctx: ComposerContext, log?: RenderPipelineOptions['log']): ComposerLike {
+  const renderer = ctx.renderer as unknown as WebGLRenderer
+  const float = ctx.renderer.extensions.has('EXT_color_buffer_float')
+  if (!float) {
+    log?.('warn', '当前显卡不支持浮点帧缓冲（EXT_color_buffer_float），描边通道已降级为 8 位精度，高光细节会有损失')
+  }
+
+  const width = Math.max(1, Math.round(ctx.width * ctx.pixelRatio))
+  const height = Math.max(1, Math.round(ctx.height * ctx.pixelRatio))
+  const target = new WebGLRenderTarget(width, height, {
+    type: float ? HalfFloatType : UnsignedByteType,
+    samples: 4,
+  })
+
+  const composer = new EffectComposer(renderer, target)
+  // **显式设回 0。** rt2 是 rt1 的 clone，而 copy() 把 samples 一起带过来了。
+  composer.renderTarget2.samples = 0
+
+  composer.addPass(new RenderPass(ctx.scene, ctx.camera))
+  // 固定链尾。加新 pass 的人必须插在它之前 —— 见 `passes` 那段注释。
+  composer.addPass(new OutputPass())
+
+  return composer as unknown as ComposerLike
 }

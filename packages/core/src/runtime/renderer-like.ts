@@ -72,6 +72,19 @@ export interface RendererLike {
    */
   toneMapping: number
   toneMappingExposure: number
+  /**
+   * 输出色彩空间。**`OutputPass` 是唯一的读者**（`OutputPass.js:97`）。
+   *
+   * 加这一条是被 T-236 逼出来的，而「加成员是决定不是形式」这句话在本文件顶上：
+   * 它意味着仓库里每一个手写的渲染器桩都要能伪造它。之所以还是加，是因为没有它
+   * 「后处理链有没有把色彩空间还原回 sRGB」这件事**在 Node 里根本测不了**——
+   * 而那正是 v0.5 那次 `toneMapping` 假绿（M8）会以另一种形式重演的地方：
+   * 画面整体偏亮/偏灰，所有单测全绿。
+   *
+   * 类型写成 `string` 而不是 three 的 `ColorSpace`：桩不必 import three 的枚举，
+   * 而生产侧赋值仍然零 cast。
+   */
+  outputColorSpace: string
   setRenderTarget(renderTarget: WebGLRenderTarget | WebGLRenderTarget<Texture[]> | null): void
   readonly domElement: HTMLCanvasElement
   dispose(): void

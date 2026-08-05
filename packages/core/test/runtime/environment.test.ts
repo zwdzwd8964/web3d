@@ -377,6 +377,8 @@ describe('SceneRuntime wires the environment up (T-183)', () => {
       shadowMap: { enabled: false, type: -1 },
       toneMapping: NoToneMapping,
       toneMappingExposure: 1,
+      // T-236 · OutputPass.js:97 是唯一读者
+      outputColorSpace: 'srgb',
       render: () => undefined,
       setSize: () => undefined,
       setPixelRatio: () => undefined,

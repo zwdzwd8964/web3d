@@ -48,6 +48,8 @@ function recordingRenderer(): RendererLike & { ratios: number[]; sizes: [number,
     shadowMap: { enabled: false, type: 0 },
     toneMapping: 0,
     toneMappingExposure: 1,
+    // T-236 · OutputPass.js:97 是唯一读者
+    outputColorSpace: 'srgb',
     setRenderTarget: () => {},
     domElement: canvas,
     dispose: () => {},
