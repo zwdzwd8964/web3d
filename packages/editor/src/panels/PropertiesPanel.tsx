@@ -2,7 +2,15 @@ import type { Explode, Node, Vec3 } from '@w3/schema'
 import { EASINGS, EXPLODE_MODES, EXPLODE_MODE_LABELS } from '@w3/schema'
 import { fromEulerDegrees, toEulerDegrees } from '@w3/core'
 import { useEffect, useMemo, useState } from 'react'
-import { clearExplodeGroup, makeExplodeGroup, setExplodeAxis, setExplodeParams } from '../lib/explode-edit.js'
+import {
+  clearExplodeGroup,
+  clearExplodeOffset,
+  makeExplodeGroup,
+  recordExplodeOffset,
+  setExplodeAxis,
+  setExplodeParams,
+} from '../lib/explode-edit.js'
+import { getActiveRuntime } from '../viewport/runtime-registry.js'
 import { getExplodeTool, onExplodeToolChange } from '../viewport/explode-tool.js'
 import { MIXED, commonValue, commonVectorComponents, isMixed } from '../lib/selection-values.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
@@ -40,6 +48,43 @@ export function PropertiesPanel() {
   const [explodeTool, setExplodeToolLocal] = useState(getExplodeTool)
   useEffect(() => onExplodeToolChange(setExplodeToolLocal), [])
   const transformLocked = explodeTool.groupNodeId !== null
+
+  /**
+   * T-249 · 这个零件属于哪个爆炸分组。null = 偏移分区不出现。
+   *
+   * **分区在「父节点是爆炸分组」时就出现**，不等工具态打开：让用户看得见这个能力存在、
+   * 并读到为什么现在用不了，比一个凭空出现又消失的分区好。I24 正是「有 explodeOffset
+   * 而父节点不是爆炸分组」那条 info，所以这里的判据与它对齐。
+   */
+  const singleParent = selected.length === 1 ? selected[0]!.parent : null
+  const offsetGroupId =
+    singleParent !== null && nodes.some((n) => n.id === singleParent && n.explode !== null) ? singleParent : null
+
+  /**
+   * 能不能记录。三个条件缺一不可：
+   *
+   *  ① 分区在（父节点是爆炸分组）；
+   *  ② **正在预览的就是这一组**——在 A 组的预览下点开 B 组的零件，观测位移是 0
+   *     （B 组没被炸开），记下去就是一条把该件钉死在原位的偏移，而用户以为自己什么都没做；
+   *  ③ ⚠ **`factor > 0`**——换算是 `观测位移 / factor`，0 会得到 Infinity 或 NaN，
+   *     而 NaN 沿 transform 传下去的表现是整个分组从画面消失且不报错。
+   */
+  const previewingThisGroup = offsetGroupId !== null && explodeTool.groupNodeId === offsetGroupId
+  const canRecordOffset = previewingThisGroup && explodeTool.factor > 0
+
+  /**
+   * 这个零件此刻被推离原位多远。**读渲染器，不读文档**——爆炸位移按 D29 从不写文档。
+   */
+  const observedOffsetOf = (nodeId: string): Vec3 | null => {
+    const object = getActiveRuntime()?.graph.objectFor(nodeId)
+    const node = nodes.find((n) => n.id === nodeId)
+    if (!object || !node) return null
+    return [
+      object.position.x - node.transform.p[0]!,
+      object.position.y - node.transform.p[1]!,
+      object.position.z - node.transform.p[2]!,
+    ]
+  }
 
   const position = useMemo(() => commonVectorComponents(selected, (n) => n.transform.p), [selected])
   const scale = useMemo(() => commonVectorComponents(selected, (n) => n.transform.s), [selected])
@@ -218,6 +263,43 @@ export function PropertiesPanel() {
                 onPreviewEnd={previewCommit}
                 onClear={() => commit('取消爆炸分组', (d) => clearExplodeGroup(d, single.id))}
               />
+            )}
+          </section>
+        )}
+
+        {/* T-249 · 单零件的爆炸偏移。**只在这个零件的父节点是爆炸分组时出现**——
+            I24 正是「有 explodeOffset 而父节点不是爆炸分组」那条 info。 */}
+        {single && offsetGroupId !== null && (
+          <section className="subpanel" data-testid="explode-offset-section">
+            <div className="subpanel__head">爆炸偏移</div>
+            <button
+              type="button"
+              className="tbtn"
+              data-testid="explode-offset-record"
+              disabled={!canRecordOffset}
+              onClick={() => {
+                const observed = observedOffsetOf(single.id)
+                if (!observed) return
+                commit('记录爆炸偏移', (d) => recordExplodeOffset(d, single.id, observed, explodeTool.factor))
+              }}
+            >
+              记录当前偏移
+            </button>
+            <button
+              type="button"
+              className="tbtn"
+              data-testid="explode-offset-clear"
+              disabled={single.explodeOffset === null}
+              onClick={() => commit('清除爆炸偏移', (d) => clearExplodeOffset(d, single.id))}
+            >
+              清除
+            </button>
+            {!canRecordOffset && (
+              <div className="hint" data-testid="explode-offset-hint">
+                {!previewingThisGroup
+                  ? '先在视口工具条上开启这一组的爆炸预览，再把零件拖到想要的位置'
+                  : '把爆炸系数拉离 0 之后才能记录——系数为 0 时零件都在原位，没有偏移可记'}
+              </div>
             )}
           </section>
         )}

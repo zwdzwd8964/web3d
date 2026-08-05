@@ -58,3 +58,35 @@ export function setExplodeAxis(draft: SceneDocument, nodeId: string, axis: 0 | 1
   next[axis] = value
   node.explode = { ...node.explode, axis: next }
 }
+
+/* --- 单零件偏移（T-249）--------------------------------------------------- */
+
+/**
+ * 记录一个零件此刻的爆炸位置。
+ *
+ * **存的是 `factor === 1` 时的位移**，所以要把观测到的位移除以当前系数——`explodeOffsets`
+ * 的 JSDoc 逐字写着它返回的是 factor=1 的位移，运行时再逐帧乘上系数（D29）。
+ * 不除的话，在 factor=0.5 时记录、再拉到 1，零件会落在观测位置的两倍处。
+ *
+ * ⚠ **调用方必须保证 `factor > 0`。** 0 会得到 `x/0 = Infinity`（或 `0/0 = NaN`），而 NaN
+ * 沿 transform 一路传下去的表现是**整个分组从画面上消失，没有报错也没有日志**——
+ * `explode-math.ts` 的 `normalizeAxis` 注释里已经把这个形状写下来过一次。面板据此把
+ * 按钮在 `factor === 0` 时禁用，这里再兜一次底。
+ */
+export function recordExplodeOffset(
+  draft: SceneDocument,
+  nodeId: string,
+  observed: Vec3,
+  factor: number,
+): void {
+  const node = nodeOf(draft, nodeId)
+  if (!node || !Number.isFinite(factor) || factor <= 0) return
+  node.explodeOffset = [observed[0] / factor, observed[1] / factor, observed[2] / factor]
+}
+
+/** 清除一个零件的偏移，回到派生值。 */
+export function clearExplodeOffset(draft: SceneDocument, nodeId: string): void {
+  const node = nodeOf(draft, nodeId)
+  if (!node) return
+  node.explodeOffset = null
+}
