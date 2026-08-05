@@ -11,6 +11,7 @@ import { HotspotPanel } from './panels/HotspotPanel.js'
 import { IssuePanel } from './panels/IssuePanel.js'
 import { LibraryPanel } from './panels/LibraryPanel.js'
 import { LightPanel } from './panels/LightPanel.js'
+import { SceneEffectsPanel } from './panels/SceneEffectsPanel.js'
 import { MaterialPanel } from './panels/MaterialPanel.js'
 import { MediaPanel } from './panels/MediaPanel.js'
 import { PropertiesPanel } from './panels/PropertiesPanel.js'
@@ -37,6 +38,7 @@ type BottomTab =
   | 'library'
   | 'assets'
   | 'light'
+  | 'effects'
   | 'material'
   | 'media'
   | 'animation'
@@ -182,6 +184,8 @@ function BottomDock() {
               ['assets', '资产'],
               ['material', '材质'],
               ['light', '灯光'],
+              // T-239 · 场景效果（雾）。描边段由 T-241 补进同一个面板
+              ['effects', '场景效果'],
               ['media', '媒体'],
               ['animation', '动画'],
               ['viewpoint', '视点'],
@@ -208,6 +212,7 @@ function BottomDock() {
         {tab === 'assets' && <AssetPanel />}
         {tab === 'material' && <MaterialPanel />}
         {tab === 'light' && <LightPanel />}
+        {tab === 'effects' && <SceneEffectsPanel />}
         {tab === 'media' && <MediaPanel />}
         {tab === 'animation' && <AnimationPanel />}
         {tab === 'viewpoint' && <ViewpointPanel />}

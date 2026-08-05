@@ -1,4 +1,5 @@
 import type { SceneDocument } from '@w3/schema'
+import { DEFAULT_FOG } from '@w3/schema'
 import {
   ACESFilmicToneMapping,
   Color,
@@ -8,8 +9,13 @@ import {
   PMREMGenerator,
   RGBAFormat,
   SRGBColorSpace,
+  // `ThreeFog` 的别名是必须的：`@w3/schema` 也导出一个 `Fog`（文档字段的类型）。
+  // 同名 import 会静默串味——一个是 three 的对象，一个是文档里的六个数字。
+  Fog as ThreeFog,
+  FogExp2,
 } from 'three'
-import type { Scene, Texture, WebGLRenderer } from 'three'
+import type { Mesh, Object3D, Scene, Texture, WebGLRenderer } from 'three'
+import type { Bounds } from './primitive-factory.js'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import type { LogLevel } from '../eca/types.js'
 
@@ -152,6 +158,13 @@ export class EnvironmentController {
             map
           : new Color(doc.meta.background.color)
 
+    // T-239 · **写在 `if (!renderer) return` 之前。**
+    //
+    // 雾是场景的属性不是渲染器的，而这条早退是给「没有画布」的路径准备的——headless
+    // 运行时、parity、单测全走那条。写在早退之后，雾在那些路径上永远是 null，而
+    // parity 恰好是「编辑器预览与播放器一致」的唯一机器证明。
+    this.applyFog(doc)
+
     const renderer = this.targets.renderer()
     if (!renderer) return
     renderer.toneMapping = env.hdriAssetId === null ? NoToneMapping : ACESFilmicToneMapping
@@ -163,6 +176,23 @@ export class EnvironmentController {
     // 这个 API 的名字与语义（`outputEncoding` → `outputColorSpace`），而那种变化的症状是
     // 画面整体偏灰、没有任何报错。假设写出来，下一次升级时它至少会以类型错误的形式出现。
     renderer.outputColorSpace = SRGBColorSpace
+  }
+
+  /**
+   * 把文档里的雾写进 `scene.fog`。
+   *
+   * `enabled: false` 时**写 null**，不是留着上一次的对象——关掉雾之后画面还带着雾，
+   * 而文档里那个开关明明是关的，这是最难自查的一类不一致。
+   */
+  private applyFog(doc: SceneDocument): void {
+    const fog = doc.meta.fog
+    if (!fog.enabled) {
+      this.targets.scene.fog = null
+      return
+    }
+    const colour = new Color(fog.color).getHex()
+    this.targets.scene.fog =
+      fog.type === 'linear' ? new ThreeFog(colour, fog.near, fog.far) : new FogExp2(colour, fog.density)
   }
 
   /**
@@ -252,4 +282,48 @@ export class EnvironmentController {
     this.loadedAssetId = null
     this.disposedCount++
   }
+}
+
+/**
+ * 按场景包围盒估一组 linear 雾的 near / far。
+ *
+ * **两个系数是拍的，不是测的**（与 `fog.ts` 对 10/100 的处置同一口径）：near 取对角线的
+ * 一半——比这更近会让选中的零件自己就开始发灰；far 取 2.5 倍——比这更远雾就看不出来，
+ * 用户会以为开关没生效。
+ *
+ * 包围盒退化（一个点）时返回 `DEFAULT_FOG` 的 10 / 100 而不是 0 / 0：后者会让
+ * `near >= far`（I16 报 error），而「场景里只有一个点」不该让文档变得发布不了。
+ *
+ * @param bounds 场景包围盒
+ * @returns 一组可直接写进 `meta.fog` 的 near / far
+ */
+export function suggestFogRange(bounds: Bounds): { near: number; far: number } {
+  const dx = bounds.max[0] - bounds.min[0]
+  const dy = bounds.max[1] - bounds.min[1]
+  const dz = bounds.max[2] - bounds.min[2]
+  const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  if (!Number.isFinite(diagonal) || diagonal < 1e-6) return { near: DEFAULT_FOG.near, far: DEFAULT_FOG.far }
+  return { near: diagonal * 0.5, far: diagonal * 2.5 }
+}
+
+/**
+ * 让一棵子树不吃雾。
+ *
+ * 编辑期的辅助物（网格、灯光线框、变换手柄、拾取代理球）是**工具**不是场景内容——
+ * 它们随距离褪成雾色，用户会以为自己的模型出问题了。而真正致命的是网格：它铺满整个
+ * 地面，开雾之后远端整片糊掉，看起来像渲染坏了。
+ *
+ * `needsUpdate` 是必要的：注册可能发生在运行中（新建一盏灯），那时材质已经编译过，
+ * 只改 JS 字段不会让 shader 重编。
+ */
+export function disableFogOn(root: Object3D): void {
+  root.traverse((object) => {
+    const material = (object as Mesh).material
+    if (!material) return
+    for (const one of Array.isArray(material) ? material : [material]) {
+      if (!('fog' in one)) continue
+      one.fog = false
+      one.needsUpdate = true
+    }
+  })
 }

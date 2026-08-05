@@ -1758,8 +1758,8 @@
   ③ `explodeOffset ?? 派生` 改成永远用派生 → 覆盖那条红；
   ④ 删零向量兜底 → 轴为零那条红（而不是 NaN 悄悄传下去）。
 
-### [ ] T-239 · 雾：core 写入 + 场景效果面板（雾段）+ chrome 不吃雾
-- **依赖** T-225 · T-235 · **预估** 1.5d · **实际** —
+### [x] T-239 · 雾：core 写入 + 场景效果面板（雾段）+ chrome 不吃雾
+- **依赖** T-225 · T-235 · **预估** 1.5d · **实际** 1.4d
 - **独占** `packages/core/src/runtime/environment.ts` ·
   `packages/editor/src/panels/SceneEffectsPanel.tsx`(新，雾段——**改名自 `ScenePanel.tsx`，
   避开 v1.5 多场景列表面板的同名撞车，X-44**) · `packages/editor/src/lib/effects-edit.ts`(新) ·

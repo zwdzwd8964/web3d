@@ -1,9 +1,9 @@
 import type { Asset, SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument } from '@w3/schema'
-import { ACESFilmicToneMapping, Color, DataTexture, EquirectangularReflectionMapping, NoToneMapping, Scene } from 'three'
+import { ACESFilmicToneMapping, BoxGeometry, Color, DataTexture, EquirectangularReflectionMapping, Fog, FogExp2, Group, Mesh, MeshStandardMaterial, NoToneMapping, Scene } from 'three'
 import type { Texture, WebGLRenderer } from 'three'
 import { describe, expect, it } from 'vitest'
-import { EnvironmentController, parseHdr } from '../../src/runtime/environment.js'
+import { EnvironmentController, disableFogOn, parseHdr, suggestFogRange } from '../../src/runtime/environment.js'
 import type { CompiledEnvironment } from '../../src/runtime/environment.js'
 import type { LogLevel } from '../../src/eca/types.js'
 
@@ -505,5 +505,150 @@ describe('SceneRuntime wires the environment up (T-183)', () => {
 
     expect(runtime.scene.environment, '清除环境要真的清掉').toBeNull()
     runtime.dispose()
+  })
+})
+
+/* ========================================================================== */
+/* T-239 · 雾                                                                  */
+/* ========================================================================== */
+
+describe('T-239 · scene.fog 跟着文档走', () => {
+  const withFog = (over: Partial<SceneDocument['meta']['fog']>): SceneDocument => {
+    const base = createGoldenPathDocument()
+    return { ...base, meta: { ...base.meta, fog: { ...base.meta.fog, ...over } } }
+  }
+
+  /** 只建 controller 与 scene —— 不需要渲染器，那正是本组要证的事之一。 */
+  const sync = (doc: SceneDocument) => {
+    const scene = new Scene()
+    new EnvironmentController({
+      scene,
+      renderer: () => null,
+      resolve: async () => new ArrayBuffer(0),
+      log: () => {},
+    }).syncScene(doc)
+    return scene
+  }
+
+  it('linear：是 Fog，且 color / near / far 逐字段相等', () => {
+    const scene = sync(withFog({ enabled: true, type: 'linear', color: '#334455', near: 12, far: 88 }))
+    expect(scene.fog).toBeInstanceOf(Fog)
+    const fog = scene.fog as Fog
+    expect(fog.color.getHexString()).toBe('334455')
+    // **逐字段**：near/far 互换的实现在「instanceof Fog」下照样绿
+    expect(fog.near).toBe(12)
+    expect(fog.far).toBe(88)
+  })
+
+  it('exp2：是 FogExp2，且 density 相等', () => {
+    const scene = sync(withFog({ enabled: true, type: 'exp2', color: '#112233', density: 0.07 }))
+    expect(scene.fog).toBeInstanceOf(FogExp2)
+    expect((scene.fog as FogExp2).density).toBe(0.07)
+    expect((scene.fog as FogExp2).color.getHexString()).toBe('112233')
+  })
+
+  it('开 → 关往返之后回到 null，**两头都断**', () => {
+    // 只断「关着时是 null」是恒真的（默认就是 null，一行代码不写它也过）。
+    // 必须先证明它真的被设起来过。
+    const scene = new Scene()
+    const controller = new EnvironmentController({
+      scene,
+      renderer: () => null,
+      resolve: async () => new ArrayBuffer(0),
+      log: () => {},
+    })
+
+    controller.syncScene(withFog({ enabled: true, type: 'linear' }))
+    expect(scene.fog, '先得真的开起来，否则下面那条是恒真的').not.toBeNull()
+
+    controller.syncScene(withFog({ enabled: false }))
+    expect(scene.fog, '关掉之后画面还带着雾，而文档里开关是关的').toBeNull()
+  })
+
+  it('切 linear ↔ exp2 时换的是对象，不是改字段', () => {
+    const scene = new Scene()
+    const controller = new EnvironmentController({
+      scene,
+      renderer: () => null,
+      resolve: async () => new ArrayBuffer(0),
+      log: () => {},
+    })
+    controller.syncScene(withFog({ enabled: true, type: 'linear' }))
+    controller.syncScene(withFog({ enabled: true, type: 'exp2' }))
+    expect(scene.fog).toBeInstanceOf(FogExp2)
+    controller.syncScene(withFog({ enabled: true, type: 'linear' }))
+    expect(scene.fog).toBeInstanceOf(Fog)
+  })
+
+  it('没有渲染器时雾照样写进去 —— headless / parity 走的正是那条路', () => {
+    // applyFog 写在 `if (!renderer) return` **之前**。写在之后，parity（编辑器预览 vs
+    // 播放器的唯一机器证明）看到的两边都是「没有雾」，于是它对雾完全失明。
+    expect(sync(withFog({ enabled: true, type: 'linear' })).fog).not.toBeNull()
+  })
+})
+
+describe('T-239 · suggestFogRange', () => {
+  it('near 是对角线的一半，far 是 2.5 倍', () => {
+    // 一个 3-4-5 的盒子，对角线恰好 5√2… 用 3/4/0 让对角线是 5
+    const { near, far } = suggestFogRange({ min: [0, 0, 0], max: [3, 4, 0] })
+    expect(near).toBeCloseTo(2.5, 6)
+    expect(far).toBeCloseTo(12.5, 6)
+  })
+
+  it('near 永远小于 far —— 否则 I16 直接判 error', () => {
+    for (const size of [0.001, 1, 1000, 1e6]) {
+      const { near, far } = suggestFogRange({ min: [0, 0, 0], max: [size, size, size] })
+      expect(near, `size=${size}`).toBeLessThan(far)
+    }
+  })
+
+  it('退化的包围盒回落到默认 10 / 100，不是 0 / 0', () => {
+    // 0/0 会让 near >= far（I16 报 error）——「场景里只有一个点」不该让文档发布不了
+    expect(suggestFogRange({ min: [1, 2, 3], max: [1, 2, 3] })).toEqual({ near: 10, far: 100 })
+  })
+})
+
+describe('T-239 · 编辑期辅助物不吃雾', () => {
+  const meshWithMaterial = (name: string) => {
+    const mesh = new Mesh(new BoxGeometry(), new MeshStandardMaterial())
+    mesh.name = name
+    return mesh
+  }
+
+  it('disableFogOn 遍历整棵子树，不只是根', () => {
+    const root = new Group()
+    const child = meshWithMaterial('child')
+    const grandchild = meshWithMaterial('grandchild')
+    child.add(grandchild)
+    root.add(child)
+
+    // 前提：默认是吃雾的。没有这一条，下面那条对「材质本来就 fog=false」也成立
+    expect((child.material as MeshStandardMaterial).fog).toBe(true)
+
+    disableFogOn(root)
+    expect((child.material as MeshStandardMaterial).fog).toBe(false)
+    expect((grandchild.material as MeshStandardMaterial).fog, '孙子节点也要').toBe(false)
+  })
+
+  it('多材质数组每一份都改到', () => {
+    const mesh = new Mesh(new BoxGeometry(), [new MeshStandardMaterial(), new MeshStandardMaterial()])
+    disableFogOn(mesh)
+    for (const m of mesh.material as MeshStandardMaterial[]) expect(m.fog).toBe(false)
+  })
+
+  it('材质被标记为要重编 —— 运行中注册的材质已经编译过了', () => {
+    // **断的是 `version` 不是 `needsUpdate`。** three 的 `Material.needsUpdate` 是**只写**
+    // 的（`set needsUpdate(v) { if (v) this.version++ }`），读回来永远是 undefined。
+    // 按 `expect(...needsUpdate).toBe(true)` 写会红在一个与被测行为无关的地方，
+    // 而按 `.not.toBe(false)` 写又会对 undefined 恒真。
+    const mesh = meshWithMaterial('late')
+    const material = mesh.material as MeshStandardMaterial
+    const before = material.version
+    disableFogOn(mesh)
+    expect(material.version, '只改 JS 字段的话 shader 不重编').toBeGreaterThan(before)
+  })
+
+  it('没有材质的对象不抛', () => {
+    expect(() => disableFogOn(new Group())).not.toThrow()
   })
 })

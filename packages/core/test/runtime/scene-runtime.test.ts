@@ -2,7 +2,7 @@ import type { Light, NodeOverrides, SceneDocument } from '@w3/schema'
 import { createGoldenPathDocument, identityTransform } from '@w3/schema'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { Object3D, PCFSoftShadowMap } from 'three'
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Object3D, PCFSoftShadowMap } from 'three'
 import type { SpotLight } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionRegistry, registerBuiltinActions } from '../../src/eca/actions/index.js'
@@ -839,6 +839,101 @@ describe('T-235 · 管线接在运行时的三个点上', () => {
 
     runtime.setPostFxEnabled(null)
     expect(runtime.pipelineMode).toBe('direct')
+    runtime.dispose()
+  })
+})
+
+/* ========================================================================== */
+/* T-239 · 编辑期辅助物不吃雾 —— 遍历断言，不是写死名单                        */
+/* ========================================================================== */
+
+describe('T-239 · registerChrome 顺手关掉雾', () => {
+  const editRuntimeForFog = () =>
+    new SceneRuntime(createGoldenPathDocument(), {
+      canvas: canvas(),
+      resolver: createMemoryResolver(new Map()),
+      mode: 'edit',
+      createRenderer: () => fakeRenderer().renderer,
+      hotspotRenderer: new NullHotspotRenderer(),
+      now: () => 0,
+    })
+
+  /** 一个吃雾的网格。**先断它默认吃雾**，否则下面的断言对「本来就是 false」也成立。 */
+  const foggyMesh = () => {
+    const mesh = new Mesh(new BoxGeometry(), new MeshStandardMaterial())
+    mesh.name = 'w3:probe'
+    return mesh
+  }
+
+  it('注册进去的对象，整棵子树都不吃雾了', () => {
+    const runtime = editRuntimeForFog()
+    const root = new Group()
+    const child = foggyMesh()
+    const grandchild = foggyMesh()
+    child.add(grandchild)
+    root.add(child)
+
+    expect((child.material as MeshStandardMaterial).fog, '前提：材质默认是吃雾的').toBe(true)
+
+    runtime.registerChrome(root)
+
+    expect((child.material as MeshStandardMaterial).fog).toBe(false)
+    expect((grandchild.material as MeshStandardMaterial).fog, '孙子节点也要').toBe(false)
+    runtime.dispose()
+  })
+
+  /**
+   * **遍历断言，不是写死名单。**
+   *
+   * 卡面要求「`scene.children` 里除 `graph.root` 外每个对象材质 `fog === false`」。
+   * 那个写法今天会**恒真**：chrome 全在一个 Group 下，而那个 Group 本身没有材质，
+   * 于是「每个对象」这句话遍历到的是零个材质。
+   *
+   * 所以数据源是 `ChromeRegistry.objects`，而且**先断它非空**——一个空注册表下
+   * 「每一个都不吃雾」是恒真的，那正是 D36 的 M6 形状。
+   */
+  it('注册表里每一个对象的每一份材质都不吃雾（含前提：注册表非空）', () => {
+    const runtime = editRuntimeForFog()
+    const extra = foggyMesh()
+    runtime.registerChrome(extra)
+
+    // `grid` 与 `lightHelpers.root` 在构造时就注册了，加上这一个
+    const scene = runtime.scene
+    const chromeRoot = scene.getObjectByName('w3:chrome')
+    expect(chromeRoot, 'chrome 容器不在场景里，下面的遍历什么都查不到').toBeDefined()
+
+    let materialsSeen = 0
+    chromeRoot!.traverse((object) => {
+      const material = (object as Mesh).material
+      if (!material) return
+      for (const one of Array.isArray(material) ? material : [material]) {
+        if (!('fog' in one)) continue
+        materialsSeen++
+        expect(one.fog, `${object.name || object.type} 的材质还在吃雾`).toBe(false)
+      }
+    })
+
+    // 下限：一份材质都没遍历到时，上面那个循环里的 expect 一次都没执行
+    expect(materialsSeen, '一份材质都没查到，这条断言是空转的').toBeGreaterThan(0)
+    runtime.dispose()
+  })
+
+  it('场景图本身照常吃雾 —— 关的只是辅助物', () => {
+    // 反向：把整个场景的材质都关掉雾，用户的模型就不受雾影响了，而那是本卡要做的
+    // 事情的**反面**。
+    const runtime = editRuntimeForFog()
+    let graphMaterials = 0
+    let foggy = 0
+    runtime.graph.root.traverse((object) => {
+      const material = (object as Mesh).material
+      if (!material) return
+      for (const one of Array.isArray(material) ? material : [material]) {
+        if (!('fog' in one)) continue
+        graphMaterials++
+        if (one.fog) foggy++
+      }
+    })
+    if (graphMaterials > 0) expect(foggy, '场景图的材质被顺手关掉了雾').toBe(graphMaterials)
     runtime.dispose()
   })
 })

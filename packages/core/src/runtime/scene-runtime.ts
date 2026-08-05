@@ -5,6 +5,7 @@ import { AmbientLight, Box3, DirectionalLight, GridHelper, Object3D, PCFSoftShad
 import type { Texture, WebGLRenderer } from 'three'
 import { createWebGLRenderer } from './renderer-like.js'
 import { ChromeRegistry } from './chrome-registry.js'
+import { disableFogOn } from './environment.js'
 import { RenderPipeline } from './render-pipeline.js'
 import type { ComposerContext, PipelineMode, RenderPipelineOptions } from './render-pipeline.js'
 import type { RendererLike } from './renderer-like.js'
@@ -248,7 +249,10 @@ export class SceneRuntime implements RuntimeContext {
     this.picker.setAuxRoot(this.chrome.root)
 
     this.lightHelpers = options.mode === 'edit' ? new LightHelperLayer(this.graph) : null
-    if (this.lightHelpers) this.chrome.register(this.lightHelpers.root)
+    // **走公共入口，不走 `chrome.register`。** 那个入口顺带做 `disableFogOn`，
+    // 绕过去的后果是「内部注册的辅助物吃雾、外部注册的不吃」——而灯光线框与网格
+    // 恰恰是最显眼的两个（网格铺满地面，开雾后远端整片糊掉）。
+    if (this.lightHelpers) this.registerChrome(this.lightHelpers.root)
     this.installLighting()
     this.syncDefaultRig(document)
     this.lightHelpers?.sync(document)
@@ -265,7 +269,7 @@ export class SceneRuntime implements RuntimeContext {
       const grid = new GridHelper(24, 48, 0x242b31, 0x1c2226)
       grid.name = 'w3:grid'
       this.grid = grid
-      this.chrome.register(grid)
+      this.registerChrome(grid)
     }
   }
 
@@ -301,6 +305,12 @@ export class SceneRuntime implements RuntimeContext {
    * 漏注册的症状是预览里多出一个播放器没有的东西，而那是 C3 分叉。
    */
   registerChrome(object: Object3D): () => void {
+    // T-239 · **一个调用点，不是四个。**
+    //
+    // 卡面要在 grid / lightHelpers / gizmo / 代理球的建构点各调一次 `disableFogOn`。
+    // 四处各调一次的代价是第五个 chrome 对象加进来时没人记得调——而那正是 T-235 把
+    // 它们统一到注册表下的理由。放在这里，「编辑期辅助物不吃雾」就成了注册的一部分。
+    disableFogOn(object)
     return this.chrome.register(object)
   }
 
