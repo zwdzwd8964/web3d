@@ -276,6 +276,36 @@ export class MaterialRegistry {
     if (source && source.mesh === mesh) mesh.material = source.material
   }
 
+  /**
+   * T-256 · 只留下这些节点的克隆，其余全部释放。返回被释放的 nodeId。
+   *
+   * ## 这是一处**已实测**的泄漏，不是预防性设计
+   *
+   * 换文档时 `graph.build` 造出全新的 Object3D，而这个注册表按 **nodeId** 记账。
+   * 上一份文档的 nodeId 全都还在 `owned` 里，它们的克隆材质也还在显存里，而且
+   * `cloneCount` 会一直涨——再对新文档的节点建克隆，数字是 2 而不是 1。
+   *
+   * 形状与 `AssetLoader.retainOnly` / `TextureCache.retainOnly` 一致：**参数是「要留下的」**。
+   * 调用方手上只有新文档，它知道要留什么，不知道上一份留下了什么。
+   *
+   * ⚠ `sources` 也要一起删。留着的话，一个 nodeId 在新文档里被复用时，
+   * `revert` 会把**上一份文档某个 mesh 的材质**赋给新 mesh —— 那正是 `noteMesh` 里
+   * 那句 "assigning another mesh's material here would be a silent cross-wire" 说的事。
+   */
+  retainOnly(nodeIds: ReadonlySet<string>): string[] {
+    const released: string[] = []
+    for (const [nodeId, owned] of [...this.owned]) {
+      if (nodeIds.has(nodeId)) continue
+      this.owned.delete(nodeId)
+      owned.material.dispose()
+      released.push(nodeId)
+    }
+    for (const nodeId of [...this.sources.keys()]) {
+      if (!nodeIds.has(nodeId)) this.sources.delete(nodeId)
+    }
+    return released
+  }
+
   /** Drops every clone. Source materials belong to the asset cache, not to us. */
   dispose(): void {
     for (const { material } of this.owned.values()) material.dispose()

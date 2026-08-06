@@ -847,3 +847,97 @@ describe('sharing one texture between disagreeing slots (T-181)', () => {
     expect(cache.variantCount, '销毁要连副本一起回收').toBe(0)
   })
 })
+
+/* ========================================================================== */
+/* T-256 · retainOnly —— 一处已实测的 clone 泄漏                               */
+/* ========================================================================== */
+
+/** 同一份场景，换一整套 nodeId —— 换文档时真正会发生的事。 */
+function renamedDocument(doc: ReturnType<typeof createGoldenPathDocument>) {
+  const rename = (id: string) => `${id.slice(0, 3)}zz${id.slice(5)}`
+  return {
+    ...doc,
+    nodes: doc.nodes.map((n) => ({ ...n, id: rename(n.id), parent: n.parent === null ? null : rename(n.parent) })),
+  }
+}
+
+describe('T-256 · retainOnly', () => {
+  /** 给某个节点建一份克隆（`acquireWritable` 无条件克隆，见 R08 那一段）。 */
+  const clone = (nodeId: string) => registry.acquireWritable(nodeId, graph)
+
+  it('**留下的还在，没留下的释放掉，返回值就是被释放的那些**', () => {
+    graph.build(createGoldenPathDocument())
+    clone(IDS.body)
+    clone(IDS.cover)
+    expect(registry.cloneCount).toBe(2)
+
+    const released = registry.retainOnly(new Set([IDS.body]))
+
+    expect(registry.isCloned(IDS.body), '把要留的那份也释放了 —— 「全清」实现在这条下红').toBe(true)
+    expect(registry.isCloned(IDS.cover), '该释放的还在 —— 空实现在这条下红').toBe(false)
+    expect(released).toEqual([IDS.cover])
+    expect(registry.cloneCount).toBe(1)
+  })
+
+  it('被释放的那份材质真的 dispose 了', () => {
+    graph.build(createGoldenPathDocument())
+    const material = clone(IDS.cover)!
+    let disposed = 0
+    material.dispose = () => void disposed++
+
+    registry.retainOnly(new Set([IDS.body]))
+
+    expect(disposed).toBe(1)
+  })
+
+  it('**换文档之后再建克隆，cloneCount 是 1 不是 2**（卡面点名的那条）', () => {
+    // 泄漏的形状：注册表按 nodeId 记账，而**换文档时 nodeId 整套都变了**。上一份文档的
+    // nodeId 全都还在 `owned` 里，克隆材质也还在显存里，于是数字只增不减。
+    //
+    // ⚠ **文档 B 必须换一套 id。** 沿用同一套 id 的话 `ownedFor` 会按 nodeId 覆盖掉旧条目，
+    // 数字停在 1——那样这条测试对「不调 retainOnly」的实现同样绿，正是卡面要防的假绿。
+    const a = createGoldenPathDocument()
+    graph.build(a)
+    clone(IDS.cover)
+    expect(registry.cloneCount).toBe(1)
+
+    const b = renamedDocument(a)
+    graph.build(b)
+    registry.retainOnly(new Set(b.nodes.map((n) => n.id)))
+    clone(b.nodes.find((n) => n.assetRef !== null)!.id)
+
+    expect(registry.cloneCount, '不 retainOnly 的话这里是 2').toBe(1)
+  })
+
+  it('`sources` 也要一起删 —— 否则 revert 会把上一份文档某个 mesh 的材质赋给新 mesh', () => {
+    // `noteMesh` 里那句 "assigning another mesh's material here would be a silent
+    // cross-wire" 说的正是这件事。
+    const doc = createGoldenPathDocument()
+    graph.build(doc)
+    clone(IDS.cover)
+    const oldMesh = graph.objectFor(IDS.cover) as Mesh
+
+    registry.retainOnly(new Set())
+    graph.build(doc)
+    const newMesh = graph.objectFor(IDS.cover) as Mesh
+    expect(newMesh, '前提：重建换了对象').not.toBe(oldMesh)
+    const beforeRevert = newMesh.material
+
+    // 对新 mesh 撤销覆盖：`sources` 已清，不该有任何东西被赋回去
+    registry.applyToNode(IDS.cover, null, defsOf(doc.materials), graph)
+
+    expect(newMesh.material, '把上一份文档的材质赋给了新 mesh').toBe(beforeRevert)
+  })
+
+  it('空集合 = 全清；全留 = 什么都不动', () => {
+    graph.build(createGoldenPathDocument())
+    clone(IDS.body)
+    clone(IDS.cover)
+
+    expect(registry.retainOnly(new Set([IDS.body, IDS.cover]))).toEqual([])
+    expect(registry.cloneCount).toBe(2)
+
+    expect([...registry.retainOnly(new Set())].sort()).toEqual([IDS.body, IDS.cover].sort())
+    expect(registry.cloneCount).toBe(0)
+  })
+})

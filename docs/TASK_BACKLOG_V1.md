@@ -2050,8 +2050,8 @@
   （**不许用 `.first()` 或 `not.toBeNull()`**，v0.5 T-115 与 E18 各栽过一次）；
   ② 预览播放的 `runtime.playAnimation` 改成空操作 → 「对象动起来」红。
 
-### [ ] T-255 · `AssetLoader.retainOnly`
-- **依赖** 无 · **预估** 0.8d · **实际** —
+### [x] T-255 · `AssetLoader.retainOnly`
+- **依赖** 无 · **预估** 0.8d · **实际** 0.7d
 - **独占** `packages/core/src/runtime/loader.ts` · `packages/core/test/runtime/loader.test.ts`
 - **做** 换文档时贴图会被淘汰（`TextureCache.retainOnly`），模型不会（`AssetLoader` 只增不减），
   且 `AssetLoader.evict()` **零调用点**——同一个 runtime 的两条资产链行为相反。
@@ -2062,8 +2062,8 @@
 - **变异检验** ① 改成空实现 → `has(b) === false` 红；② 改成「全清」→ `has(a) === true` 红。
   **两个方向都要有断言，只测一个方向的话「全清」会假绿。**
 
-### [ ] T-256 · `MaterialRegistry.retainOnly`（已实测的 clone 泄漏）
-- **依赖** 无 · **预估** 0.8d · **实际** —
+### [x] T-256 · `MaterialRegistry.retainOnly`（已实测的 clone 泄漏）
+- **依赖** 无 · **预估** 0.8d · **实际** 0.6d
 - **独占** `packages/core/src/runtime/material-registry.ts` · `packages/core/test/runtime/material-registry.test.ts`
 - **做** 对 `owned` 里不在集合内的 nodeId，`dispose()` 掉 clone、从 `owned` 与 `sources` 删除。
 - **验收** 对文档 A 建 clone（`cloneCount === 1`）→ `retainOnly(B 的 nodeIds)` → `cloneCount === 0`
