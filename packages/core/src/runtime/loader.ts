@@ -191,6 +191,39 @@ export class AssetLoader implements AssetSource {
     return { assetId, scene: gltf.scene, clips: gltf.animations as AnimationClip[], objects }
   }
 
+  /**
+   * T-255 · 只留下这些资产，其余全部淘汰。返回被淘汰的 id。
+   *
+   * ## 为什么非要有它
+   *
+   * 同一个 runtime 里两条资产链**行为相反**：换文档时贴图会被淘汰
+   * （`TextureCache` 在 `ensure` 末尾调自己的 `retainOnly`），而模型**只增不减**——
+   * `AssetLoader` 从来只往 `cache` 里放。一个编辑一下午、开过十份文档的会话，
+   * 十份文档的几何体全都还在显存里。
+   *
+   * 形状逐字照抄 `texture-cache.ts` 的那一份：**参数是「要留下的」而不是「要删的」**。
+   * 传「要删的」会把「算出该删谁」的责任推给调用方，而调用方手上只有新文档——
+   * 它知道要留什么，不知道上一份留下了什么。
+   *
+   * ⚠ **返回值不是装饰**：调用方（换场景的 T-429、体检报告）要报「释放了 N 份资产」，
+   * 而一个只回 void 的方法会让那句话只能靠 `size` 前后相减去猜。
+   */
+  retainOnly(assetIds: ReadonlySet<string>): string[] {
+    const evicted: string[] = []
+    for (const [assetId, loaded] of [...this.cache]) {
+      if (assetIds.has(assetId)) continue
+      this.cache.delete(assetId)
+      disposeAsset(loaded)
+      evicted.push(assetId)
+    }
+    // 在飞的那些也要拦下：留着的话，一份刚被淘汰的资产会在几百毫秒后自己回到缓存里，
+    // 而那时已经没有任何文档引用它了。
+    for (const assetId of [...this.inflight.keys()]) {
+      if (!assetIds.has(assetId)) this.inflight.delete(assetId)
+    }
+    return evicted
+  }
+
   /** Drops a single asset from the cache, freeing its geometry and textures. */
   evict(assetId: string): boolean {
     const loaded = this.cache.get(assetId)
