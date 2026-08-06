@@ -24,7 +24,29 @@ export interface CapabilityReport {
   /** Unmasked GPU string when WEBGL_debug_renderer_info is available. */
   readonly renderer: string | null
   readonly vendor: string | null
+  /**
+   * `GL_MAX_TEXTURE_SIZE`. **0 means "the probe could not read it", not "zero pixels".**
+   *
+   * The same convention holds for the two fields below. `planCapture` is the consumer and
+   * substitutes a conservative value for a 0 — see `effectiveEdgeLimit` in `image-export.ts`.
+   */
   readonly maxTextureSize: number
+  /**
+   * `GL_MAX_RENDERBUFFER_SIZE`, or 0 when unknown.
+   *
+   * Not a duplicate of `maxTextureSize`: an export renders into a multisampled render
+   * target, which is a **renderbuffer**, and drivers do report the two limits separately.
+   * Clamping only against the texture limit is how a request that fits a texture but not a
+   * 4× MSAA renderbuffer gets through and loses the context mid-export.
+   */
+  readonly maxRenderbufferSize: number
+  /**
+   * The smaller of `GL_MAX_VIEWPORT_DIMS`, or 0 when unknown.
+   *
+   * The export path resizes the main canvas rather than drawing into an offscreen target
+   * (ADR-0025 §4), so the viewport limit binds even when both buffer limits are generous.
+   */
+  readonly maxViewportDim: number
   /** Chinese, user-facing, and specific enough to act on. */
   readonly message: string
   readonly advice: string
@@ -32,6 +54,22 @@ export interface CapabilityReport {
 
 /** Substrings that identify a software rasteriser rather than a GPU. */
 const SOFTWARE_RENDERERS = ['swiftshader', 'llvmpipe', 'software', 'softpipe', 'microsoft basic render']
+
+/**
+ * The smaller entry of a `[w, h]` GL limit, or 0 when the driver returned something else.
+ *
+ * `getParameter(MAX_VIEWPORT_DIMS)` is specified to return an `Int32Array` of length 2, but
+ * this has to survive a driver that returns `null` and a stub that returns a plain array —
+ * a throw here would take out capability detection itself, which is the one thing that must
+ * never fail.
+ */
+function smallestDim(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : 0
+  const pair = value as ArrayLike<number> | null
+  if (!pair || typeof pair.length !== 'number' || pair.length < 2) return 0
+  const min = Math.min(Number(pair[0]), Number(pair[1]))
+  return Number.isFinite(min) && min > 0 ? min : 0
+}
 
 /**
  * Probes for WebGL2 using a throwaway canvas.
@@ -67,6 +105,8 @@ export function detectCapability(
       renderer: null,
       vendor: null,
       maxTextureSize: 0,
+      maxRenderbufferSize: 0,
+      maxViewportDim: 0,
       message: hasWebgl1
         ? '当前浏览器只支持 WebGL 1，本播放器需要 WebGL 2。'
         : '当前浏览器不支持 WebGL，无法显示三维内容。',
@@ -80,6 +120,10 @@ export function detectCapability(
   const renderer = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)) : null
   const vendor = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)) : null
   const maxTextureSize = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 0
+  const maxRenderbufferSize = Number(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)) || 0
+  // MAX_VIEWPORT_DIMS is a two-element array; a non-square limit is legal, so take the
+  // smaller one — an export is clamped on its long edge and does not know which axis it is.
+  const maxViewportDim = smallestDim(gl.getParameter(gl.MAX_VIEWPORT_DIMS))
 
   // Release the probe context immediately rather than waiting for GC.
   gl.getExtension('WEBGL_lose_context')?.loseContext()
@@ -91,6 +135,8 @@ export function detectCapability(
     renderer,
     vendor,
     maxTextureSize,
+    maxRenderbufferSize,
+    maxViewportDim,
     message: software
       ? '当前环境使用软件渲染（没有可用的独立显卡或未开启硬件加速），画面会明显卡顿。'
       : '图形环境正常。',
@@ -189,6 +235,18 @@ export interface CaptureLimits {
   readonly pixelRatio: number
   /** `GL_MAX_TEXTURE_SIZE`, or 0 when the probe could not read it (treat as unknown). */
   readonly maxTextureSize: number
+  /** `GL_MAX_RENDERBUFFER_SIZE`, or 0 when unknown. See {@link CapabilityReport}. */
+  readonly maxRenderbufferSize: number
+  /** The smaller of `GL_MAX_VIEWPORT_DIMS`, or 0 when unknown. */
+  readonly maxViewportDim: number
+  /**
+   * Whether the runtime is currently rendering through the composer (T-235's `pipelineMode`).
+   *
+   * It belongs to `limits` rather than to the request because it is a property of the
+   * machine-and-document state at capture time, not of what the user asked for: the export
+   * ceiling is 2× through the composer and 4× direct, and the user does not choose which.
+   */
+  readonly postFxActive: boolean
 }
 
 /**

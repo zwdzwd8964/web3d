@@ -35,6 +35,7 @@
 | 2026-08-05 | （裁决 ADR-0033） | 36 | **26** | **−10，且这一次不是靠接线换来的，是靠分表。** 十条「规划 §4 逐字冻结、消费者在 v1.2/v1.5」的行迁进新的冻结接口表，四列表回到只装「归得到卡但今天没人调」的东西。⚠ 迁移不是豁免：新表有一把四列表没有的门锁——符号名必须逐字出现在它自己 `spec` 列点名的那节规范的**代码跨度**里，写不进规范的进不来。第一版门锁只查「出现在这一节里」，被 `schema:touch` 当场击穿（规划 §4 的一段 JSDoc 里写着 "touch nothing that is already there"），所以 `touch` 留在四列表里 |
 | 2026-08-05 | T-241 | 26 | **25** | 接线 `setSelectionOutline`（Viewport 的选择 effect 是它的生产调用者），那一行随之删除。分表之后第一张卡就把表变短了一格——这正是 ADR-0033 想要的形状：四列表里剩下的都是「归得到卡但今天没人调」，接线一张就少一行 |
 | 2026-08-05 | T-243 | 25 | **23** | 接线 `clippingPlanes` 与 `localClippingEnabled`（`SectionLayer.sync` 与 `attachRenderer`），两行随之删除。⚠ 本卡还差点为了让一条测试有东西可断而新增 `SceneRuntime.sectionPlaneCount`——闸门当场判它是孤儿，而它读的是本层账本、与本卡自己定的「断渲染器」纪律正相反。删掉它、测试改读渲染器桩，**这一次闸门拦住的正是它该拦的东西** |
+| 2026-08-05 | T-262 | 23 | **24** | **净 +1，而两个方向都动了**：`captureDevicePixels` / `maxCaptureScale` 两行退休——T-214 当时只落公式不落 `planCapture`，本卡把钳位链接上，它们有生产调用者了；同时新增 `planCapture` / `CapturePlan.droppedOutline` / `CapturePlan.notice` 三行，owner 是同一个里程碑 M17 里排在后面的 T-263 / T-266 / T-267。`planCapture` 逐字出现在规划 §4 的代码跨度里，够得上冻结接口表的门锁，但那张表收的是「消费者排在**后面版本**」的东西，而这三行的消费者就在本版本内——放进四列表才是它们真实的形状 |
 
 ## 豁免
 
@@ -42,8 +43,9 @@
 
 | symbol | reason | owner | expires |
 |---|---|---|---|
-| core:captureDevicePixels | 出图按 CSS 像素下单、按设备像素分配，T-262 的 planCapture 用它算真实分辨率；本卡先落公式是因为桩 limits 让缺了它的公式全绿 | T-262 | v1.2 |
-| core:maxCaptureScale | 纹理上限随像素比收紧倍率天花板，T-262 的钳位链调它；同上，本卡只落公式不落 planCapture | T-262 | v1.2 |
+| core:planCapture | 出图对话框（T-267）与 exportImage 动作（T-266）下单前都过它一遍；本卡只落纯函数与两个矩阵，不落调用点 | T-266 | v1.2 |
+| core:CapturePlan.droppedOutline | T-263 的 resolveExportPipeline 返回同名字段，出图对话框据它显示「不含描边」那句 | T-263 | v1.2 |
+| core:CapturePlan.notice | 钳位说明，T-267 的对话框把它显示在尺寸下方；没有显示方就等于静默钳位 | T-267 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |

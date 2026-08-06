@@ -124,6 +124,8 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 | 11 | T-110 明列的「逐级加载压力测试」在任何规范里都没有定义，实现为场景副本倍增阶梯（×1/×2/×4/×8） | ADR-0016 |
 | 12 | HDR 解析用 `HDRLoader` 而非进化规划写的 `RGBELoader` | — （three 0.185 里 `RGBELoader` 是已废弃别名，构造即打印弃用警告；同一个 RGBE 解析器，零新增依赖，不构成设计取舍） |
 | 13 | 原始体的朝向与分段数：规范只冻结了语义尺寸，两者都没写 | ADR-0017 |
+| 14 | **T-262**：`MAX_SCALE_DIRECT` / `MAX_SCALE_COMPOSED` 落在 `image-export.ts`，卡面写的是「由 T-263 提供」（`render-pipeline.ts`）。T-263 排在后面且独占那个文件，等它落 = `maxScaleFor` 有公式没接线，正是 X-19 点名的形状。**T-263 落地时必须 import，不许再抄一份**（机器判据：`grep -c 'MAX_SCALE_COMPOSED = ' packages/core/src` 恒为 1） | ADR-0041 §4 |
+| 15 | **T-262**：常量是**六个**不是卡面写的五个，多出的 `MIN_EXPORT_EDGE = 256` 是拒绝矩阵 R3 / R4 共用的那条线；同时「尺寸太大」没有成为第四条拒绝——钳完之后总有一张图，硬凑成拒绝要引入一条没有需求支持的「不许缩小」假设 | ADR-0041 §1 §3 |
 
 `@w3/schema` 中另加了两个规范未列出的文件：`selectors.ts`（纯查询，T-014 点名要 `getAncestors`
 等）与 `rule.ts`（承载 EventDescriptor / Condition / Action 信封 / Rule 的数据形状——

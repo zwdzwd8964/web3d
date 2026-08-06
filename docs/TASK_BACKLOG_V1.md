@@ -2173,8 +2173,8 @@
 > 「能被嵌进」在部署层面**现在就可用**——全仓一个 `X-Frame-Options` / `frame-ancestors` 都没设。
 > 缺的不是能力，是 **API 和策略**。
 
-### [ ] T-262 · 能力探针扩展 + `planCapture`（出图的全部防线）
-- **依赖** T-214（`CaptureLimits.pixelRatio`）· **预估** 1.0d · **实际** —
+### [x] T-262 · 能力探针扩展 + `planCapture`（出图的全部防线）
+- **依赖** T-214（`CaptureLimits.pixelRatio`）· **预估** 1.0d · **实际** 1.1d（常量是六个不是五个，拒绝矩阵改了一条，见 ADR-0041）
 - **独占** `packages/core/src/runtime/capability.ts` · `packages/core/src/runtime/image-export.ts`(新，仅 plan 部分) ·
   `packages/core/test/runtime/image-export.test.ts`(新)
 - **做** `CapabilityReport` 加 `maxRenderbufferSize` / `maxViewportDim`（探针失败一律 0 = 未知，

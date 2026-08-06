@@ -32,6 +32,9 @@ const software: CapabilityReport = {
   renderer: 'SwiftShader Device',
   vendor: 'Google Inc.',
   maxTextureSize: 8192,
+  // T-262 加的两条探针。这份桩只用来判软渲档位，与出图钳位无关，所以按「未知」填 0。
+  maxRenderbufferSize: 0,
+  maxViewportDim: 0,
   message: '',
   advice: '',
 }

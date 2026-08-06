@@ -125,7 +125,15 @@ describe('T-214 · 设备像素比封顶', () => {
 })
 
 describe('T-214 · CaptureLimits.pixelRatio 进钳位公式', () => {
-  const at = (pixelRatio: number, maxTextureSize = 16384): CaptureLimits => ({ pixelRatio, maxTextureSize })
+  // T-262 给 CaptureLimits 加了三个字段（两条 GL 探针 + postFxActive）。这两条公式一个都不读，
+  // 所以这里补的是常量而不是参数——补成参数会让人以为它们参与了计算。
+  const at = (pixelRatio: number, maxTextureSize = 16384): CaptureLimits => ({
+    pixelRatio,
+    maxTextureSize,
+    maxRenderbufferSize: 0,
+    maxViewportDim: 0,
+    postFxActive: false,
+  })
 
   it('a capture is allocated in device pixels, not CSS pixels', () => {
     // The dialog says "1920 × 2 = 3840". On a 2× screen the GPU is asked for 7680.

@@ -103,7 +103,9 @@ describe('T-255 · retainOnly', () => {
   it('**在飞的请求也要拦下** —— 否则它几百毫秒后自己回到缓存里', async () => {
     // 那时已经没有任何文档引用它了，而缓存里多了一份没人要的几何体。
     const bytes = await buildPumpGlb({ animationName: 'Disassemble', animationSeconds: 1 })
-    let release: (() => void) | null = null
+    // 初值是个空函数而不是 null：赋值发生在 executor 回调里，TS 的控制流分析看不进去，
+    // 到调用点时把它窄化成 null，`release?.()` 于是变成「对 never 取调用」。
+    let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
@@ -121,7 +123,7 @@ describe('T-255 · retainOnly', () => {
       .catch(() => undefined)
 
     loader.retainOnly(new Set([A]))
-    release?.()
+    release()
     await pending
 
     expect(loader.has(B), '在飞的那份自己回来了').toBe(false)
