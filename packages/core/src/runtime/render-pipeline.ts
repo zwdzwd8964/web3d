@@ -1,3 +1,4 @@
+import { maxScaleFor } from './image-export.js'
 import type { SceneDocument } from '@w3/schema'
 import { HalfFloatType, UnsignedByteType, WebGLRenderTarget } from 'three'
 import type { Camera, Scene, WebGLRenderer } from 'three'
@@ -185,4 +186,90 @@ export function createDefaultComposer(ctx: ComposerContext, log?: RenderPipeline
   composer.addPass(new OutputPass())
 
   return composer as unknown as ComposerLike
+}
+
+/* ========================================================================== */
+/* T-263 · 出图相容性：透明背景降级、倍率上限、显存预估                          */
+/* ========================================================================== */
+
+/**
+ * 一次导出会额外占多少显存，字节。
+ *
+ * 公式来自 [ADR-0021](../../../docs/adr/0021-撤销-D20-v1.0-引入后处理链.md) 腿 3 的实测表：
+ * `OutlinePass` 在分辨率 (W,H)、`downSampleRatio = 2` 下分配 7 张 target ≈ **19·W·H** 字节；
+ * composer 侧（rt1 samples 4 + 解析纹理 + rt2 samples 0）≈ **48·W·H** 字节。
+ *
+ * direct 模式 ≈ 0 额外：它直接画进默认帧缓冲，没有中间 target。
+ *
+ * ⚠ **这个数不是用来显示的，是用来拦的。** 3840×2160 带两个 pass ≈ 712 MB，
+ * 7680×4320 ≈ 2.8 GB —— 后者会让浏览器丢上下文，现象是整个页面变白，而用户无法
+ * 把它和「导出失败」联系起来。
+ */
+export function estimateExportVram(input: {
+  readonly width: number
+  readonly height: number
+  readonly mode: PipelineMode
+  readonly outlinePasses: number
+}): number {
+  if (input.mode === 'direct') return 0
+  const pixels = Math.max(0, input.width) * Math.max(0, input.height)
+  return COMPOSER_BYTES_PER_PIXEL * pixels + OUTLINE_BYTES_PER_PIXEL * pixels * Math.max(0, input.outlinePasses)
+}
+
+/** composer 侧每像素字节数（rt1 samples 4 + 解析纹理 + rt2 samples 0）。 */
+const COMPOSER_BYTES_PER_PIXEL = 48
+/** 一个 `OutlinePass` 每像素字节数（7 张 target，`downSampleRatio = 2`）。 */
+const OUTLINE_BYTES_PER_PIXEL = 19
+
+/** 一次导出该走哪条管线，以及为此付出了什么。 */
+export interface ExportPipelineDecision {
+  readonly mode: PipelineMode
+  /** 透明背景强制 direct 时为 true：导出的图不含描边。 */
+  readonly droppedOutline: boolean
+  /** 生效的倍率，已按管线上限钳过。 */
+  readonly scale: number
+  /** 中文原因；没有任何降级或钳位时是空串。 */
+  readonly reason: string
+}
+
+/**
+ * 透明背景 × 后处理 × 倍率，三者一起裁一次。
+ *
+ * ## X-18 的裁决：**降级，不是拒绝**
+ *
+ * 用户拿到一张图 + 一句解释，好过拿到一个禁用的按钮。他真正要的是一张能贴进 PPT 的
+ * 透明底图；描边可以没有，图不能没有（[ADR-0021](../../../docs/adr/0021-撤销-D20-v1.0-引入后处理链.md)
+ * 覆盖了 `design/render-out.md` ADR-C 的「拒绝导出」主张）。
+ *
+ * ## 为什么透明背景非降级不可
+ *
+ * `OutlinePass._getOverlayMaterial()` 末尾是 `AdditiveBlending`，three 对非预乘 additive
+ * 用 `blendFuncSeparate(SRC_ALPHA, ONE, ONE, ONE)`。描边落在背景像素上时 RGB 按
+ * `src.rgb * src.a` 加、alpha 按 `src.a` 加——**轮廓外扩那半圈得到 RGB > A**，存成非预乘
+ * PNG 再合成就是「边缘发亮 / 发灰」。
+ *
+ * ⚠ **雾不受影响，文案里不许把它一起列进去**（拍板项 P-11）。雾画在物体像素上，
+ * 背景像素仍然是 alpha 0。
+ */
+export function resolveExportPipeline(input: {
+  readonly transparent: boolean
+  readonly scale: number
+  readonly docMode: PipelineMode
+}): ExportPipelineDecision {
+  const reasons: string[] = []
+
+  const droppedOutline = input.transparent && input.docMode === 'composed'
+  const mode: PipelineMode = input.transparent ? 'direct' : input.docMode
+  if (droppedOutline) reasons.push('透明背景导出不包含描边效果。')
+
+  // **import 而不是再写一遍那两个数。** X-19 说的两张卡各交付一半，另一半就是这里：
+  // 抄一份常量等于把「composed 上限」写在两个地方，而它们会分叉。
+  const ceiling = maxScaleFor(mode)
+  let scale = input.scale
+  if (scale > ceiling) {
+    reasons.push(`叠加了描边等画面效果时导出倍率上限为 ${ceiling}×，已按 ${ceiling}× 导出。`)
+    scale = ceiling
+  }
+
+  return { mode, droppedOutline, scale, reason: reasons.join(' ') }
 }

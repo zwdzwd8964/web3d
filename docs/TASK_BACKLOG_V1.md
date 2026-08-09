@@ -2194,8 +2194,8 @@
   warn → 拒绝矩阵红；⑤ **把 `limits.pixelRatio` 从公式里删掉 → 那两条 `pixelRatio: 2` 用例必须红**
   （这条是 X-17 的机器落点：**桩 limits 在真实 2× 屏上仍然全绿**，不加这两行就永远发现不了）。
 
-### [ ] T-263 · 出图相容性：透明背景降级、倍率上限、显存预估
-- **依赖** T-235 · **预估** 1.0d · **实际** —
+### [x] T-263 · 出图相容性：透明背景降级、倍率上限、显存预估
+- **依赖** T-235 · **预估** 1.0d · **实际** 0.5d
 - **独占** `packages/core/src/runtime/render-pipeline.ts`（导出约束段）·
   `packages/core/test/runtime/export-constraints.test.ts`(新)
 - **做** 纯函数 `estimateExportVram({width,height,mode,outlinePasses})`（direct ≈ 0 额外；
