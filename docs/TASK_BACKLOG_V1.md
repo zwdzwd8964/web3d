@@ -2122,8 +2122,8 @@
   ② `suggestUnit` 阈值改掉 → 预填红；③ **只接一条入口** → 另外两条的测试必须红
   （**三条入口各写一条，不许写成一条参数化测试跑同一个入口**）。
 
-### [ ] T-260 · 体检报告呈现增强
-- **依赖** T-234 · **预估** 1.0d · **实际** —
+### [x] T-260 · 体检报告呈现增强
+- **依赖** T-234 · **预估** 1.0d · **实际** 1.0d
 - **独占** `packages/editor/src/panels/AuditReport.tsx`(新) · `packages/editor/src/lib/audit-markdown.ts`(新) ·
   `packages/editor/src/panels/AssetPanel.tsx` · `packages/editor/test/audit-report.test.tsx`(新)
 - **做** 把 `ImportReport`（`AssetPanel.tsx:160-240`）抽成 `AuditReport`，参数化「导入前确认」与

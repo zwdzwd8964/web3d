@@ -7,6 +7,7 @@ import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { ImportDialog, declarationFrom } from './ImportDialog.jsx'
 import type { ImportDeclaration } from './ImportDialog.jsx'
+import { AuditReport } from './AuditReport.jsx'
 import { describeRemoval } from './removal.js'
 
 /**
@@ -258,33 +259,18 @@ function ImportReport({
   onCancel: () => void
 }) {
   return (
-    <div className="report">
-      <h3>{result.asset.name}</h3>
-      <p className="report__summary">{summarizeImport(result)}</p>
-
-      <table className="report__table">
-        <thead>
-          <tr>
-            <th>项目</th>
-            <th>实测</th>
-            <th>上限</th>
-            <th>结论</th>
-            <th>建议</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result.audit.audit.findings.map((finding) => (
-            <tr key={finding.metric} data-level={finding.level}>
-              <td>{finding.metric}</td>
-              <td className="num">{finding.value.toLocaleString('en-US')}</td>
-              <td className="num">{finding.limit.toLocaleString('en-US')}</td>
-              <td>{finding.level === 'pass' ? '通过' : finding.level === 'warn' ? '接近上限' : '超标'}</td>
-              <td>{finding.advice}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
+    <AuditReport
+      name={result.asset.name}
+      // T-260 · `summarizeImport` 说的是「导入这一次发生了什么」（迁移了几项、失效几项），
+      // 与体检本身的一句话结论是两件事。两句都要，所以拼起来而不是二选一。
+      summary={`${summarizeImport(result)} ${result.audit.summary}`}
+      audit={result.audit.audit}
+      {...(result.asset.origin ? { origin: result.asset.origin } : {})}
+      mode="confirm"
+      failed={result.audit.verdict === 'fail'}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
       {result.remap && (
         <>
           <h4>资产映射</h4>
@@ -312,20 +298,6 @@ function ImportReport({
           ))}
         </>
       )}
-
-      <div className="report__actions">
-        <button type="button" className="tbtn" onClick={onCancel}>
-          取消
-        </button>
-        <button type="button" className="tbtn tbtn--primary" onClick={onConfirm}>
-          {result.audit.verdict === 'fail' ? '仍然导入' : '确认导入'}
-        </button>
-      </div>
-      {result.audit.verdict === 'fail' && (
-        <p className="panel__note panel__note--warn">
-          该资产未通过体检。仍可导入，但性能验收以《附件A》规格为前提，超标资产的表现不作为验收依据。
-        </p>
-      )}
-    </div>
+    </AuditReport>
   )
 }
