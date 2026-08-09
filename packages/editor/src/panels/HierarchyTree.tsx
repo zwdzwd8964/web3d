@@ -3,7 +3,17 @@ import { buildIndex, describeReferences, getSubtreeIds } from '@w3/schema'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { setUi, useUi } from '../store/ui-store.js'
-import { applyDropPlan, canDrop, canDragRows, clampScrollTop, dropPositionFor, filterNodes, flattenTree, rangeBetween } from './tree-dnd.js'
+import {
+  applyDropPlan,
+  canDragRows,
+  canDrop,
+  clampScrollTop,
+  dropPositionFor,
+  filterNodes,
+  flattenTree,
+  rangeBetween,
+  reparentNotice,
+} from './tree-dnd.js'
 import type { DropTarget } from './tree-dnd.js'
 
 /**
@@ -30,6 +40,9 @@ export function HierarchyTree() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<(DropTarget & { ok: boolean }) | null>(null)
+  // T-258 · the last drop's shear warning. A UI transient in the same sense as `dragging`:
+  // it does not survive a reload and the player never sees it (铁律 1's exception).
+  const [reparentWarning, setReparentNotice] = useState<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
   const lastClicked = useRef<string | null>(null)
@@ -76,9 +89,13 @@ export function HierarchyTree() {
     if (!dragging || !dropTarget) return
     const result = canDrop(doc, dragging, dropTarget)
     if (result.ok) {
-      commit(`移动 ${doc.nodes.find((n) => n.id === dragging)?.name ?? '对象'}`, (draft) =>
-        applyDropPlan(draft, result.plan),
-      )
+      // T-258 · read off the pre-move document, because after `commit` the answer is gone.
+      setReparentNotice(reparentNotice(doc, result.plan))
+      commit(`移动 ${doc.nodes.find((n) => n.id === dragging)?.name ?? '对象'}`, (draft) => {
+        // Braces, not an expression body: `applyDropPlan` returns void today, and an
+        // implicit return from an immer recipe that also mutated the draft makes immer throw.
+        applyDropPlan(draft, result.plan)
+      })
     }
     setDragging(null)
     setDropTarget(null)
@@ -125,6 +142,14 @@ export function HierarchyTree() {
           }}
         />
       </div>
+      {reparentWarning !== null && (
+        <div className="hint hint--warn" data-testid="reparent-warning" role="status">
+          {reparentWarning}
+          <button type="button" className="tbtn" onClick={() => setReparentNotice(null)}>
+            知道了
+          </button>
+        </div>
+      )}
       <div
         className="panel__body panel__body--tight"
         ref={bodyRef}

@@ -1,5 +1,5 @@
 import type { SceneDocument } from '@w3/schema'
-import { checkIntegrity, createGoldenPathDocument, errorsOf } from '@w3/schema'
+import { checkIntegrity, createGoldenPathDocument, errorsOf, worldMatrixOf } from '@w3/schema'
 import { describe, expect, it } from 'vitest'
 import { IDENTITY_QUAT, fromEulerDegrees, sameRotation, toEulerDegrees } from '@w3/core'
 import {
@@ -12,7 +12,7 @@ import {
   isMixed,
   parseNumber,
 } from '../src/lib/selection-values.js'
-import { applyDropPlan, canDrop, dropPositionFor, flattenTree, rangeBetween } from '../src/panels/tree-dnd.js'
+import { applyDropPlan, canDrop, dropPositionFor, flattenTree, rangeBetween, reparentNotice } from '../src/panels/tree-dnd.js'
 import { createDocumentStore } from '../src/store/document-store.js'
 
 /** T-063 / T-064 · the parts of the panels that are logic rather than markup. */
@@ -190,6 +190,119 @@ describe('T-063 · hierarchy drag and drop', () => {
 
     store.getState().undo()
     expect(store.getState().doc.nodes.find((n) => n.id === BODY)!.parent).toBe(PUMP)
+  })
+})
+
+describe('T-258 · 改父保持世界位姿', () => {
+  /**
+   * 黄金路径那份文档三个节点全是单位 transform，改父在数值上是个空操作——
+   * 用它测「位姿保持」等于什么都没测。所以这里给泵组一个偏移 + 旋转 + 缩放，
+   * 再把阀盖挪到根下 / 挪回去。
+   */
+  function scene(pumpScale: [number, number, number]): SceneDocument {
+    const doc = createGoldenPathDocument()
+    return {
+      ...doc,
+      nodes: doc.nodes.map((n) => {
+        if (n.id === PUMP) {
+          return { ...n, transform: { p: [3, 0, -2] as [number, number, number], r: [0, 0.3826834, 0, 0.9238795] as [number, number, number, number], s: pumpScale } }
+        }
+        if (n.id === COVER) {
+          return { ...n, transform: { p: [0, 0.35, 0] as [number, number, number], r: [0.3826834, 0, 0, 0.9238795] as [number, number, number, number], s: [1, 1, 1] as [number, number, number] } }
+        }
+        return n
+      }),
+    }
+  }
+
+  it('把阀盖拖到根下，世界位姿逐元素不变', () => {
+    const doc = scene([2, 2, 2])
+    const before = worldMatrixOf(doc, COVER)
+    // 「拖到泵组之后」= 成为根一级的兄弟。
+    const result = canDrop(doc, COVER, { nodeId: PUMP, position: 'after' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const store = createDocumentStore(doc, { now: () => 0 })
+    store.getState().commit('移动 阀盖', (draft) => applyDropPlan(draft, result.plan))
+    const moved = store.getState().doc
+
+    expect(moved.nodes.find((n) => n.id === COVER)!.parent).toBeNull()
+    const was = [...before]
+    worldMatrixOf(moved, COVER).forEach((value, i) => {
+      // 缺项兜底成 NaN 而不是 0：NaN 让断言红，0 可能碰巧通过。
+      expect(Math.abs(value - (was[i] ?? Number.NaN)), `m[${i}]`).toBeLessThan(1e-6)
+    })
+    // 局部 transform 确实被改写了 —— 否则「位姿不变」只是因为父级本来就是单位阵。
+    expect(moved.nodes.find((n) => n.id === COVER)!.transform.p).not.toEqual([0, 0.35, 0])
+  })
+
+  it('parent / order / transform 三者同时正确', () => {
+    const doc = scene([2, 2, 2])
+    const result = canDrop(doc, COVER, { nodeId: PUMP, position: 'after' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+
+    const store = createDocumentStore(doc, { now: () => 0 })
+    store.getState().commit('移动 阀盖', (draft) => applyDropPlan(draft, result.plan))
+    const cover = store.getState().doc.nodes.find((n) => n.id === COVER)!
+
+    expect(cover.parent).toBe(result.plan.parent)
+    expect(cover.order).toBe(result.plan.order)
+    expect(cover.transform.p[0]).toBeCloseTo(3, 6)
+    expect(errorsOf(checkIntegrity(store.getState().doc))).toHaveLength(0)
+  })
+
+  it('撤销把 transform 也还回去，不只是 parent', () => {
+    // 只还 parent 的话，撤销之后零件停在一个新算出来的局部坐标上——比不撤销还糟。
+    const doc = scene([2, 2, 2])
+    const result = canDrop(doc, COVER, { nodeId: PUMP, position: 'after' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+
+    const store = createDocumentStore(doc, { now: () => 0 })
+    store.getState().commit('移动 阀盖', (draft) => applyDropPlan(draft, result.plan))
+    store.getState().undo()
+
+    const cover = store.getState().doc.nodes.find((n) => n.id === COVER)!
+    expect(cover.parent).toBe(PUMP)
+    expect(cover.transform.p).toEqual([0, 0.35, 0])
+  })
+
+  it('拖回同一个父级下面时不动 transform（只是重排序）', () => {
+    const doc = scene([2, 2, 2])
+    const result = canDrop(doc, COVER, { nodeId: BODY, position: 'before' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+    expect(result.plan.parent).toBe(PUMP)
+
+    const store = createDocumentStore(doc, { now: () => 0 })
+    store.getState().commit('移动 阀盖', (draft) => applyDropPlan(draft, result.plan))
+    // 同父重排序走的是 `plan.parent === node.parent` 那条早退，一次矩阵运算都不做。
+    expect(store.getState().doc.nodes.find((n) => n.id === COVER)!.transform.p).toEqual([0, 0.35, 0])
+  })
+
+  it('父级非均匀缩放 → reparentNotice 给中文提示', () => {
+    // 阀盖已经挂在泵组下面了，往外拖：源父级的非均匀缩放会在新的局部矩阵里留下剪切。
+    const doc = scene([2, 0.5, 1])
+    const result = canDrop(doc, COVER, { nodeId: PUMP, position: 'after' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+
+    const notice = reparentNotice(doc, result.plan)
+    expect(notice).not.toBeNull()
+    expect(notice).toContain('非均匀缩放')
+    expect(notice).toContain('阀盖')
+  })
+
+  it('父级均匀缩放 → 没有提示（证明上一条不是恒真）', () => {
+    const doc = scene([2, 2, 2])
+    const result = canDrop(doc, COVER, { nodeId: PUMP, position: 'after' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+    expect(reparentNotice(doc, result.plan)).toBeNull()
+  })
+
+  it('同父重排序不提示', () => {
+    const doc = scene([2, 0.5, 1])
+    const result = canDrop(doc, COVER, { nodeId: BODY, position: 'before' })
+    if (!result.ok) throw new Error('canDrop 应当通过')
+    expect(reparentNotice(doc, result.plan)).toBeNull()
   })
 })
 

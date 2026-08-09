@@ -1,5 +1,13 @@
 import type { Node, SceneDocument } from '@w3/schema'
-import { ORDER_STEP, getChildren, getOrderBetween, groupChildren, renumberSiblings, wouldCreateCycle } from '@w3/schema'
+import {
+  ORDER_STEP,
+  getChildren,
+  getOrderBetween,
+  groupChildren,
+  renumberSiblings,
+  reparentPreservingWorld,
+  wouldCreateCycle,
+} from '@w3/schema'
 
 /**
  * T-063 · hierarchy drag-and-drop.
@@ -95,6 +103,17 @@ function planDrop(
 /**
  * Applies a plan to a document draft. Kept separate from `canDrop` so the caller wraps
  * it in exactly one `commit` — one drag, one undo entry.
+ *
+ * **T-258 · the node keeps its world pose.** Without this, dragging a part into a group
+ * that sits at an offset teleports it by exactly that offset: the local transform is
+ * unchanged but it is now measured against a different parent. The user's gesture was
+ * "drag a row onto another row"; nothing about it says "move the part 3 metres".
+ *
+ * ⚠ **Returns `void` on purpose, and that is load-bearing.** The call site passes this
+ * straight to an immer recipe (`commit(desc, draft => applyDropPlan(draft, plan))`).
+ * Returning anything non-undefined from a recipe that also mutated the draft makes immer
+ * throw. The shear warning therefore travels through {@link reparentNotice}, which the UI
+ * calls separately — see that function for why the duplicate arithmetic is fine.
  */
 export function applyDropPlan(draft: SceneDocument, plan: DropPlan): void {
   if (plan.renumber) {
@@ -105,8 +124,39 @@ export function applyDropPlan(draft: SceneDocument, plan: DropPlan): void {
   }
   const node = draft.nodes.find((n) => n.id === plan.nodeId)
   if (!node) return
+
+  // Computed BEFORE `parent` is written: the function reads the node's current world pose
+  // by walking the parent chain, and half of that walk is about to change.
+  const preserved = plan.parent === node.parent ? null : reparentPreservingWorld(draft, plan.nodeId, plan.parent)
+
   node.parent = plan.parent
   node.order = plan.order
+  // `null` means the new parent has a zero scale and the world pose has no representation
+  // under it. Keeping the old local transform is the least surprising of the bad options:
+  // the part lands somewhere, rather than collapsing onto the parent's flattened plane.
+  if (preserved) node.transform = preserved.transform
+}
+
+/**
+ * The Chinese warning a drop deserves, or `null` when the move is exact.
+ *
+ * Separate from {@link applyDropPlan} because that one has to stay `void`. It re-runs the
+ * same matrix work, which is a few hundred flops on one node — paid once per drop, not per
+ * frame.
+ *
+ * The only way to get a warning is a parent whose accumulated world matrix carries
+ * non-uniform scale *and* a child that is rotated relative to it. The product is sheared,
+ * and `{p, r, s}` has nowhere to put shear, so the new local transform is an approximation
+ * and the part visibly shifts. Saying so is the whole point: the alternative is a silent
+ * few-millimetre error that surfaces as "the model is wrong" three steps later.
+ */
+export function reparentNotice(doc: SceneDocument, plan: DropPlan): string | null {
+  const node = doc.nodes.find((n) => n.id === plan.nodeId)
+  if (!node || node.parent === plan.parent) return null
+  const preserved = reparentPreservingWorld(doc, plan.nodeId, plan.parent)
+  if (preserved === null) return `「${node.name}」的新父级某个方向的缩放为 0，无法保持原来的位置，已保留原有变换。`
+  if (!preserved.sheared) return null
+  return `「${node.name}」的新父级带有非均匀缩放，位置只能近似保留，可能有轻微偏移。`
 }
 
 /** Where a pointer lands within a row, in the tree's usual thirds. */
