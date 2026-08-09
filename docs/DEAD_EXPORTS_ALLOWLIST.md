@@ -36,6 +36,7 @@
 | 2026-08-05 | T-241 | 26 | **25** | 接线 `setSelectionOutline`（Viewport 的选择 effect 是它的生产调用者），那一行随之删除。分表之后第一张卡就把表变短了一格——这正是 ADR-0033 想要的形状：四列表里剩下的都是「归得到卡但今天没人调」，接线一张就少一行 |
 | 2026-08-05 | T-243 | 25 | **23** | 接线 `clippingPlanes` 与 `localClippingEnabled`（`SectionLayer.sync` 与 `attachRenderer`），两行随之删除。⚠ 本卡还差点为了让一条测试有东西可断而新增 `SceneRuntime.sectionPlaneCount`——闸门当场判它是孤儿，而它读的是本层账本、与本卡自己定的「断渲染器」纪律正相反。删掉它、测试改读渲染器桩，**这一次闸门拦住的正是它该拦的东西** |
 | 2026-08-05 | T-262 | 23 | **24** | **净 +1，而两个方向都动了**：`captureDevicePixels` / `maxCaptureScale` 两行退休——T-214 当时只落公式不落 `planCapture`，本卡把钳位链接上，它们有生产调用者了；同时新增 `planCapture` / `CapturePlan.droppedOutline` / `CapturePlan.notice` 三行，owner 是同一个里程碑 M17 里排在后面的 T-263 / T-266 / T-267。`planCapture` 逐字出现在规划 §4 的代码跨度里，够得上冻结接口表的门锁，但那张表收的是「消费者排在**后面版本**」的东西，而这三行的消费者就在本版本内——放进四列表才是它们真实的形状 |
+| 2026-08-05 | T-259 | 24 | **23** | `suggestUnit` 退休。它从 T-051 起就躺在零调用者清单上——公式在、对话框不在，于是每一份模型都按米处理。本卡在 core 里加 `suggestUnitFromHeader`（从 GLB 头部的 POSITION 访问器 min/max 直接量，不解几何）作为它的生产调用者，编辑器再调这一层。**接线一张卡，表短一格** |
 
 ## 豁免
 
@@ -53,7 +54,6 @@
 | storage:StorageProvider.deleteProject | T-282 的项目列表交付删除入口，接口这一侧先留着 | T-282 | v1.2 |
 | core:renderTestCasesMarkdown | 验收用例生成器由 T-317 在 v1.2 接上，v1.0 明确不接 | T-317 | v1.2 |
 | core:AuditResult.summary | T-260 的体检报告界面按中文标签与格式化数值渲染这一段 | T-260 | v1.2 |
-| core:suggestUnit | T-260 的导入报告要在单位可疑时给出建议值 | T-260 | v1.2 |
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
 | core:buildPumpDemoGlb | T-283 把泵组样板物化成一份可打开的项目，它是那条链上唯一的字节来源 | T-283 | v1.2 |
 | core:SAMPLE_OBJECT_PATHS | T-222 的泵组样板给它补断言，这是同一形状第三次零调用者 | T-222 | v1.2 |

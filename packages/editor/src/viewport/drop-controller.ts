@@ -1,4 +1,4 @@
-import type { Bounds } from '@w3/core'
+import type { Bounds, SceneUnit, UpAxis } from '@w3/core'
 import type { Node, SceneDocument, Vec3 } from '@w3/schema'
 import { ensureDefaultMaterial } from '@w3/schema'
 import type { ImportResult } from '../lib/import-flow.js'
@@ -6,6 +6,13 @@ import { applyImport } from '../lib/import-flow.js'
 import type { LibraryItem, PrimitiveTemplate } from '../lib/library.js'
 import { addPrimitive } from '../lib/library.js'
 import type { DragPayload } from './drag.js'
+
+/** 内置库的文件是我们自己做的：米，Y 朝上。写成常量而不是散在调用点。 */
+export interface ImportDeclaration {
+  readonly sourceUnit: SceneUnit
+  readonly sourceUpAxis: UpAxis
+}
+export const LIBRARY_DECLARATION: ImportDeclaration = { sourceUnit: 'm', sourceUpAxis: 'Y' }
 import { offsetToRestOn } from './place.js'
 import { snapPosition } from './snap.js'
 
@@ -43,7 +50,14 @@ export interface DropDeps {
   readonly select: (nodeIds: readonly string[]) => void
   /** Measures a built subtree. Null when it encloses nothing. */
   readonly boundsOf: (nodeIds: readonly string[]) => Bounds | null
-  readonly importItem: (item: LibraryItem) => Promise<ImportResult>
+  /**
+   * T-259 · 第三条导入入口。带上声明，与另外两条同路。
+   *
+   * 拖进视口的库条目今天一律是米 · Y 朝上，所以调用点传的是常量而不是问一句——
+   * 内置库的文件是我们自己做的，问用户「展示台是什么单位」没有意义。**但参数必须在**：
+   * 三条入口里少接一条，那一条就是下一次「模型进来是一堵墙」的来源。
+   */
+  readonly importItem: (item: LibraryItem, declaration: ImportDeclaration) => Promise<ImportResult>
   /**
    * Resolves once the patches written so far have reached the renderer.
    *
@@ -155,7 +169,7 @@ export class DropController {
     this.leave()
 
     try {
-      const result = await this.deps.importItem(item)
+      const result = await this.deps.importItem(item, LIBRARY_DECLARATION)
       const roots: string[] = []
 
       this.deps.previewStart()

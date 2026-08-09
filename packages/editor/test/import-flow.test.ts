@@ -1,6 +1,6 @@
 import { checkIntegrity, createGoldenPathDocument, errorsOf, validate, AssetStatsSchema } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
-import { buildSamplePumpGlb } from '@w3/core'
+import { buildSamplePumpGlb, readGlbHeader, suggestUnitFromHeader } from '@w3/core'
 import { Document, NodeIO } from '@gltf-transform/core'
 import { MemoryProvider, hashBytes } from '@w3/storage'
 import { produce } from 'immer'
@@ -15,6 +15,9 @@ import {
   placeInstance,
   summarizeImport,
 } from '../src/lib/import-flow.js'
+import { importLibraryItem } from '../src/lib/library.js'
+import { declarationFrom } from '../src/panels/ImportDialog.jsx'
+import { LIBRARY_DECLARATION } from '../src/viewport/drop-controller.js'
 import { ProjectSession } from '../src/project/session.js'
 
 /**
@@ -604,5 +607,113 @@ describe('every import produces a PUBLISHABLE document (T-170 抓到的 blocker)
     const result = await runImport(before, 'pump-b.glb')
     const after = produce(before, (draft) => applyImport(draft, result))
     expect(validate(after).ok).toBe(true)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* T-259 · 源单位 / 上方向声明这条断链                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `computeNormalization` 从 T-051 就在，`importAsset` 一直接受 `sourceUnit` /
+ * `sourceUpAxis`——**而全仓没有一个调用方传过它们**，`suggestUnit` 更是零调用者清单上
+ * 的一条。结果是每一份模型都按「米 · Y 朝上」处理：一份毫米单位的泵体进来是 1200 米高，
+ * 用户看到一堵墙，且没有任何地方告诉他为什么。
+ *
+ * 三条入口各写一条测试，**不写成一条参数化跑同一个入口**——卡面点名了这一点，理由是
+ * 三条入口在用户眼里是同一个「导入」，只要有一条没接上，那一条进来的模型就永远按米处理。
+ */
+describe('T-259 · 三条入口都要透传源单位', () => {
+  /** 一份最长边 1200 单位的 GLB：按米算是一堵 1.2 公里的墙，按毫米算是 1.2 米。 */
+  const millimetreGlb = () => buildGlbWithPaths(['Root'], 1200)
+
+  it('① `suggestUnitFromHeader` 从头部直接判出毫米，且不解几何', () => {
+    return millimetreGlb().then((bytes) => {
+      const header = readGlbHeader(bytes)
+      expect(header, '这份 fixture 应当是合法 GLB').not.toBeNull()
+
+      const suggestion = suggestUnitFromHeader(header!)
+      expect(suggestion?.unit).toBe('mm')
+      // 理由要露出来：用户才是唯一知道这份图纸是什么的人，「疑似毫米」不带依据帮不上忙。
+      expect(suggestion?.reason).toContain('1200')
+      expect(declarationFrom(suggestion).sourceUnit, '对话框的预填值').toBe('mm')
+      // 上方向没有可靠推断依据，一律从 glTF 标准的 Y 起步。
+      expect(declarationFrom(suggestion).sourceUpAxis).toBe('Y')
+    })
+  })
+
+  it('② 入口一 · AssetPanel 走的 `importAsset`：选毫米 → scaleApplied 0.001', async () => {
+    const bytes = await millimetreGlb()
+    const result = await importAsset({
+      file: { name: 'pump-mm.glb', bytes },
+      doc: emptyDoc(),
+      storage,
+      loader: session.loader,
+      sourceUnit: 'mm',
+    })
+
+    expect(result.asset.normalized?.scaleApplied).toBe(0.001)
+    // 「节点在视口里是米制尺寸」：修正落在实例化出来的根节点的 transform 上（SCHEMA_SPEC §5.2），
+    // 不是每帧再换算一次——运行时单位换算是一个留到验收才发作的舍入误差。
+    const root = result.nodes[0]
+    expect(root, '模型导入应当产出节点').toBeDefined()
+    expect(root!.transform.s).toEqual([0.001, 0.001, 0.001])
+  })
+
+  it('③ 入口二 · `importLibraryItem` 逐字透传', async () => {
+    const bytes = await millimetreGlb()
+    const result = await importLibraryItem({
+      item: { id: 'lib_x', name: '毫米件', file: 'mm.glb', kind: 'model' } as never,
+      doc: emptyDoc(),
+      storage,
+      loader: session.loader,
+      base: 'http://localhost/',
+      fetch: (async () => new Response(bytes)) as never,
+      sourceUnit: 'mm',
+      sourceUpAxis: 'Y',
+    })
+
+    expect(result.asset.normalized?.scaleApplied, '库入口没透传的话这里是 1').toBe(0.001)
+  })
+
+  it('④ 入口三 · 拖进视口的库条目走的是米制常量', () => {
+    // 这里只钉住常量本身。**「控制器真的把它传出去了」那一条断在 `drag.test.ts`**——
+    // DropController 的装配在那边，把它搬过来只会多一份桩。断一个常量而不驱动控制器，
+    // 是这条测试单独存在时最容易退化成的样子，所以两处一起看才算数。
+    expect(LIBRARY_DECLARATION).toEqual({ sourceUnit: 'm', sourceUpAxis: 'Y' })
+  })
+
+  it('不传声明时行为逐字不变（老文档 / 老调用点零影响）', async () => {
+    const bytes = await millimetreGlb()
+    const result = await importAsset({
+      file: { name: 'pump-default.glb', bytes },
+      doc: emptyDoc(),
+      storage,
+      loader: session.loader,
+    })
+    expect(result.asset.normalized?.scaleApplied).toBe(1)
+  })
+
+  it('上方向声明为 Z 时记下 axisRotated，而不是悄悄躺平', async () => {
+    const bytes = await millimetreGlb()
+    const result = await importAsset({
+      file: { name: 'pump-z.glb', bytes },
+      doc: emptyDoc(),
+      storage,
+      loader: session.loader,
+      sourceUpAxis: 'Z',
+    })
+    expect(result.asset.normalized?.axisRotated).toBe(true)
+  })
+
+  it('没有可测几何的容器：不给预填，而不是拿空包围盒猜一个', async () => {
+    const empty = new Document()
+    empty.createScene('Scene').addChild(empty.createNode('Empty'))
+    const written = await new NodeIO().writeBinary(empty)
+    const bytes = written.buffer.slice(written.byteOffset, written.byteOffset + written.byteLength) as ArrayBuffer
+
+    expect(suggestUnitFromHeader(readGlbHeader(bytes)!)).toBeNull()
+    // 兜底是米，与 `computeNormalization` 的默认值一致。
+    expect(declarationFrom(null).sourceUnit).toBe('m')
   })
 })

@@ -1,5 +1,5 @@
 import type { AssetNormalized, Meta } from '@w3/schema'
-import { Matrix4, Quaternion, Vector3 } from 'three'
+import { Box3 as Box3Impl, Matrix4, Quaternion, Vector3 } from 'three'
 import type { Box3 } from 'three'
 
 /**
@@ -76,6 +76,50 @@ export function suggestUnit(bounds: Box3): { unit: SceneUnit; confident: boolean
     return { unit: 'cm', confident: false, reason: `最长边 ${largest.toFixed(0)} 单位，疑似厘米` }
   }
   return { unit: 'm', confident: true, reason: `最长边 ${largest.toFixed(2)} 单位，符合米制` }
+}
+
+/**
+ * T-259 · the same guess, taken straight off a GLB's header.
+ *
+ * **No geometry is parsed.** glTF requires every `POSITION` accessor to carry `min` and
+ * `max`, so the model's extent is already in the JSON chunk — reading it costs a few
+ * hundred bytes, not a decode of the whole mesh. That matters because this runs on the
+ * file the user just picked, **before** the import pipeline does anything: the dialog has
+ * to appear immediately, and a 200 MB assembly must not be decoded twice.
+ *
+ * The bounds are per-accessor and ignore node transforms. For 「是米还是毫米」 that is
+ * exactly right — a part authored at 1,200 units is 1,200 units whatever the assembly
+ * does with it — and it is the reason this can be cheap at all.
+ *
+ * @returns `null` when the container has no positional geometry to measure (a GLB that is
+ *   only lights, or only animation). The dialog then falls back to its own default rather
+ *   than pre-filling a guess made from nothing.
+ */
+export function suggestUnitFromHeader(header: {
+  json: { meshes?: { primitives?: { attributes?: Record<string, number> }[] }[]; accessors?: { min?: number[]; max?: number[] }[] }
+}): { unit: SceneUnit; confident: boolean; reason: string } | null {
+  const accessors = header.json.accessors ?? []
+  const box = new Box3Impl()
+  let measured = false
+
+  for (const mesh of header.json.meshes ?? []) {
+    for (const primitive of mesh.primitives ?? []) {
+      const at = primitive.attributes?.['POSITION']
+      if (at === undefined) continue
+      const accessor = accessors[at]
+      const min = accessor?.min
+      const max = accessor?.max
+      if (!min || !max || min.length < 3 || max.length < 3) continue
+      // Non-finite entries do exist in the wild (a NaN vertex poisons the whole accessor's
+      // min/max). Skipping them beats letting one bad primitive make the box infinite.
+      if (![...min.slice(0, 3), ...max.slice(0, 3)].every((n) => Number.isFinite(n))) continue
+      box.expandByPoint(new Vector3(min[0], min[1], min[2]))
+      box.expandByPoint(new Vector3(max[0], max[1], max[2]))
+      measured = true
+    }
+  }
+
+  return measured ? suggestUnit(box) : null
 }
 
 /** Decomposes a matrix into the document's p / r / s triple. */

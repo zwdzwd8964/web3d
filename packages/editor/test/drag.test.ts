@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PRIMITIVE_TEMPLATES } from '../src/lib/library.js'
 import type { ImportResult } from '../src/lib/import-flow.js'
 import { LIBRARY_MIME, PRIMITIVE_MIME, acceptsDrag, beginDrag, endDrag, getDrag } from '../src/viewport/drag.js'
-import { DropController } from '../src/viewport/drop-controller.js'
+import { DropController, LIBRARY_DECLARATION } from '../src/viewport/drop-controller.js'
 import { createDocumentStore } from '../src/store/document-store.js'
 import { resetSnap, setSnap } from '../src/viewport/snap.js'
 
@@ -236,6 +236,10 @@ describe('dropping a library model', () => {
     await controller.drop({ kind: 'library', item: ITEM }, at([0, 0, 0]), () => [4, 0.5, -2])
 
     expect(importItem).toHaveBeenCalledTimes(1)
+    // T-259 · 第三条导入入口。内置库的文件确实是米制 · Y 朝上，所以这里传的是常量而不是
+    // 问用户一句——但**参数必须真的传出去**：三条入口里少接一条，那一条进来的模型就永远
+    // 按米处理，而三条在用户眼里是同一个「导入」。
+    expect(importItem).toHaveBeenCalledWith(ITEM, LIBRARY_DECLARATION)
     expect(state().doc.nodes).toHaveLength(before + 1)
     expect(state().historyDepth, '导入 + 落点 = 一条撤销').toBe(1)
     const created = state().doc.nodes[state().doc.nodes.length - 1]!

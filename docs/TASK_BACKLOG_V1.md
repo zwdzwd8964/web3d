@@ -2107,8 +2107,8 @@
 - ⚠ 顺带登记（不在本卡范围）：gizmo 多选拖拽**不应用旋转 delta**（只加 position、乘 scale），
   但 UI 上旋转模式按钮可用。
 
-### [ ] T-259 · 源单位 / 上方向声明这条断链接上
-- **依赖** T-217 · **预估** 0.8d · **实际** —
+### [x] T-259 · 源单位 / 上方向声明这条断链接上
+- **依赖** T-217 · **预估** 0.8d · **实际** 0.9d
 - **独占** `packages/editor/src/panels/ImportDialog.tsx`(新) · `packages/editor/src/panels/AssetPanel.tsx` ·
   `packages/editor/src/lib/library.ts` · `packages/editor/test/import-flow.test.ts`
 - **做** 文件选定后、`importAsset` 之前弹 `ImportDialog` 让用户声明 `sourceUnit` / `sourceUpAxis`，

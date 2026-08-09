@@ -387,9 +387,10 @@ export function Viewport() {
       select,
       boundsOf: (ids) => runtimeRef.current?.boundsOf(ids) ?? null,
       settle: patchesSettled,
-      importItem: (item) =>
+      importItem: (item, declaration) =>
         importLibraryItem({
           item,
+          ...declaration,
           doc: store.getState().doc,
           storage: session.storage,
           loader: session.loader,

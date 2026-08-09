@@ -53,7 +53,9 @@ export interface GltfJson {
   readonly meshes?: { primitives?: { mode?: number; indices?: number; attributes?: Record<string, number> }[] }[]
   // `max` 是 glTF 规范对 animation input 访问器的**强制要求**——正因如此，片段时长
   // 不需要解 BIN chunk 就拿得到（见 `clipDurationsFromJson`）。
-  readonly accessors?: { count?: number; max?: number[] }[]
+  // T-259 · `min` 与 `max` 一样是 glTF 对 POSITION 访问器的强制要求，`suggestUnitFromHeader`
+  // 靠这一对拿到模型尺度，不必解 BIN chunk。
+  readonly accessors?: { count?: number; min?: number[]; max?: number[] }[]
   readonly materials?: unknown[]
   readonly images?: { bufferView?: number; uri?: string; mimeType?: string }[]
   readonly textures?: unknown[]

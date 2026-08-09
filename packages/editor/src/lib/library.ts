@@ -7,6 +7,7 @@ import {
   ensureDefaultMaterial,
   identityTransform,
 } from '@w3/schema'
+import type { SceneUnit, UpAxis } from '@w3/core'
 import type { AssetLoader } from '@w3/core'
 import type { StorageProvider } from '@w3/storage'
 import { importAsset } from './import-flow.js'
@@ -241,6 +242,15 @@ export interface ImportLibraryItemOptions {
   /** Where the app is served from. Required — see `LoadLibraryOptions.base`. */
   readonly base: string
   readonly fetch?: typeof globalThis.fetch
+  /**
+   * T-259 · 源单位与上方向，逐字透传给 `importAsset`。
+   *
+   * 内置库自己的文件当然是米 · Y 朝上——这两个参数不是为它们准备的，是为了让**这条入口
+   * 与另外两条走同一条路**。三条入口里只要有一条不透传，那一条进来的模型就永远按米处理，
+   * 而三条在用户眼里是同一个「导入」。默认值写在 `importAsset` 一侧，此处不填即沿用。
+   */
+  readonly sourceUnit?: SceneUnit
+  readonly sourceUpAxis?: UpAxis
   readonly newId?: IdFactory
   readonly now?: () => string
 }
@@ -271,6 +281,8 @@ export async function importLibraryItem(options: ImportLibraryItemOptions): Prom
     doc,
     storage,
     loader,
+    ...(options.sourceUnit ? { sourceUnit: options.sourceUnit } : {}),
+    ...(options.sourceUpAxis ? { sourceUpAxis: options.sourceUpAxis } : {}),
     ...(options.newId ? { newId: options.newId } : {}),
     ...(options.now ? { now: options.now } : {}),
   })

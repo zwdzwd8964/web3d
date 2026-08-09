@@ -1,10 +1,12 @@
 import type { AuditFinding } from '@w3/schema'
-import { formatBytes } from '@w3/core'
+import { formatBytes, readGlbHeader, suggestUnitFromHeader } from '@w3/core'
 import { useMemo, useRef, useState } from 'react'
 import { IMPORT_ACCEPT, applyImport, importAsset, placeInstance, summarizeImport } from '../lib/import-flow.js'
 import type { ImportProgress, ImportResult } from '../lib/import-flow.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
+import { ImportDialog, declarationFrom } from './ImportDialog.jsx'
+import type { ImportDeclaration } from './ImportDialog.jsx'
 import { describeRemoval } from './removal.js'
 
 /**
@@ -30,21 +32,50 @@ export function AssetPanel() {
   const [pending, setPending] = useState<ImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [replacing, setReplacing] = useState<string | null>(null)
+  /** T-259 · a GLB waiting on the unit / up-axis question, or null. */
+  const [declaring, setDeclaring] = useState<{
+    file: { name: string; bytes: ArrayBuffer }
+    suggestion: ReturnType<typeof suggestUnitFromHeader>
+    value: ImportDeclaration
+  } | null>(null)
   /** T-257 · the asset id awaiting a delete confirmation, or null. */
   const [removing, setRemoving] = useState<string | null>(null)
   // 重新推导而不是拍快照：对话框开着时有人删了引用方，问句要从「无法删除」变成可删。
   const removal = useMemo(() => (removing ? describeRemoval(doc, 'asset', removing) : null), [doc, removing])
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const runImport = async (file: File) => {
+  /**
+   * T-259 · 先问单位与上方向，再导入。
+   *
+   * 只有 GLB 走这一步：贴图、环境贴图、音视频没有「单位」这件事，给它们弹一个选米还是
+   * 毫米的框只是徒增一次点击。判据是**头部解析得出来**——`readGlbHeader` 对不是 glTF
+   * 容器的字节返回 null，不抛。
+   */
+  const chooseFile = async (file: File) => {
+    setError(null)
+    setPending(null)
+    const bytes = await file.arrayBuffer()
+    const header = readGlbHeader(bytes)
+    if (!header) {
+      await runImport({ name: file.name, bytes })
+      return
+    }
+    // 只读 JSON chunk 里的 POSITION 访问器 min/max，不解几何：用户刚点完文件，
+    // 对话框要立刻出来，而一份 200 MB 的装配体不该被解码两遍。
+    const suggestion = suggestUnitFromHeader(header)
+    setDeclaring({ file: { name: file.name, bytes }, suggestion, value: declarationFrom(suggestion) })
+  }
+
+  const runImport = async (file: { name: string; bytes: ArrayBuffer }, declaration?: ImportDeclaration) => {
     setError(null)
     setPending(null)
     try {
       const result = await importAsset({
-        file: { name: file.name, bytes: await file.arrayBuffer() },
+        file,
         doc,
         storage,
         loader,
+        ...(declaration ?? {}),
         ...(replacing ? { replacesAssetId: replacing } : {}),
         onProgress: setProgress,
       })
@@ -93,7 +124,7 @@ export function AssetPanel() {
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0]
-            if (file) void runImport(file)
+            if (file) void chooseFile(file)
             event.target.value = ''
           }}
         />
@@ -105,7 +136,7 @@ export function AssetPanel() {
         onDrop={(event) => {
           event.preventDefault()
           const file = event.dataTransfer.files[0]
-          if (file) void runImport(file)
+          if (file) void chooseFile(file)
         }}
       >
         {progress && <p className="panel__note">{progress.message}</p>}
@@ -181,6 +212,24 @@ export function AssetPanel() {
               取消
             </button>
           </div>
+        )}
+
+        {declaring && (
+          <ImportDialog
+            fileName={declaring.file.name}
+            value={declaring.value}
+            suggestion={declaring.suggestion}
+            onChange={(value) => setDeclaring({ ...declaring, value })}
+            onConfirm={() => {
+              const { file, value } = declaring
+              setDeclaring(null)
+              void runImport(file, value)
+            }}
+            onCancel={() => {
+              setDeclaring(null)
+              setReplacing(null)
+            }}
+          />
         )}
 
         {pending && (
