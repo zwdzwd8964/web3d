@@ -2071,8 +2071,8 @@
 - **自测** `pnpm -F @w3/core test material-registry`
 - **变异检验** 不调 `retainOnly` → 「再对 B 建 clone 后 `cloneCount === 1`」会变成 2，必须红。
 
-### [ ] T-257 · 删材质 / 删资产入口（未认领缺口补齐）
-- **依赖** T-227 · **预估** 1.0d · **实际** —
+### [x] T-257 · 删材质 / 删资产入口（未认领缺口补齐）
+- **依赖** T-227 · **预估** 1.0d · **实际** 0.9d
 - **独占** `packages/editor/src/panels/MaterialPanel.tsx`（删除入口）· `packages/editor/src/panels/AssetPanel.tsx`
   （删除入口）· `packages/editor/src/panels/removal.ts`(新，与 T-290 共用) ·
   `packages/editor/test/removal-material.test.ts`(新)

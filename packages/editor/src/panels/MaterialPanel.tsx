@@ -1,5 +1,5 @@
 import type { MaterialBase, MaterialMaps, SceneDocument } from '@w3/schema'
-import { MATERIAL_BASES, createMaterial, defaultFactoryContext } from '@w3/schema'
+import { MATERIAL_BASES, createMaterial, defaultFactoryContext, ensureDefaultMaterial } from '@w3/schema'
 import { useMemo, useState } from 'react'
 import {
   IDENTITY_UV,
@@ -18,6 +18,7 @@ import { commonValue } from '../lib/selection-values.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { NumberField, TextField } from '../widgets/NumberField.js'
 import { TexturePicker } from '../widgets/TexturePicker.js'
+import { describeRemoval } from './removal.js'
 
 /**
  * T-067 + T-152 · the material panel.
@@ -45,11 +46,15 @@ export function MaterialPanel() {
   const [picking, setPicking] = useState<keyof MaterialMaps | null>(null)
   /** A preset waiting on the 「分离 / 全部」 question, when the material is shared. */
   const [pendingPreset, setPendingPreset] = useState<MaterialPreset | null>(null)
+  /** T-257 · the material id awaiting a delete confirmation, or null. */
+  const [removing, setRemoving] = useState<string | null>(null)
 
   const selected = useMemo(() => doc.nodes.filter((n) => selection.includes(n.id)), [doc.nodes, selection])
   const materialId = useMemo(() => commonValue(selected, (n) => n.overrides.materialId ?? null), [selected])
   const material = typeof materialId === 'string' ? doc.materials.find((m) => m.id === materialId) : undefined
   const users = material ? usersOfMaterial(doc, material.id) : 0
+  // T-257 · 重新推导而不是点下删除键那一刻拍快照：对话框开着时文档变了，问句要跟着变。
+  const removal = useMemo(() => (removing ? describeRemoval(doc, 'material', removing) : null), [doc, removing])
 
   const assign = (id: string | null) => {
     commit(id ? '指定材质' : '还原材质', (draft) => {
@@ -150,7 +155,48 @@ export function MaterialPanel() {
         >
           新建并指定
         </button>
+        {/* T-257 · 在此之前，一条建错的材质永远删不掉。 */}
+        <button
+          type="button"
+          className="tbtn"
+          data-testid="material-remove"
+          disabled={material === undefined}
+          title="删除当前材质，使用它的对象回到默认材质"
+          onClick={() => setRemoving(typeof materialId === 'string' ? materialId : null)}
+        >
+          删除材质
+        </button>
       </div>
+
+      {removal && (
+        <div className="panel__note panel__note--warn" data-testid="material-remove-confirm" role="alertdialog">
+          {removal.question}
+          <button
+            type="button"
+            className="tbtn"
+            disabled={removal.blocked !== null}
+            data-testid="material-remove-confirm-yes"
+            onClick={() => {
+              setRemoving(null)
+              commit(`删除材质 ${removal.name}`, (draft) => {
+                // 先建/找到落点，再删——顺序反了的话，被删的恰好是唯一一条材质时，
+                // 中间会有一瞬间文档里一条材质都没有。
+                const fallback = ensureDefaultMaterial(draft, defaultFactoryContext)
+                for (const node of draft.nodes) {
+                  if (node.overrides.materialId === removal.id) node.overrides.materialId = fallback
+                }
+                const at = draft.materials.findIndex((m) => m.id === removal.id)
+                if (at >= 0) draft.materials.splice(at, 1)
+              })
+            }}
+          >
+            {removal.blocked === null ? '确认删除' : '无法删除'}
+          </button>
+          <button type="button" className="tbtn" onClick={() => setRemoving(null)}>
+            取消
+          </button>
+        </div>
+      )}
 
       {selected.length === 0 ? (
         <p className="panel__empty">未选中对象</p>

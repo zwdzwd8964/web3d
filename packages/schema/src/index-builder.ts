@@ -347,9 +347,16 @@ export function referencesTo(index: DocIndex, id: string): readonly Ref[] {
 /**
  * "该节点被 2 条规则、1 个动画引用，确认删除？" — the sentence T-092 requires before a
  * delete. Returns an empty string when nothing points at `id`.
+ *
+ * @param exclude T-257 · ids whose references do NOT count, because they are being deleted
+ *   in the same breath. Deleting a group takes its children with it, and every child points
+ *   at the parent through `parent` — without this, a 20-part group reads as 「被 20 个对象
+ *   引用，删除后这些引用会失效」, which sounds like twenty things elsewhere are about to
+ *   break. Omit it and the behaviour is exactly what it was before.
  */
-export function describeReferences(index: DocIndex, id: string): string {
-  const refs = referencesTo(index, id)
+export function describeReferences(index: DocIndex, id: string, exclude?: ReadonlySet<string>): string {
+  const all = referencesTo(index, id)
+  const refs = exclude ? all.filter((ref) => !exclude.has(ref.from.id)) : all
   if (refs.length === 0) return ''
   const labels: Record<string, string> = {
     rule: '条规则',

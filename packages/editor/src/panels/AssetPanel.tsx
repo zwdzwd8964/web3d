@@ -1,10 +1,11 @@
 import type { AuditFinding } from '@w3/schema'
 import { formatBytes } from '@w3/core'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { IMPORT_ACCEPT, applyImport, importAsset, placeInstance, summarizeImport } from '../lib/import-flow.js'
 import type { ImportProgress, ImportResult } from '../lib/import-flow.js'
 import { useProject } from '../project/ProjectContext.jsx'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
+import { describeRemoval } from './removal.js'
 
 /**
  * T-066 · the asset panel and its import flow.
@@ -29,6 +30,10 @@ export function AssetPanel() {
   const [pending, setPending] = useState<ImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [replacing, setReplacing] = useState<string | null>(null)
+  /** T-257 · the asset id awaiting a delete confirmation, or null. */
+  const [removing, setRemoving] = useState<string | null>(null)
+  // 重新推导而不是拍快照：对话框开着时有人删了引用方，问句要从「无法删除」变成可删。
+  const removal = useMemo(() => (removing ? describeRemoval(doc, 'asset', removing) : null), [doc, removing])
   const fileInput = useRef<HTMLInputElement>(null)
 
   const runImport = async (file: File) => {
@@ -137,9 +142,46 @@ export function AssetPanel() {
               >
                 更新
               </button>
+              {/* T-257 · 在此之前，一张导错的贴图删不掉，它的字节会一直进发布包。 */}
+              <button
+                type="button"
+                className="tbtn"
+                data-testid={`asset-remove-${asset.id}`}
+                title="从文档中删除这份资产"
+                onClick={() => setRemoving(asset.id)}
+              >
+                删除
+              </button>
             </li>
           ))}
         </ul>
+
+        {removal && (
+          <div className="panel__note panel__note--warn" data-testid="asset-remove-confirm" role="alertdialog">
+            {removal.question}
+            <button
+              type="button"
+              className="tbtn"
+              disabled={removal.blocked !== null}
+              data-testid="asset-remove-confirm-yes"
+              onClick={() => {
+                setRemoving(null)
+                commit(`删除资产 ${removal.name}`, (draft) => {
+                  // 只动 `document.assets`。**字节不在这里删**——它们躺在 StorageProvider 的
+                  // blob 表里，可能被别的项目共用（同一份 hash 只存一次）。发布包已经只写
+                  // 被引用的资产（T-233），所以这一条记录消失，那份字节就不再进包。
+                  const at = draft.assets.findIndex((a) => a.id === removal.id)
+                  if (at >= 0) draft.assets.splice(at, 1)
+                })
+              }}
+            >
+              {removal.blocked === null ? '确认删除' : '无法删除'}
+            </button>
+            <button type="button" className="tbtn" onClick={() => setRemoving(null)}>
+              取消
+            </button>
+          </div>
+        )}
 
         {pending && (
           <ImportReport result={pending} onConfirm={confirmImport} onCancel={() => setPending(null)} />
