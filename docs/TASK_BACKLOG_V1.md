@@ -2089,8 +2089,8 @@
 - **变异检验** ① 删掉引用前置检查 → 「被引用时被拒」红；
   ② 删材质后不回落到默认材质 → `checkIntegrity` 那条红（**若只断言「材质少了一条」则不会红**）。
 
-### [ ] T-258 · 改父保持世界位姿 + 拖拽改父的 E2E
-- **依赖** 无 · **预估** 2.0d · **实际** —
+### [x] T-258 · 改父保持世界位姿 + 拖拽改父的 E2E
+- **依赖** 无 · **预估** 2.0d · **实际** 1.8d
 - **独占** `packages/schema/src/transform-math.ts`(新) · `packages/schema/test/transform-math.test.ts`(新) ·
   `packages/editor/src/panels/tree-dnd.ts` · `packages/editor/test/editor-logic.test.ts` · `e2e/tests/reparent.spec.ts`(新)
 - **做** `reparentPreservingWorld` 并接进 `applyDropPlan`；`sheared` 时给中文提示。
