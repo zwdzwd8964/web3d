@@ -1,5 +1,5 @@
 import type { AuditFinding } from '@w3/schema'
-import { formatBytes, readGlbHeader, suggestUnitFromHeader } from '@w3/core'
+import { formatBytes, readGlbHeader, regrade, suggestUnitFromHeader } from '@w3/core'
 import { useMemo, useRef, useState } from 'react'
 import { IMPORT_ACCEPT, applyImport, importAsset, placeInstance, summarizeImport } from '../lib/import-flow.js'
 import type { ImportProgress, ImportResult } from '../lib/import-flow.js'
@@ -39,6 +39,17 @@ export function AssetPanel() {
     suggestion: ReturnType<typeof suggestUnitFromHeader>
     value: ImportDeclaration
   } | null>(null)
+  /** T-261 · the asset whose stored report is being re-read, or null. */
+  const [reviewing, setReviewing] = useState<string | null>(null)
+  /**
+   * T-261 · 重新体检。**只读**——`regrade` 只用已存的 stats 重判阈值，不重读字节
+   * （资产字节可能已经不在本地），也不写文档（存着的那份结论是收检当天的事实，
+   * 是合同口径的一部分，今天阈值变严了不能倒过来改写历史）。
+   */
+  const review = useMemo(() => {
+    const asset = reviewing ? doc.assets.find((a) => a.id === reviewing) : undefined
+    return asset?.audit ? { asset, result: regrade(asset.stats, asset.audit) } : null
+  }, [doc.assets, reviewing])
   /** T-257 · the asset id awaiting a delete confirmation, or null. */
   const [removing, setRemoving] = useState<string | null>(null)
   // 重新推导而不是拍快照：对话框开着时有人删了引用方，问句要从「无法删除」变成可删。
@@ -154,7 +165,17 @@ export function AssetPanel() {
               <span className="num">v{asset.version}</span>
               <span className="num">{formatBytes(asset.stats.bytes)}</span>
               <span className="num">{asset.stats.tris.toLocaleString('en-US')} 面</span>
-              {asset.audit && <AuditBadge findings={asset.audit.findings} />}
+              {asset.audit && (
+                <button
+                  type="button"
+                  className="badge-button"
+                  data-testid={`asset-audit-${asset.id}`}
+                  title="查看体检报告，并按当前阈值重新判级"
+                  onClick={() => setReviewing(asset.id)}
+                >
+                  <AuditBadge findings={asset.audit.findings} />
+                </button>
+              )}
               <button
                 type="button"
                 className="tbtn"
@@ -213,6 +234,27 @@ export function AssetPanel() {
               取消
             </button>
           </div>
+        )}
+
+        {review && (
+          <AuditReport
+            name={review.asset.name}
+            summary={review.result.current.summary}
+            audit={review.result.stored}
+            {...(review.asset.origin ? { origin: review.asset.origin } : {})}
+            mode="view"
+            notes={
+              review.result.changed
+                ? [
+                    ...review.result.notes,
+                    // 两句结论不同时必须明说。否则用户看到两行相似的中文，很容易以为
+                    // 那只是同一句话的两种写法，而它们的差正是这个功能存在的理由。
+                    '⚠ 两次结论不同：阈值在这中间改过。文档里存着的仍然是收检时的那一份，本页不会改写它。',
+                  ]
+                : review.result.notes
+            }
+            onCancel={() => setReviewing(null)}
+          />
         )}
 
         {declaring && (

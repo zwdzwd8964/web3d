@@ -2138,8 +2138,8 @@
   裸数字红；③ 删 `summary` 那行 → 红。**⚠ 这三条正是最容易写成假绿的地方**：
   「表格渲染出来了」和「表格渲染的是对的东西」在今天的实现下**都成立**。
 
-### [ ] T-261 · 重新体检（只读）+ 附件A 机械校验
-- **依赖** T-260 · **预估** 1.0d · **实际** —
+### [x] T-261 · 重新体检（只读）+ 附件A 机械校验
+- **依赖** T-260 · **预估** 1.0d · **实际** 1.3d
 - **独占** `packages/editor/src/panels/AssetPanel.tsx`（`AuditBadge` 可点击）·
   `packages/core/src/assets/audit.ts`（增 `regrade`）· `packages/core/test/assets/regrade.test.ts`(新) ·
   `scripts/check-annex-a.mjs`(新) · `scripts/check-constitution.mjs` · `docs/附件A_数字资产规范_草案.md`

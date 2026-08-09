@@ -52,6 +52,10 @@ const GUARDS = [
   // the script that reads an expiry version did not exist, so three ADRs (0022 / 0024 / 0025)
   // each wrote into their own 代价 column that their expiry promise was a blank cheque until
   // this line existed.
+  // v1.0 · T-261. 附件A 是合同的一部分，而它的每个数字在 DEFAULT_POLICY 里都有一个
+  // 对应物，两边靠人手同步。人手同步的失效是**单向的**：有人为了让一份客户资产过检而
+  // 调宽策略，附件A 不动——合同里写着 60 MB、系统里放行 80 MB，而没有任何测试会红。
+  { article: '合同 · 附件A', script: 'check-annex-a.mjs', args: [], what: 'Appendix A numbers equal DEFAULT_POLICY; every metric is in the contract; no retired format names' },
   { article: 'NORTH_STAR §8', script: 'check-expiry.mjs', args: [], what: 'every CONSTITUTION-EXCEPTION parses and none has expired' },
 ]
 

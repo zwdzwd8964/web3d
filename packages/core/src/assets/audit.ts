@@ -523,3 +523,77 @@ export function measureMedia(byteLength: number): MediaMeasurements {
 export function auditMedia(byteLength: number, options: AuditOptions & { scope: 'audio' | 'video' }): AuditResult {
   return grade(measureMedia(byteLength), options)
 }
+
+/* ========================================================================== */
+/* T-261 · 重新体检（只读）                                                    */
+/* ========================================================================== */
+
+/** 一次重新判级的结果：收检时的那份结论，和按今天的阈值重算的那份。 */
+export interface RegradeResult {
+  /** 文档里存着的那一份，**逐字节原样返回**，没有被重新计算过。 */
+  readonly stored: AssetAudit
+  /** 按传入 policy 重算的结论。**不写文档**——它是一个视图，不是一次编辑。 */
+  readonly current: AuditResult
+  /** 两次判级的结论是否不同。true 就意味着阈值在这中间改过。 */
+  readonly changed: boolean
+  /** 两句中文，直接给报告顶部用。 */
+  readonly notes: readonly string[]
+}
+
+/**
+ * 按今天的阈值，用**已存的 stats** 重新判一次级。
+ *
+ * ## 为什么不重读字节
+ *
+ * 资产的字节可能已经不在本地了——用户换了台机器、清了缓存、或者这份文档是别人发来的。
+ * 「重新体检」如果需要原文件，那它在最需要用到的时候恰好用不了。而重新判级要的只是
+ * 「这些数字对上今天的上限是什么结论」，那些数字早就存在 `asset.stats` 里。
+ *
+ * 代价写清楚：**它只能重判阈值，不能发现新的测量维度**。v0.5 之后新增的指标（贴图显存、
+ * 单张贴图边长）在老资产的 `stats` 里没有，重判时按 0 处理，报告里会是「0，通过」——
+ * 那不是真的通过，是没测过。所以两句话里第二句必须写明「按当前阈值重算」，而不是
+ * 「重新体检」——后者暗示重新测量了。
+ *
+ * @param stats 文档里存着的测量结果
+ * @param stored 文档里存着的体检结论。原样返回，**一个字节都不动**
+ * @param options 判级用的 policy 与时钟
+ */
+export function regrade(stats: AssetStats, stored: AssetAudit, options: AuditOptions = {}): RegradeResult {
+  // 缺失的维度补 0 而不是补上限：补上限会让老资产在报告里显示「刚好卡线通过」，
+  // 那比「0」更容易被当成真的测过了。
+  const measurements: AuditMeasurements = {
+    ...stats,
+    maxTextureSize: 0,
+    externalRefs: 0,
+    unsupportedExtensions: 0,
+    textureBytesFallback: 0,
+    compressedTextureCount: 0,
+  }
+  const current = grade(measurements, options)
+  const storedVerdict = verdictOf(stored.findings)
+
+  return {
+    stored,
+    current,
+    changed: storedVerdict !== current.verdict,
+    notes: [
+      `收检时（${stored.checkedAt.slice(0, 10)}，阈值 ${stored.policyId}）：${describeVerdict(storedVerdict, stored.findings)}`,
+      `按当前阈值（${current.audit.policyId}）重算：${current.summary}`,
+    ],
+  }
+}
+
+/** 一组 finding 的总结论。fail 压过 warn，warn 压过 pass。 */
+function verdictOf(findings: readonly AuditFinding[]): AuditLevel {
+  if (findings.some((f) => f.level === 'fail')) return 'fail'
+  return findings.some((f) => f.level === 'warn') ? 'warn' : 'pass'
+}
+
+/** 一句中文结论，形状与 `grade` 的 `summary` 一致，好让两句话读起来是同一种东西。 */
+function describeVerdict(verdict: AuditLevel, findings: readonly AuditFinding[]): string {
+  const failing = findings.filter((f) => f.level === 'fail')
+  const warning = findings.filter((f) => f.level === 'warn')
+  if (verdict === 'pass') return `体检通过：${findings.length} 项全部在规范范围内。`
+  if (verdict === 'warn') return `体检通过，但 ${warning.length} 项接近上限：${warning.map(labelOf).join('、')}。`
+  return `体检未通过：${failing.length} 项超标 —— ${failing.map(labelOf).join('、')}。`
+}

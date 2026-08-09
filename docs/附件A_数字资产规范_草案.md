@@ -30,8 +30,8 @@
 | 项 | 要求 | 来源 |
 |---|---|---|
 | 格式 | **glTF 2.0 二进制（`.glb`）**，单文件自包含 | `[规范]` MVP_V0 §1.2 v0 只支持 glTF/GLB |
-| 几何压缩 | **允许**送检件自带 Draco 压缩——「允许」= 我方能读 | `[代码]` 解码器已自托管于 `vendor/draco/`，离线可用 |
-| 贴图压缩 | **允许**送检件自带 KTX2 / Basis 压缩贴图——「允许」= 我方能读，**不是**我方代为压缩（见本节末「『允许』与『代做』的分界」） | `[代码]` transcoder 已自托管于 `vendor/basis/`；解码路径由 v1.0 的 T-219 第一次真正接通（此前 `KTX2Loader` 从未被创建过，见 [MVP_V1_进化规划.md](MVP_V1_进化规划.md) §1.3 遗留决议 S3） |
+| 几何压缩 | **允许**送检件自带 Draco 压缩——「允许」= 我方能读 | `[实测]` **T-218 已端到端跑通**：解码器自托管于 `vendor/draco/`，E2E 实测取回 `draco_wasm_wrapper.js`（276,778 字节）与 `draco_decoder.wasm` 两条同源 URL，压缩件与未压缩同源件的体检报告逐项相等 |
+| 贴图压缩 | **允许**送检件自带 KTX2 / Basis 压缩贴图——「允许」= 我方能读，**不是**我方代为压缩（见本节末「『允许』与『代做』的分界」） | `[实测]` **T-219 已端到端跑通**：transcoder 自托管于 `vendor/basis/`，E2E 实测取回 `basis_transcoder.js`（253,964 字节）与 `basis_transcoder.wasm`。⚠ 在此之前 `KTX2Loader` 从未被创建过——**「解码器已自托管」不等于「能用」**，本行原文正是那种误读的成品 |
 | 外部引用 | **不允许**。不得引用外部 `.bin`、外部贴图、外部 URL | `[规范]` 宪法 C6 零外部运行时依赖；内网部署下任何外链都是白屏 |
 | 交付方式 | 单个 `.glb` 文件；多个部件可分多个文件分批导入 | `[代码]` 导入按内容哈希去重，同一文件重复提交不额外占用存储 |
 
@@ -57,13 +57,13 @@ v1.5 的服务端资产转码**只做 Draco 几何压缩**（纯 WASM，无服�
 
 | 指标 | 上限 | 接近上限（黄灯） | 来源 |
 |---|---|---|---|
-| 单文件大小 | **60 MB** | 48 MB | `[代码]` `DEFAULT_POLICY.maxBytes` |
-| 三角面数 | **300,000** | 240,000 | `[代码]` `DEFAULT_POLICY.maxTriangles` |
-| 材质数量 | **60** | 48 | `[代码]` `DEFAULT_POLICY.maxMaterials` |
-| 贴图数量 | **40** | 32 | `[代码]` `DEFAULT_POLICY.maxTextures` |
-| 贴图解码后显存 | **128 MB** | 102 MB | `[代码]` `DEFAULT_POLICY.maxTextureBytes` |
-| 单张贴图边长 | **2048 px** | 1638 px | `[代码]` `DEFAULT_POLICY.maxTextureSize` |
-| 节点数量 | **5,000** | 4,000 | `[代码]` `DEFAULT_POLICY.maxNodes` |
+| 单文件大小 | **60 MB** | 48 MB | `[代码]` `DEFAULT_POLICY.maxBytes` · 指标 `bytes` |
+| 三角面数 | **300,000** | 240,000 | `[代码]` `DEFAULT_POLICY.maxTriangles` · 指标 `tris` |
+| 材质数量 | **60** | 48 | `[代码]` `DEFAULT_POLICY.maxMaterials` · 指标 `materials` |
+| 贴图数量 | **40** | 32 | `[代码]` `DEFAULT_POLICY.maxTextures` · 指标 `textures` |
+| 贴图解码后显存 | **128 MB** | 102 MB | `[代码]` `DEFAULT_POLICY.maxTextureBytes` · 指标 `textureBytes` |
+| 单张贴图边长 | **2048 px** | 1638 px | `[代码]` `DEFAULT_POLICY.maxTextureSize` · 指标 `maxTextureSize` |
+| 节点数量 | **5,000** | 4,000 | `[代码]` `DEFAULT_POLICY.maxNodes` · 指标 `nodes` |
 
 黄灯阈值 = 上限 × **0.8**（`[代码]` `WARN_RATIO`）。
 
@@ -75,11 +75,11 @@ v1.5 的服务端资产转码**只做 Draco 几何压缩**（纯 WASM，无服�
 
 | 指标 | 上限 | 接近上限（黄灯） | 来源 |
 |---|---|---|---|
-| 图片文件大小（png / jpg / webp / ktx2） | **8 MB** | 6.4 MB | `[代码]` `DEFAULT_POLICY.maxImageBytes` |
-| 环境贴图文件大小（.hdr） | **32 MB** | 25.6 MB | `[代码]` `DEFAULT_POLICY.maxHdriBytes` |
-| 音频文件大小（mp3 / wav / ogg） | **10 MB** | 8 MB | `[代码]` `DEFAULT_POLICY.maxAudioBytes` |
-| 视频文件大小（mp4 / webm） | **50 MB** | 40 MB | `[代码]` `DEFAULT_POLICY.maxVideoBytes` |
-| 单张贴图边长 | **2048 px** | 1638 px | `[代码]` `DEFAULT_POLICY.maxTextureSize` |
+| 图片文件大小（png / jpg / webp / ktx2） | **8 MB** | 6.4 MB | `[代码]` `DEFAULT_POLICY.maxImageBytes` · 指标 `imageBytes` |
+| 环境贴图文件大小（.hdr） | **32 MB** | 25.6 MB | `[代码]` `DEFAULT_POLICY.maxHdriBytes` · 指标 `hdriBytes` |
+| 音频文件大小（mp3 / wav / ogg） | **10 MB** | 8 MB | `[代码]` `DEFAULT_POLICY.maxAudioBytes` · 指标 `audioBytes` |
+| 视频文件大小（mp4 / webm） | **50 MB** | 40 MB | `[代码]` `DEFAULT_POLICY.maxVideoBytes` · 指标 `videoBytes` |
+| 图片最大边长（独立贴图 / 环境贴图） | **2048 px** | 1638 px | `[代码]` `DEFAULT_POLICY.maxTextureSize` · 指标 `imageSize` |
 
 **格式是白名单，不是嗅探。** 能不能播由浏览器说了算，而在存完字节之后才发现播不了，
 等于给了一个在库里看得见、永远听不到的资产。白名单：
@@ -153,6 +153,17 @@ v1.5 的服务端资产转码**只做 Draco 几何压缩**（纯 WASM，无服�
 
 ---
 
+### KTX2 与色彩空间（v1.0 · T-219 实测）
+
+送检件里的 KTX2 贴图我方能正确解码并**按用途设定色彩空间**：基础色 / 自发光按 sRGB，
+法线 / 金属度 / 粗糙度 / 环境光遮蔽按线性。这一条要写进附件是因为它的失效方式很安静——
+色彩空间搞错时模型仍然显示，只是偏灰或偏亮，看起来像「材质没调好」而不是「贴图读错了」。
+
+**送检方需要注意的一条**：同一张 KTX2 被同时用作基础色与法线时，色彩空间只能按其中
+一种设定。请为两种用途各导出一张。
+
+**[v1.5]** 转码上线后，我方可代为把未压缩贴图转成 KTX2；届时本节增加「送检 / 处理后」
+两栏的对照口径。v1.0 不做（见 §1「『允许』与『代做』的分界」）。
 ## 6. 动画
 
 | 项 | 要求 | 来源 |
@@ -227,5 +238,7 @@ benchmark 页从 v0.5 起会给出**两个**动态灯上限：无阴影的，和
 - [ ] 每个需要单独交互的部件**有名字**，且该名字在后续版本中保持不变
 - [ ] 同一父节点下没有重名的兄弟节点
 - [ ] 原点位于装配体的几何中心或安装基准面附近
+- [ ] 若贴图为 KTX2，基础色 / 自发光与法线 / 金属粗糙 **分开导出**（色彩空间不同，见 §5）
+- [ ] 交付说明中写明源单位与上方向（导入时需要逐份声明，见 §3）
 
 把这一页发给交付方，比发整份附件有效。
