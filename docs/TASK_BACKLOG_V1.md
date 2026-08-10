@@ -2523,8 +2523,10 @@
 - ⚠ 债：阴影三档在 bench 页里测了三档，但**结论行只有 off 与 medium 两条，high 只落在明细里**——
   遗留决议 S3（旧称 H3，见规划 §1）要求的「确定出厂默认档」在现有报告格式下拿不到可比较的第三个数。
 
-### [ ] T-280 · bench 报告回填脚本
-- **依赖** T-279 · **预估** 0.8d · **实际** —
+### [x] T-280 · bench 报告回填脚本
+- **依赖** T-279 · **预估** 0.8d · **实际** 0.8d
+- **交付偏差** 一处：`package.json` 加一行 `check:bench` 并挂进 `verify`（卡面写了「挂进 `pnpm verify`」，但没把 `package.json` 列进独占）。
+- 附件A §7 的表被 `<!-- bench:table:start/end -->` 圈起来，由脚本整块重生成——**没有实测的今天它也在守东西**：那四行「待实测」的措辞被逐字节钉住。
 - **独占** `scripts/apply-bench-report.mjs`(新) · `docs/附件A_数字资产规范_草案.md` §7 ·
   `docs/BENCHMARK.md`（当前状态段）· `docs/bench-reports/.gitkeep`
 - **做** 回填规则逐字；`--check` 模式重生成后逐字节比对；**软渲报告
