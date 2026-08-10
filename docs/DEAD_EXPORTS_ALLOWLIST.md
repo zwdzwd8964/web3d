@@ -39,6 +39,7 @@
 | 2026-08-05 | T-259 | 24 | **23** | `suggestUnit` 退休。它从 T-051 起就躺在零调用者清单上——公式在、对话框不在，于是每一份模型都按米处理。本卡在 core 里加 `suggestUnitFromHeader`（从 GLB 头部的 POSITION 访问器 min/max 直接量，不解几何）作为它的生产调用者，编辑器再调这一层。**接线一张卡，表短一格** |
 | 2026-08-05 | T-260 | 23 | **22** | `AuditResult.summary` 退休。它一直算得好好的、从来没被显示过——一句「体检通过，但 2 项接近上限：三角面数、贴图数量」，用户一次都没看见。`AuditReport` 把它渲染出来，那一行随之删除 |
 | 2026-08-05 | T-265 | 22 | **28** | **+6，全部 owner 是紧接着的 T-266 / T-267。** sprite 层与它的消费者被卡面拆成了两张卡：本卡落栅格化与 `ops`（纯 Node 可穷举），T-266 落编排（还原栈 · 八步链路 · overlay pass）。六行都到期 v1.2——**下一张卡就该把它们全删掉**，删不掉就说明拆卡拆错了 |
+| 2026-08-05 | T-266 | 28 | **30** | **+2，而且 T-265 那六行一条都没删掉——这与我在上一行写的预期不符，如实记下。** 成因是拆卡的边界与我以为的不同：sprite 层的消费者不是 `captureImage`（它只调一个注入进来的 `composeOverlay`，好让不出图的宿主不背那份对象），而是**宿主侧的接线**，那属于 T-267 的 Viewport。新增两行是 `CaptureResult` 的 blob 与 panelCount，同样等 T-267 的对话框。**下一张卡应当一次性删掉八行**，删不掉就说明 M17 的拆卡真的有问题。⚠ 另一头是好消息：`beginCapture` / `endCapture` 两行退休了——T-235 为出图预付的那对接缝，这一卡真的用上了。连同 `HotspotSpriteLayer.surface`（`captureSurface` 的 instanceof 分支读它）与 `RendererLike.setClearAlpha`（透明背景那一步），一共退休**七行**（还包括 `planCapture` / `CapturePlan.notice` / `HotspotSpriteLayer` —— `captureImage` 一接线，T-262 与 T-265 预付的那几行同时兑现）。净 −5：28 → 23 |
 
 ## 豁免
 
@@ -46,15 +47,13 @@
 
 | symbol | reason | owner | expires |
 |---|---|---|---|
-| core:planCapture | 出图对话框（T-267）与 exportImage 动作（T-266）下单前都过它一遍；本卡只落纯函数与两个矩阵，不落调用点 | T-266 | v1.2 |
 | core:CapturePlan.droppedOutline | T-263 的 resolveExportPipeline 返回同名字段，出图对话框据它显示「不含描边」那句 | T-263 | v1.2 |
-| core:CapturePlan.notice | 钳位说明，T-267 的对话框把它显示在尺寸下方；没有显示方就等于静默钳位 | T-267 | v1.2 |
-| core:HotspotSpriteLayer | 出图链路的热点层，T-266 的 captureImage 建它并在 drawScene 之后 compose；本卡只落栅格化与 ops，不落编排 | T-266 | v1.2 |
-| core:HotspotSpriteLayer.surface | T-266 的 overlay pass 拿这块画布当 three 贴图的源，并在导出前后按目标分辨率改它的尺寸 | T-266 | v1.2 |
 | core:HotspotSpriteLayer.fontSource | 出图对话框显示当前字体来源（T-267 验收点名） | T-267 | v1.2 |
 | core:HotspotSpriteLayer.prepare | T-266 在导出前等字体就绪、把媒体解码进缓存 | T-266 | v1.2 |
 | core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
 | core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |
+| core:CaptureResult.blob | 出图对话框（T-267）拿它触发浏览器下载，发布缩略图（T-269）把它当字节喂给 publish | T-267 | v1.2 |
+| core:CaptureResult.panelCount | 出图对话框显示「本次导出包含 N 个已打开面板」，也是面板重放的用户可见证据 | T-267 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |
@@ -69,11 +68,8 @@
 | core:AssetLoader.evict | T-429 换场景时按新文档收窄已加载资产，届时它是清场的一环 | T-429 | v1.5 |
 | core:RendererLike.getPixelRatio | T-214 的像素比封顶要读回渲染器当前值来断言钳位生效 | T-214 | v1.2 |
 | core:RendererLike.setClearColor | T-266 出图时改背景色，还原栈按进入前的值恢复 | T-266 | v1.2 |
-| core:RendererLike.setClearAlpha | T-266 的透明背景导出要把清除透明度设为零 | T-266 | v1.2 |
 | core:RendererLike.capabilities | T-262 的出图钳位公式要读 maxTextureSize 判上限 | T-262 | v1.2 |
 | core:RendererLike.setRenderTarget | T-235 的 composer 需要它切换离屏目标与画布 | T-235 | v1.2 |
-| core:SceneRuntime.beginCapture | T-266 的出图八步链路在开头调它：期间 tick 不画、resize 只记不改 | T-266 | v1.2 |
-| core:SceneRuntime.endCapture | T-266 同批交付，它负责弹出被推迟的 resize | T-266 | v1.2 |
 
 ## 冻结接口（接口先落，消费者在后）
 

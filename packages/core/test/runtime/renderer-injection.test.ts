@@ -179,7 +179,6 @@ describe('不注入时的构造参数', () => {
  * therefore both the assertion and the ledger: if it is empty, the seam list is fully wired.
  */
 const SEAMS: readonly [member: string, owner: string, invoke: (runtime: SceneRuntime) => unknown][] = [
-  ['captureImage', 'T-266', (r) => r.captureImage({})],
   ['flyToView', 'T-337', (r) => r.flyToView([])],
   ['showPage', 'T-307', (r) => r.showPage('pg_00000001')],
   ['hidePage', 'T-307', (r) => r.hidePage('pg_00000001')],
@@ -188,13 +187,14 @@ const SEAMS: readonly [member: string, owner: string, invoke: (runtime: SceneRun
 ]
 
 describe('接缝清单', () => {
-  it('opens exactly six seams', () => {
-    // 12 → 8 → 7 → 6：T-235 接线了 registerChrome / setChromeVisible / pipelineMode /
-    // setPostFxEnabled 四条，T-241 接线了 setSelectionOutline，T-244 接线了 setExplode。
+  it('opens exactly five seams', () => {
+    // 12 → 8 → 7 → 6 → 5：T-235 接线了 registerChrome / setChromeVisible / pipelineMode /
+    // setPostFxEnabled 四条，T-241 接线了 setSelectionOutline，T-244 接线了 setExplode，
+    // T-266 接线了 captureImage。
     // 按 T-200 定的规矩，
     // 接线一条就从这张表里删掉一行。
     // **这张表是进度台账**：一条接缝被实现，它就从这里消失，而不是改成「已实现」。
-    expect(SEAMS).toHaveLength(6)
+    expect(SEAMS).toHaveLength(5)
   })
 
   it.each(SEAMS)('%s (%s) exists and throws until it is wired', (member, owner, invoke) => {

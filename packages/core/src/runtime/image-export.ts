@@ -269,3 +269,186 @@ export function planCapture(request: CaptureRequest, limits: CaptureLimits): Cap
     notice: notices.join(' '),
   }
 }
+
+/* ========================================================================== */
+/* T-266 · captureImage 的编排与还原保证                                        */
+/* ========================================================================== */
+
+/**
+ * 出图要临时改动的那一片运行时状态，收成一个接口。
+ *
+ * **五个字段各有一个读、一个写**，因为还原栈要的是「进来时是什么，出去时还是什么」，
+ * 而那需要能读。写成接口而不是直接操作 `SceneRuntime`，是为了让八步链路能在纯 Node 里
+ * 被逐步注入故障——真实现里每一步都会碰渲染器。
+ */
+export interface CaptureSurface {
+  size(): { readonly width: number; readonly height: number }
+  setSize(width: number, height: number): void
+  chromeVisible(): boolean
+  setChromeVisible(visible: boolean): void
+  background(): 'transparent' | 'opaque'
+  setBackground(background: 'transparent' | 'opaque'): void
+  /** 帧循环在不在跑。出图期间必须停——半改完的状态画出去就是一帧闪烁。 */
+  running(): boolean
+  setRunning(running: boolean): void
+  capturing(): boolean
+  setCapturing(capturing: boolean): void
+  /** 准备 overlay：等字体、解码媒体、把打开着的面板重放进 sprite 层。 */
+  prepareOverlay(plan: CapturePlan): Promise<void>
+  /** 唯一渲染出口。 */
+  drawScene(): void
+  /** ADR-0025 的那次 overlay pass，`autoClear = false`，**在 `drawScene()` 之后**。 */
+  composeOverlay(): void
+  /** 把画布读成图片字节。 */
+  readPixels(format: 'png' | 'jpeg'): Promise<Blob | null>
+}
+
+/** 一次导出的结果。**永不 reject**，失败也是一个可以显示的值。 */
+export interface CaptureResult {
+  readonly ok: boolean
+  readonly width: number
+  readonly height: number
+  readonly format: 'png' | 'jpeg'
+  readonly background: 'transparent' | 'opaque'
+  readonly filename: string
+  /** 计划里的中文钳位说明，原样带出来给对话框显示。 */
+  readonly notice: string
+  /** 失败原因；成功时是空串。 */
+  readonly reason: string
+  /** 图片字节。headless 侧恒为 null（契约测试比的是除它以外的全部字段）。 */
+  readonly blob: Blob | null
+  /** 打开着的面板有没有被重放进导出图。 */
+  readonly panelCount: number
+}
+
+/** 出图期间被临时改掉的一项，以及怎么还原它。 */
+interface RestoreEntry {
+  readonly what: string
+  readonly undo: () => void
+}
+
+export interface CaptureRunOptions {
+  readonly request: CaptureRequest
+  readonly limits: CaptureLimits
+  readonly surface: CaptureSurface
+  readonly filename: string
+  /** 打开着的面板数，进结果供调用方断言重放。 */
+  readonly openPanelCount?: number
+  readonly onWarn?: (message: string) => void
+}
+
+/**
+ * 八步导出，**任何一步失败都把前面改过的全部还原**。
+ *
+ * ## 还原栈，而不是 try/finally 里抄一遍
+ *
+ * 每改一样东西就往栈里压一条「怎么还原」，收尾时倒着弹。抄一遍的写法有两个失效方式：
+ * 漏抄一项（那一项永远还原不了），以及**顺序写反**（尺寸在背景之后还原，中间那一帧的
+ * 长宽比是错的）。栈让「改了什么」与「还原什么」在同一行代码里，加一样东西不可能忘。
+ *
+ * ## 为什么永不 reject
+ *
+ * 规划 §4 的动作表写着 `captureImage` 永不 reject，好让 `await: false` 的 fire-and-forget
+ * 不产生未处理拒绝。所以这里所有失败都变成 `{ ok: false, reason }`。
+ *
+ * ## 重入
+ *
+ * 第二次调用直接被拒。两次导出交叠会让还原栈互相覆盖——后一次记下的「原尺寸」是前一次
+ * 改过的那个，于是导完之后画布停在一个谁也没要过的尺寸上。
+ */
+export async function runCapture(options: CaptureRunOptions): Promise<CaptureResult> {
+  // 逐项读 `options.x` 而不是解构：解构之后这些字段在全仓就再没有一处属性访问，
+  // 而 D36 的孤儿闸门正是按属性访问判「有没有消费者」——解构会让一个真被用着的
+  // 入参看起来像死字段。
+  const surface = options.surface
+  const request = options.request
+  const limits = options.limits
+  const filename = options.filename
+  const rejected = (reason: string): CaptureResult => ({
+    ok: false,
+    width: 0,
+    height: 0,
+    format: request.format,
+    background: request.background === 'transparent' ? 'transparent' : 'opaque',
+    filename,
+    notice: '',
+    reason,
+    blob: null,
+    panelCount: 0,
+  })
+
+  if (surface.capturing()) return rejected('上一次导出还没完成。')
+
+  const plan = planCapture(request, limits)
+  if (!plan.ok) return rejected(plan.reason)
+
+  const restore: RestoreEntry[] = []
+  /** 压栈并执行。**先记后改**——改完再记的话，中间抛异常就没人还原了。 */
+  const change = (what: string, undo: () => void, apply: () => void): void => {
+    restore.push({ what, undo })
+    apply()
+  }
+
+  try {
+    /* ① 停帧循环 ---------------------------------------------------------- */
+    const wasRunning = surface.running()
+    change('帧循环', () => surface.setRunning(wasRunning), () => surface.setRunning(false))
+
+    /* ② 进入出图态（`resize` 从此只记不改，`tick` 不画） ------------------- */
+    const wasCapturing = surface.capturing()
+    change('出图标志', () => surface.setCapturing(wasCapturing), () => surface.setCapturing(true))
+
+    /* ③ 改到目标分辨率 ---------------------------------------------------- */
+    const size = surface.size()
+    change('画布尺寸', () => surface.setSize(size.width, size.height), () => surface.setSize(plan.width, plan.height))
+
+    /* ④ 背景 -------------------------------------------------------------- */
+    const background = surface.background()
+    change('背景', () => surface.setBackground(background), () => surface.setBackground(plan.background))
+
+    /* ⑤ 收起编辑期辅助物（网格与 gizmo 不进图） ---------------------------- */
+    const chrome = surface.chromeVisible()
+    change('编辑期辅助物', () => surface.setChromeVisible(chrome), () => surface.setChromeVisible(false))
+
+    /* ⑥ 准备 overlay：等字体、解码媒体、重放打开着的面板 ------------------- */
+    await surface.prepareOverlay(plan)
+
+    /* ⑦ 画一帧，然后把热点叠上去 ------------------------------------------ */
+    // 顺序是契约 K3：overlay 在 `drawScene()` **之后**、`autoClear = false`。反过来的话
+    // 热点会被这一帧的场景盖掉，而两种顺序都「画了」。
+    surface.drawScene()
+    surface.composeOverlay()
+
+    /* ⑧ 读像素 ------------------------------------------------------------ */
+    const blob = await surface.readPixels(plan.format)
+    if (!blob) return rejected('画布读取失败，导出已取消。')
+
+    return {
+      ok: true,
+      width: plan.width,
+      height: plan.height,
+      format: plan.format,
+      background: plan.background,
+      filename,
+      notice: plan.notice,
+      reason: '',
+      blob,
+      panelCount: options.openPanelCount ?? 0,
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    options.onWarn?.(`导出失败：${message}`)
+    return rejected(`导出过程中出错，画面已恢复原状：${message}`)
+  } finally {
+    // 倒着弹。正着弹的话，「还原尺寸」会发生在「退出出图态」之前，而出图态下的
+    // `setSize` 只记不改——尺寸就永远回不去了。
+    for (let i = restore.length - 1; i >= 0; i--) {
+      try {
+        restore[i]?.undo()
+      } catch {
+        // 一项还原失败不许拖垮其余。这里已经在收尾路径上，抛出去只会盖掉真正的原因。
+        options.onWarn?.(`还原「${restore[i]?.what}」失败，画面可能停在导出时的状态。`)
+      }
+    }
+  }
+}

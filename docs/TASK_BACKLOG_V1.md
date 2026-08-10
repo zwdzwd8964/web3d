@@ -2263,8 +2263,8 @@
   的假绿**）；④ 删 `toneMapped:false` → 材质属性断言红（**这条只能断材质属性不能断像素，
   如实写在卡里**）；⑤ 把过期版本号从白名单条目里删掉 → `check:constitution` 必须红。
 
-### [ ] T-266 · `captureImage` 主链路与还原保证
-- **依赖** T-235 · T-262 · T-265 · **预估** 2.0d · **实际** —
+### [x] T-266 · `captureImage` 主链路与还原保证
+- **依赖** T-235 · T-262 · T-265 · **预估** 2.0d · **实际** 1.9d（overlay 的宿主接线随 T-267 落）
 - **独占** `packages/core/src/runtime/image-export.ts`（编排部分）· `packages/core/src/util/filename.ts`(新) ·
   `packages/core/src/runtime/scene-runtime.ts`（`captureImage` 段，列 R）·
   `packages/core/test/runtime/image-export-flow.test.ts`(新)

@@ -1,3 +1,8 @@
+// T-266 · `sanitiseFilename` 已上移到 `@w3/core/util/filename`。**全仓一份**：出图要产出
+// 文件名、发布也要，两处各写一份的话「同一个场景名导出的图和发布的包不同名」会成为一个
+// 没人能一眼看出成因的现象。这里 re-export 是为了不让既有调用点跟着改。
+export { sanitiseFilename } from '@w3/core'
+import { sanitiseFilename } from '@w3/core'
 import { checkIntegrity, errorsOf, validate, warningsOf } from '@w3/schema'
 import type { IntegrityIssue, SceneDocument } from '@w3/schema'
 import { createActionRefResolver } from '@w3/core'
@@ -179,14 +184,6 @@ function describeBlock(check: PublishPrecheck): string {
   return `无法发布：${parts.join('，')}`
 }
 
-/**
- * Windows forbids `\ / : * ? " < > |` in filenames and the user names their project in
- * Chinese; both have to survive into something a browser will actually download.
- */
-export function sanitiseFilename(name: string): string {
-  const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim()
-  return cleaned === '' ? 'scene' : cleaned.slice(0, 80)
-}
 
 /**
  * Hands the bytes to the browser as a download.

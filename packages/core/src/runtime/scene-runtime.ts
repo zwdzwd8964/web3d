@@ -1,3 +1,8 @@
+import type { CaptureLimits } from './capability.js'
+import type { CaptureRequest, CaptureResult, CaptureSurface } from './image-export.js'
+import { runCapture } from './image-export.js'
+import { HotspotSpriteLayer } from './hotspot-sprite.js'
+import { captureFilename } from '../util/filename.js'
 import type { SceneDocument, TweenAnimation, VariableValue } from '@w3/schema'
 import { needsDefaultLightRig } from '@w3/schema'
 import { neverEnds } from '../eca/types.js'
@@ -58,6 +63,22 @@ import type { AssetResolver, NodeUserData, RuntimeMode } from './types.js'
 
 export interface SceneRuntimeOptions {
   readonly canvas?: HTMLCanvasElement
+  /**
+   * T-266 · 这台机器的 GL 上限探针，出图钳位读它。
+   *
+   * 注入而不是内部探测：探测要建一个一次性的 WebGL 上下文（`detectCapability`），而宿主
+   * 通常在启动时已经探过一次——再探一次会占掉浏览器为数不多的活上下文名额之一。
+   * 不注入时全部按 0（未知）走，`planCapture` 会用保守值。
+   */
+  readonly capability?: () => { maxTextureSize: number; maxRenderbufferSize: number; maxViewportDim: number } | null
+  /**
+   * T-266 · ADR-0025 的那次 overlay pass，由宿主注入。
+   *
+   * **注入而不是在这里直接 `renderer.render(overlayScene, orthoCamera)`**：sprite 层不认识
+   * three（它只写 2D context），而把一个正交相机与一个全屏四边形建在 core 里，等于让每一个
+   * 不出图的宿主也背上那份对象。没注入 = 没有第二次绘制 = 那条例外不生效。
+   */
+  readonly composeOverlay?: (layer: unknown) => void
   readonly resolver: AssetResolver
   readonly mode: RuntimeMode
   /**
@@ -1515,9 +1536,103 @@ export class SceneRuntime implements RuntimeContext {
    * Every entry names the card that owns it. No owner, no seam (D36's rule, applied early).
    */
 
-  /** T-266 · the eight-step capture: resize, freeze, draw, compose overlays, restore. */
-  captureImage(_request: unknown): Promise<Blob | null> {
-    throw new Error(SEAM_NOT_WIRED('captureImage', 'T-266'))
+  /**
+   * T-266 · 八步导出：停帧、进出图态、改尺寸、设背景、收辅助物、备 overlay、画、读像素。
+   *
+   * **永不 reject**（规划 §4 的动作表），所以失败也是一个可以显示的 `CaptureResult`。
+   * 编排与还原栈在 `image-export.ts` 的 {@link runCapture} 里——那一段是纯逻辑，
+   * 故障注入矩阵在纯 Node 里逐步走过八条路径；这里只负责把运行时接成一个 `CaptureSurface`。
+   */
+  async captureImage(request: CaptureRequest, options: { filename?: string } = {}): Promise<CaptureResult> {
+    return runCapture({
+      request,
+      limits: this.captureLimits(),
+      surface: this.captureSurface(),
+      filename: options.filename ?? captureFilename(this.document.name, request.format, this.captureStamp()),
+      openPanelCount: this.hotspotRenderer instanceof HotspotSpriteLayer ? 0 : 0,
+      onWarn: (message) => this.log('warn', message),
+    })
+  }
+
+  /** 这台机器与当前管线状态的实测数字。 */
+  private captureLimits(): CaptureLimits {
+    const report = this.options.capability?.()
+    return {
+      pixelRatio: this.pixelRatio(),
+      maxTextureSize: report?.maxTextureSize ?? 0,
+      maxRenderbufferSize: report?.maxRenderbufferSize ?? 0,
+      maxViewportDim: report?.maxViewportDim ?? 0,
+      postFxActive: this.pipeline.mode === 'composed',
+    }
+  }
+
+  /** 时间戳。注入的时钟，好让导出文件名在测试里可断言。 */
+  private captureStamp(): string {
+    return new Date(this.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  }
+
+  /** 把运行时接成 `runCapture` 要的那五对读写。 */
+  private captureSurface(): CaptureSurface {
+    // 下面返回的是一份对象字面量，它的每个方法都要读运行时。显式取一次别名，比给十个
+    // 方法各绑一次 `this` 清楚，也比把十个私有字段一个个抄成局部变量短。
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const runtime = this
+    let background: 'transparent' | 'opaque' = 'opaque'
+    return {
+      size: () => ({ width: runtime.width, height: runtime.height }),
+      setSize: (width, height) => runtime.applyResize(width, height),
+      chromeVisible: () => runtime.chromeVisible,
+      setChromeVisible: (visible) => runtime.setChromeVisible(visible),
+      background: () => background,
+      setBackground: (next) => {
+        background = next
+        runtime.renderer?.setClearAlpha?.(next === 'transparent' ? 0 : 1)
+      },
+      running: () => runtime.frameHandle !== null,
+      setRunning: (value) => {
+        if (value) runtime.start()
+        else runtime.stop()
+      },
+      capturing: () => runtime.capturing,
+      setCapturing: (value) => {
+        if (value) runtime.beginCapture()
+        else runtime.endCapture()
+      },
+      prepareOverlay: async () => {
+        // 出图那一帧不许沿用旧的遮挡判定（T-264 的 `forceOcclusion`）：遮挡状态最多可能
+        // 是 N-1 帧之前的，那意味着导出图上热点的明暗与用户按下按钮时看到的不一样。
+        runtime.hotspotRenderer.update(
+          runtime.hotspots.update(runtime.document, runtime.camera.camera, runtime.width, runtime.height, {
+            forceOcclusion: true,
+          }),
+          runtime.document,
+        )
+      },
+      drawScene: () => runtime.drawScene(),
+      composeOverlay: () => runtime.composeOverlay(),
+      readPixels: async (format) => runtime.readCanvas(format),
+    }
+  }
+
+  /**
+   * ADR-0025 的那次 overlay pass。
+   *
+   * v1.0 只有 DOM 热点渲染器时它是空操作——sprite 层（T-265）由宿主注入，没注入就没有
+   * 第二次绘制，也就没有那处例外。**这正是把例外写成条件的理由**：一个无条件的第二次
+   * `renderer.render` 会让每一个不出图的宿主也背上它。
+   */
+  private composeOverlay(): void {
+    const layer = this.hotspotRenderer
+    if (!(layer instanceof HotspotSpriteLayer) || !this.renderer) return
+    // CONSTITUTION-EXCEPTION: 渲染出口 · ADR-0025 · 到期 v2
+    this.options.composeOverlay?.(layer)
+  }
+
+  /** 画布读成图片字节。宿主没给 `toBlob` 时返回 null，由编排层报「画布读取失败」。 */
+  private async readCanvas(format: 'png' | 'jpeg'): Promise<Blob | null> {
+    const canvas = this.renderer?.domElement as { toBlob?: (cb: (b: Blob | null) => void, type: string) => void } | undefined
+    if (!canvas?.toBlob) return null
+    return new Promise((resolve) => canvas.toBlob!((blob) => resolve(blob), `image/${format}`))
   }
 
   /** T-337（v1.2）· flies the camera through N viewpoints as one continuous path. */

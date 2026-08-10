@@ -41,7 +41,7 @@ const BACKLOGS = ['docs/TASK_BACKLOG_V1.md', 'docs/TASK_BACKLOG_V0_5.md', 'docs/
  * no landing point, and「把它加进豁免表」becomes the cheapest way to make this script green.
  * Raising it requires a reason in the commit message and a line in the allowlist's ratchet log.
  */
-const MAX_EXEMPTIONS = 28
+const MAX_EXEMPTIONS = 23
 
 /**
  * ADR-0033 · 第三张表：**接口先落、消费者在后**。
