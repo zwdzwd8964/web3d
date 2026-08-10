@@ -79,7 +79,13 @@ function fakeRenderer() {
       dispose: () => {
         calls.dispose++
       },
-      domElement: {} as HTMLCanvasElement,
+      // T-268 · 契约里 `captureImage` 的成功分支要读画布。给替身一个 `toBlob`，
+      // **不是为了让测试变绿**——没有它，两个运行时在契约上的差别就变成「真运行时永远
+      // 导不出图」，而那是 harness 的性质，不是产品的性质。与 `createMediaElement`
+      // 同一条理由：契约比的是语义，不是解码器。
+      domElement: {
+        toBlob: (cb: (blob: unknown) => void, type: string) => cb({ size: 1024, type }),
+      } as unknown as HTMLCanvasElement,
       // T-241 · core 自带的 composer 工厂会问显卡有没有浮点帧缓冲，真 `WebGLRenderer`
       // 永远有 `extensions`。与 `shadowMap` 同一条理由放进替身：让生产代码为一个
       // 只在测试里可能出现的状态写 `if`，那个分支永远测不到。

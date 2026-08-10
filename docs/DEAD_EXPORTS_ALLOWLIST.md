@@ -40,6 +40,7 @@
 | 2026-08-05 | T-260 | 23 | **22** | `AuditResult.summary` 退休。它一直算得好好的、从来没被显示过——一句「体检通过，但 2 项接近上限：三角面数、贴图数量」，用户一次都没看见。`AuditReport` 把它渲染出来，那一行随之删除 |
 | 2026-08-05 | T-265 | 22 | **28** | **+6，全部 owner 是紧接着的 T-266 / T-267。** sprite 层与它的消费者被卡面拆成了两张卡：本卡落栅格化与 `ops`（纯 Node 可穷举），T-266 落编排（还原栈 · 八步链路 · overlay pass）。六行都到期 v1.2——**下一张卡就该把它们全删掉**，删不掉就说明拆卡拆错了 |
 | 2026-08-05 | T-266 | 28 | **30** | **+2，而且 T-265 那六行一条都没删掉——这与我在上一行写的预期不符，如实记下。** 成因是拆卡的边界与我以为的不同：sprite 层的消费者不是 `captureImage`（它只调一个注入进来的 `composeOverlay`，好让不出图的宿主不背那份对象），而是**宿主侧的接线**，那属于 T-267 的 Viewport。新增两行是 `CaptureResult` 的 blob 与 panelCount，同样等 T-267 的对话框。**下一张卡应当一次性删掉八行**，删不掉就说明 M17 的拆卡真的有问题。⚠ 另一头是好消息：`beginCapture` / `endCapture` 两行退休了——T-235 为出图预付的那对接缝，这一卡真的用上了。连同 `HotspotSpriteLayer.surface`（`captureSurface` 的 instanceof 分支读它）与 `RendererLike.setClearAlpha`（透明背景那一步），一共退休**七行**（还包括 `planCapture` / `CapturePlan.notice` / `HotspotSpriteLayer` —— `captureImage` 一接线，T-262 与 T-265 预付的那几行同时兑现）。净 −5：28 → 23 |
+| 2026-08-05 | T-268 | 23 | 23 | **豁免表条数不动**（`SceneRuntime.captureImage` 退休的那一行在**冻结接口表**里，不计入这个棘轮）。真正下降的是另一把： `HeadlessRuntime` 从 v0/v0.5 遗留基线退休（`MAX_LEGACY` 86 → 85）：它一直只被测试引用，本卡第一次让它出现在生产代码路径上（契约里的双实现） |
 
 ## 豁免
 
@@ -83,7 +84,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 
 | symbol | reason | owner | expires | spec |
 |---|---|---|---|---|
-| core:SceneRuntime.captureImage | T-266 的出图八步链路由它编排，含还原栈与重入拒绝 | T-266 | v1.2 | 规划§4 |
 | core:SceneRuntime.flyToView | T-337 的相机路径巡游按采样函数逐帧驱动相机 | T-337 | v1.5 | 规划§4 |
 | core:SceneRuntime.showPage | T-307 给覆盖层三方法做双实现与契约套件时接上 | T-307 | v1.5 | 规划§4 |
 | core:SceneRuntime.hidePage | T-307 同批交付，语义与 closePanel 逐字同形 | T-307 | v1.5 | 规划§4 |
@@ -141,7 +141,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 - `core:EventBus.on`
 - `core:FakeClock.pendingCount`
 - `core:FakeClock.cancelAll`
-- `core:HeadlessRuntime`
 - `core:HeadlessRuntime.setCurrentEvent`
 - `core:HeadlessRuntime.highlightOf`
 - `core:HeadlessRuntime.materialOf`

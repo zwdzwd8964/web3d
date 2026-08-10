@@ -1,5 +1,5 @@
 import type { CaptureLimits } from './capability.js'
-import type { CaptureRequest, CaptureResult, CaptureSurface } from './image-export.js'
+import type { CaptureOrder, CaptureResult, CaptureSurface } from './image-export.js'
 import { runCapture } from './image-export.js'
 import { HotspotSpriteLayer } from './hotspot-sprite.js'
 import { captureFilename } from '../util/filename.js'
@@ -1543,9 +1543,11 @@ export class SceneRuntime implements RuntimeContext {
    * 编排与还原栈在 `image-export.ts` 的 {@link runCapture} 里——那一段是纯逻辑，
    * 故障注入矩阵在纯 Node 里逐步走过八条路径；这里只负责把运行时接成一个 `CaptureSurface`。
    */
-  async captureImage(request: CaptureRequest, options: { filename?: string } = {}): Promise<CaptureResult> {
+  async captureImage(request: CaptureOrder, options: { filename?: string } = {}): Promise<CaptureResult> {
     return runCapture({
-      request,
+      // 视口恒用运行时自己的尺寸。调用方给的那个（如果有）只在测试里用得上——
+      // 一条写进文档的规则不该带着某台机器的分辨率到处跑。
+      request: { ...request, viewport: request.viewport ?? { width: this.width, height: this.height } },
       limits: this.captureLimits(),
       surface: this.captureSurface(),
       filename: options.filename ?? captureFilename(this.document.name, request.format, this.captureStamp()),

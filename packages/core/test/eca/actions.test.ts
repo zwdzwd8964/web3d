@@ -741,6 +741,17 @@ describe('T-246 · explode', () => {
   })
 })
 
+
+describe('T-268 · exportImage', () => {
+  // 覆盖率闸门的 `covered` 集合是**模块内**的，所以这条最小用例必须留在本文件里；
+  // 参数表逐字、双实现同符号、失败只 warn 这些断言在 `actions/export.test.ts`。
+  it('走一遍就够，细节在 actions/export.test.ts', async () => {
+    await run('exportImage', { await: true, scale: 2 })
+    expect(ctx.captures).toHaveLength(1)
+    expect(ctx.captures[0]?.ok).toBe(true)
+  })
+})
+
 describe('G0-5 · every registered action has a test', () => {
   it('the tested set covers the registry exactly', () => {
     const registered = BUILTIN_ACTIONS.map((a) => a.type).sort()

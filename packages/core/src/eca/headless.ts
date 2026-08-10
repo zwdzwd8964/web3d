@@ -1,3 +1,7 @@
+import type { CaptureLimits } from '../runtime/capability.js'
+import type { CaptureOrder, CaptureResult } from '../runtime/image-export.js'
+import { planCapture } from '../runtime/image-export.js'
+import { captureFilename } from '../util/filename.js'
 import type { Light, SceneDocument } from '@w3/schema'
 import { explodeOffsets } from '@w3/schema'
 import { HIGHLIGHT_PRESETS } from '../highlight-presets.js'
@@ -133,6 +137,22 @@ export class HeadlessRuntime implements RuntimeContext {
   readonly doc: SceneDocument
   readonly logs: LogEntry[] = []
   readonly openedLinks: { url: string; target: string }[] = []
+  /** T-268 · 每一次 `captureImage` 的计划结果。断言用。 */
+  readonly captures: CaptureResult[] = []
+  /**
+   * 无头侧的「视口」尺寸与机器上限。
+   *
+   * 写成可改的字段而不是常量：契约测试要让两个运行时**从同一组输入出发**，否则比出来的
+   * 相等是两个巧合而不是一个契约。
+   */
+  captureViewport = { width: 1280, height: 720 }
+  captureLimits: CaptureLimits = {
+    pixelRatio: 1,
+    maxTextureSize: 16384,
+    maxRenderbufferSize: 16384,
+    maxViewportDim: 16384,
+    postFxActive: false,
+  }
 
   private vars = new Map<string, VarValue>()
   private visibility = new Map<string, boolean>()
@@ -587,6 +607,62 @@ export class HeadlessRuntime implements RuntimeContext {
     // Head-less: record the intent. Navigating would end the test run.
     this.openedLinks.push({ url, target })
   }
+
+  /**
+   * T-268 · 无头侧的出图：**走同一个 `planCapture`**，只是不产出字节。
+   *
+   * ⚠ 这里最容易犯的错是「照着钳位规则再写一遍」。那样契约测试仍然全绿（两边算出同样的
+   * 数），而钳位规则改了之后只有一边跟着改——**冗余实现让变异失灵**（E18 教训 1）。
+   * 所以契约测试额外断 `HeadlessRuntime.planFn === planCapture`：断的是同一个符号，
+   * 不是同一个结果。
+   */
+  async captureImage(request: CaptureOrder): Promise<CaptureResult> {
+    const plan = HeadlessRuntime.planFn({ ...request, viewport: this.captureViewport }, this.captureLimits)
+    const filename = captureFilename(this.doc.name, request.format, this.captureStamp())
+    const result: CaptureResult = plan.ok
+      ? {
+          ok: true,
+          width: plan.width,
+          height: plan.height,
+          format: plan.format,
+          background: plan.background,
+          filename,
+          notice: plan.notice,
+          reason: '',
+          // 无头侧没有画布。**null 而不是一个假 Blob**：假字节会让「导出成功了吗」这个
+          // 问题在两个运行时上有两个答案，而契约测试比的正是「除 blob 外逐字段相等」。
+          blob: null,
+          panelCount: this.panels.size,
+        }
+      : {
+          ok: false,
+          width: 0,
+          height: 0,
+          format: request.format,
+          background: request.background === 'transparent' ? 'transparent' : 'opaque',
+          filename,
+          notice: '',
+          reason: plan.reason,
+          blob: null,
+          panelCount: 0,
+        }
+    this.captures.push(result)
+    return result
+  }
+
+  /** 与真运行时同形的时间戳，走注入的假时钟——契约测试要能逐字比文件名。 */
+  private captureStamp(): string {
+    return new Date(this.clock.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  }
+
+  /**
+   * 出图钳位用的那个函数。
+   *
+   * 暴露成静态属性**只为了让契约测试能断它就是 `planCapture` 本身**。这条断言是本卡
+   * 唯一一条断「是不是同一份实现」而不是「结果一不一样」的断言，而它防的正是那种
+   * 「抄一份、数字一样、契约全绿」的失效。
+   */
+  static planFn: typeof planCapture = planCapture
 
   /* --- time ---------------------------------------------------------------- */
 

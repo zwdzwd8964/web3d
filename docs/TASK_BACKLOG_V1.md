@@ -2300,8 +2300,8 @@
 - **变异检验** ① 让 UI 自己算 `vw*scale` → 打桩断言红；② 删 disabled 条件 → JPEG × 透明红；
   ③ 把透明 + 描边改成 disabled → 降级提示那条红（**两种行为互相排斥，必须各有一条断言**）。
 
-### [ ] T-268 · `exportImage` 动作 + `RuntimeContext` 双实现 + 契约
-- **依赖** T-266 · T-203 · **预估** 0.8d · **实际** —
+### [x] T-268 · `exportImage` 动作 + `RuntimeContext` 双实现 + 契约
+- **依赖** T-266 · T-203 · **预估** 0.8d · **实际** 0.8d
 - **独占** `packages/core/src/eca/actions/scene.ts` · `packages/core/src/eca/types.ts`（列 T）·
   `packages/core/src/eca/headless.ts` · `packages/core/test/eca/actions/export.test.ts`(新) ·
   `packages/core/test/eca/runtime-contract.test.ts`

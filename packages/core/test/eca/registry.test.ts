@@ -75,6 +75,7 @@ describe('registerBuiltinActions()', () => {
       [
         'closePanel',
         'explode',
+        'exportImage',
       'highlight',
         'moveCamera',
         'openLink',

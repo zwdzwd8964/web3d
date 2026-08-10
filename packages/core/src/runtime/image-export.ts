@@ -82,6 +82,15 @@ export interface CaptureRequest {
   readonly includeHotspots?: boolean
 }
 
+/**
+ * 动作与 UI 下单时用的请求形状：**视口由运行时自己填**。
+ *
+ * 一条 ECA 规则里的 `exportImage` 拿不到画布尺寸，也不该拿到——它写在文档里，而文档
+ * 在两台不同分辨率的机器上要产出各自正确的图。让调用方填视口等于把一台机器的尺寸
+ * 写死进了文档。
+ */
+export type CaptureOrder = Omit<CaptureRequest, 'viewport'> & { readonly viewport?: CaptureRequest['viewport'] }
+
 /** 可以执行的一份出图计划。 */
 export interface CapturePlan {
   readonly ok: true

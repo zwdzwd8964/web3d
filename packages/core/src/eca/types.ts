@@ -1,3 +1,4 @@
+import type { CaptureOrder, CaptureResult } from '../runtime/image-export.js'
 import type { SceneDocument, VariableValue } from '@w3/schema'
 import type { ZodType } from '@w3/schema'
 
@@ -141,6 +142,18 @@ export interface RuntimeContext {
   closePanel(hotspotId: string | 'all'): void
   isPanelOpen(hotspotId: string): boolean
   openLink(url: string, target: '_blank' | '_self'): void
+
+  /**
+   * T-268 · 把当前视角导出为图片。
+   *
+   * **永不 reject**（规划 §4 的动作表），所以 `await: false` 的 fire-and-forget 不会产生
+   * 未处理拒绝。失败是一个 `{ ok: false, reason }` 的值，调用方可以显示它。
+   *
+   * 两个运行时**共用同一个 `planCapture` 符号**（契约测试逐字断言这一点，不只断结果
+   * 相等）：抄一份同数字的算法会让契约测试仍然绿，而那正是 E18 教训 1 说的「冗余实现让
+   * 变异失灵」。headless 侧返回 `blob: null`，其余字段与真运行时逐字段相等。
+   */
+  captureImage(request: CaptureOrder): Promise<CaptureResult>
 
   // ---- time (injectable — ECA_SPEC constraint three) ----
   /** Milliseconds. Monotonic within a session; never `Date.now()`. */

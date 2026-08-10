@@ -170,4 +170,76 @@ export const explode = defineAction<z.infer<typeof ExplodeParams>>({
       : `将分组「${nodeName(doc, p.nodeId)}」爆炸到 ${p.factor} 成${p.await ? '（等待结束）' : ''}`,
 })
 
-export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene, explode]
+
+/**
+ * T-268 · 规划 §4 的动作表逐字：
+ * `{ scale: 1–4 =1, includeHotspots: bool=true, background: 'auto'|'transparent'|'opaque' ='auto',
+ *   format: 'png'|'jpeg' ='png', filename: string='', await: bool=false }`
+ *
+ * **没有 `longEdge`**：长边是出图对话框的档位（T-267），不是规则里的参数。一条规则写死
+ * 一个像素长边，会在换一台机器时产出不同构图的图。
+ */
+const ExportImageParams = z.object({
+  scale: z.number().min(1).max(4).default(1),
+  includeHotspots: z.boolean().default(true),
+  background: z.enum(['auto', 'transparent', 'opaque']).default('auto'),
+  format: z.enum(['png', 'jpeg']).default('png'),
+  filename: z.string().default(''),
+  await: z.boolean().default(false),
+})
+
+export const exportImage = defineAction<z.infer<typeof ExportImageParams>>({
+  type: 'exportImage',
+  schema: ExportImageParams,
+  async handler(ctx, p) {
+    const done = ctx.captureImage({
+      scale: p.scale,
+      includeHotspots: p.includeHotspots,
+      background: p.background,
+      format: p.format,
+    })
+    if (p.await) {
+      const result = await done
+      if (!result.ok) ctx.log('warn', '导出图片失败：' + result.reason)
+      return
+    }
+    // `await: false` 时立即 resolve。`captureImage` 永不 reject（规划 §4 的动作表），
+    // 所以这里不需要 `.catch`——但仍然要把失败说出来，否则一条 fire-and-forget 的导出
+    // 规则失败时全场静默。
+    void done.then((result) => { if (!result.ok) ctx.log('warn', '导出图片失败：' + result.reason) })
+  },
+  ui: {
+    label: '导出图片',
+    group: 'scene',
+    icon: 'image',
+    fields: [
+      { key: 'scale', type: 'number', label: '倍率', default: 1, min: 1, max: 4 },
+      { key: 'includeHotspots', type: 'boolean', label: '包含热点', default: true },
+      {
+        key: 'background',
+        type: 'enum',
+        label: '背景',
+        options: [
+          { value: 'auto', label: '跟随场景' },
+          { value: 'transparent', label: '透明' },
+          { value: 'opaque', label: '不透明' },
+        ],
+      },
+      {
+        key: 'format',
+        type: 'enum',
+        label: '格式',
+        options: [
+          { value: 'png', label: 'PNG' },
+          { value: 'jpeg', label: 'JPEG' },
+        ],
+      },
+      { key: 'filename', type: 'string', label: '文件名（留空自动生成）' },
+      { key: 'await', type: 'boolean', label: '等待导出完成再执行下一步', default: false },
+    ],
+  },
+  refs: () => [],
+  describe: (p) =>
+    '导出图片（' + p.scale + '× ' + p.format.toUpperCase() + (p.includeHotspots ? ' 含热点' : '') + '）' + (p.await ? '（等待完成）' : ''),
+})
+export const SCENE_ACTIONS: ActionDefinition<any>[] = [setVisible, setMaterial, highlight, resetScene, explode, exportImage]

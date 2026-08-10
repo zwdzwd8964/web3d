@@ -622,4 +622,41 @@ export function describeRuntimeContract(label: string, makeCtx: (doc: SceneDocum
     h.ctx.resetScene()
     expect(h.ctx.isMediaPlaying(MEDIA_ID)).toBe(false)
   })
+  /* --- T-268 · captureImage 的双实现契约 ---------------------------------- */
+
+  it(`${label}: captureImage 永不 reject —— 失败也是一个可以显示的值`, async () => {
+    // 规划 §4 的动作表：`await: false` 的 fire-and-forget 不许产生未处理拒绝。
+    const h = setup()
+    const bad = await h.ctx.captureImage({ format: 'jpeg', background: 'transparent' })
+    expect(bad.ok).toBe(false)
+    expect(bad.reason).toBe('JPEG 格式不支持透明背景。请改用 PNG 格式，或把背景改为不透明。')
+  })
+
+  it(`${label}: 成功时除 blob 外的字段都在，且 notice 与 filename 有值`, async () => {
+    const h = setup()
+    // **用 `longEdge` 而不是 `scale`**：两个 harness 的视口不一样（无头 1280×720、
+    // 真运行时 800×600），按倍率算出来的尺寸因此不同，钳不钳位也不同——那样比出来的
+    // 「相等」是两个巧合。长边是绝对值，两侧必然得到同一个数。
+    const result = await h.ctx.captureImage({ longEdge: 9999, background: 'auto', format: 'png' })
+    expect(result.ok).toBe(true)
+    // 两侧从同一个 `planCapture` 出发，所以这些数在两个运行时上必须一样。
+    expect(Number.isInteger(result.width) && result.width >= 1).toBe(true)
+    expect(Number.isInteger(result.height) && result.height >= 1).toBe(true)
+    expect(result.format).toBe('png')
+    expect(result.background).toBe('opaque')
+    // 9999 一定超过 3840 的合同上限，所以两侧的 notice 都必须非空。
+    expect(result.notice).not.toBe('')
+    expect(result.filename).not.toBe('')
+    expect(result.filename.endsWith('.png')).toBe(true)
+  })
+
+  it(`${label}: 钳位说明里带着最终尺寸的数字`, async () => {
+    // 「静默钳位」在两个运行时上都不许发生：用户点了 4×、拿到一张更小的图、
+    // 没有任何提示，他会以为是自己看错了。
+    const h = setup()
+    const result = await h.ctx.captureImage({ longEdge: 9999, background: 'auto', format: 'png' })
+    expect(result.ok).toBe(true)
+    expect(result.width, '长边钳到合同上限').toBe(3840)
+    expect(result.notice.includes(String(result.width))).toBe(true)
+  })
 }
