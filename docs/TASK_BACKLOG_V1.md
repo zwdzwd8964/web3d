@@ -2403,8 +2403,8 @@
   ⑤ **守卫自身的变异**：在 `packages/core/src/embed/protocol.ts` 临时写 `const _ = window` →
   `check-embed-layering` 必须 fail（**守卫本身也要做一次变异检验**，v0.5 T-117 教训）。
 
-### [ ] T-273 · Player 生命周期与嵌入模式接线
-- **依赖** T-272 · **预估** 1.5d · **实际** —
+### [x] T-273 · Player 生命周期与嵌入模式接线
+- **依赖** T-272 · **预估** 1.5d · **实际** 1.2d
 - **独占** `packages/player/src/app.ts` · `packages/player/src/main.ts`
 - **做** `pause()` / `resume()` + 内部 `shouldRun` 与门（`hostWantsPlay && documentVisible && onScreen`），
   `visibilitychange` + `IntersectionObserver` **各自只改一个输入量**；构造参数 `onSession?`

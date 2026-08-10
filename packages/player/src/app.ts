@@ -1,5 +1,6 @@
 import { createPackageResolver } from '@w3/storage'
 import type { SceneDocument } from '@w3/schema'
+import type { CapabilityReport } from '@w3/core'
 import { DomHotspotRenderer, detectCapability, renderCapabilityNotice } from '@w3/core'
 import type { PlaybackSession, SceneRuntime } from '@w3/core'
 import { unpackScene } from '@w3/storage'
@@ -27,6 +28,21 @@ export interface PlayerOptions {
   /** Bytes of a `.w3p`. */
   readonly bytes: Uint8Array
   readonly onLog?: (level: string, message: string) => void
+  /**
+   * T-273 · 场景起来之后交出会话与运行时，**一次**。
+   *
+   * ⚠ **不做成 public getter。** 一个 `player.session` / `player.runtime` 意味着页面上
+   * 任何拿得到 Player 的代码都能绕过嵌入控制器直接改场景——而控制器存在的全部理由，
+   * 就是宿主只能通过一条受检的通道说话。回调只在装配时被调一次，拿到的人是装配它的人。
+   */
+  readonly onSession?: (parts: { session: PlaybackSession; runtime: SceneRuntime }) => void
+  /**
+   * T-273 · 这台机器跑不了，说出去。
+   *
+   * 页面里那句中文提示在 iframe 里，**宿主的 JS 读不到它**——不发这一条，宿主看到的
+   * 就是一个永远不响应的黑框。
+   */
+  readonly onUnsupported?: (capability: CapabilityReport) => void
 }
 
 export class Player {
@@ -36,6 +52,21 @@ export class Player {
   private overlay: HTMLDivElement | null = null
   private resize: ResizeObserver | null = null
   private detachPointer: (() => void) | null = null
+  private detachLifecycle: (() => void) | null = null
+
+  /**
+   * T-273 · 跑不跑，由三个输入量的**与**决定。
+   *
+   * 三个各自只被一处改：`hostWantsPlay` 只由 `pause()` / `resume()` 改，
+   * `documentVisible` 只由 `visibilitychange` 改，`onScreen` 只由 `IntersectionObserver` 改。
+   *
+   * **不许在三处各自 start/stop。** 那样写的话，标签页切走再切回来会无条件 `start()`，
+   * 把宿主刚 `pause()` 的播放器又跑起来——而宿主并没有再点过播放。与门让「谁都可以
+   * 摁住，只有全部松开才跑」成为结构，而不是一句要记住的纪律。
+   */
+  private hostWantsPlay = true
+  private documentVisible = true
+  private onScreen = true
 
   constructor(private readonly options: PlayerOptions) {}
 
@@ -47,6 +78,10 @@ export class Player {
     const capability = detectCapability()
     if (capability.level === 'unsupported') {
       renderCapabilityNotice(host, capability)
+      // T-273 · **不能直接 return。** 嵌入时宿主看到的是一个黑框，而它无从知道原因——
+      // 页面里那句中文提示在 iframe 里，宿主的 JS 读不到。把这件事从通道里说出去：
+      // 宿主拿到一次 `ready`（我起来了）加一次 `error`（但我跑不了，原因是这个）。
+      this.options.onUnsupported?.(capability)
       return
     }
 
@@ -88,7 +123,11 @@ export class Player {
     runtime.resize(host.clientWidth, host.clientHeight)
 
     await this.session.start()
-    runtime.start()
+    // 起点由与门决定，而不是无条件 `start()`：嵌入宿主可能在场景加载完之前就已经
+    // `pause()` 过了（例如它想先自己布好局再放）。
+    this.applyRunState()
+    this.installLifecycle(host)
+    this.options.onSession?.({ session: this.session, runtime })
 
     if (import.meta.env.DEV) {
       // DEV-only, stripped from production builds. See the editor's equivalent.
@@ -184,13 +223,64 @@ export class Player {
     }
   }
 
+  /** 宿主要求暂停。三个输入量之一。 */
+  pause(): void {
+    this.hostWantsPlay = false
+    this.applyRunState()
+  }
+
+  /** 宿主要求继续。**不保证真的跑起来**——另外两个输入量也得松开。 */
+  resume(): void {
+    this.hostWantsPlay = true
+    this.applyRunState()
+  }
+
+  /** 与门的唯一落点。全仓只有这一处调 `runtime.start()` / `runtime.stop()`。 */
+  private applyRunState(): void {
+    const shouldRun = this.hostWantsPlay && this.documentVisible && this.onScreen
+    if (shouldRun) this.runtime?.start()
+    else this.runtime?.stop()
+  }
+
+  /**
+   * 装上两个「省电」输入量。**各自只改一个量**，然后一起交给与门。
+   *
+   * `IntersectionObserver` 在老内核上可能不存在——那时候 `onScreen` 保持 true，
+   * 退化成「只看可见性」，而不是整个播放器不跑。
+   */
+  private installLifecycle(host: HTMLElement): void {
+    const onVisibility = (): void => {
+      this.documentVisible = document.visibilityState !== 'hidden'
+      this.applyRunState()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    let observer: IntersectionObserver | null = null
+    if (typeof IntersectionObserver === 'function') {
+      observer = new IntersectionObserver((entries) => {
+        const entry = entries[entries.length - 1]
+        if (!entry) return
+        this.onScreen = entry.isIntersecting
+        this.applyRunState()
+      })
+      observer.observe(host)
+    }
+
+    this.detachLifecycle = () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      observer?.disconnect()
+    }
+  }
+
   dispose(): void {
     this.resize?.disconnect()
+    this.detachLifecycle?.()
     this.detachPointer?.()
     this.session?.dispose()
     this.runtime?.dispose()
     this.canvas?.remove()
     this.overlay?.remove()
+    this.detachLifecycle = null
     this.session = null
     this.runtime = null
     this.canvas = null
