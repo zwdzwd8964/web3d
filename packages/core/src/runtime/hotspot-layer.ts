@@ -2,6 +2,7 @@ import type { Hotspot, SceneDocument } from '@w3/schema'
 import { Frustum, Matrix4, Raycaster, Vector3 } from 'three'
 import type { Camera } from 'three'
 import type { SceneGraph } from './scene-graph.js'
+import { HOTSPOT_PANEL_SPEC, estimatePanelHeight, hotspotDrawOrder, markerGeometry, panelLayout } from './hotspot-visual.js'
 
 /**
  * T-041 · MVP_V0 D7 · hotspot anchoring and occlusion.
@@ -84,10 +85,21 @@ export class HotspotProjector {
     return target.set(...hotspot.anchor.offset).applyMatrix4(object.matrixWorld)
   }
 
-  update(doc: SceneDocument, camera: Camera, width: number, height: number): HotspotPlacement[] {
+  /**
+   * @param options T-264 · `forceOcclusion` 绕过每 N 帧的节流，**这一帧一定 raycast**。
+   *   出图要用：导出发生在某一个任意的帧上，而遮挡状态最多可能是 N-1 帧之前的——
+   *   那意味着导出图上某个热点的明暗与用户按下按钮时看到的不一样，且不可复现。
+   */
+  update(
+    doc: SceneDocument,
+    camera: Camera,
+    width: number,
+    height: number,
+    options?: { readonly forceOcclusion?: boolean },
+  ): HotspotPlacement[] {
     this.frame++
     this.lastRaycastCount = 0
-    const testOcclusion = this.frame % this.interval === 1 || this.interval === 1
+    const testOcclusion = options?.forceOcclusion === true || this.frame % this.interval === 1 || this.interval === 1
 
     camera.updateMatrixWorld()
     this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
@@ -183,9 +195,12 @@ export class DomHotspotRenderer implements HotspotRenderer {
 
   update(placements: readonly HotspotPlacement[], doc: SceneDocument): void {
     const byId = new Map(doc.hotspots.map((h) => [h.id, h]))
+    const ordinalOf = new Map(doc.hotspots.map((h, i) => [h.id, i]))
     const seen = new Set<string>()
 
-    for (const placement of placements) {
+    // T-264 · 与 sprite 层共用同一个排序函数。**两边各写一个比较器就是 C3 分叉的一种**，
+    // 而 parity 看不见它——两侧都「有热点」，只是叠的顺序不同。
+    for (const placement of hotspotDrawOrder(placements)) {
       const hotspot = byId.get(placement.hotspotId)
       if (!hotspot) continue
       seen.add(hotspot.id)
@@ -195,13 +210,27 @@ export class DomHotspotRenderer implements HotspotRenderer {
         marker.style.display = 'none'
         continue
       }
+
+      const geometry = markerGeometry(hotspot, placement, ordinalOf.get(hotspot.id) ?? 0)
       marker.style.display = ''
+      // T-264 · 编号在这里写，不在 markerFor 里：`markerFor` 只建一次，而序号会随文档变
+      // （删掉前面一个热点，后面的缺省编号全要往前挪）。
+      marker.textContent = geometry.label
+      marker.style.width = `${geometry.radius * 2}px`
+      marker.style.height = `${geometry.radius * 2}px`
+      marker.style.fontSize = geometry.fontSize === 0 ? '' : `${geometry.fontSize}px`
+      marker.style.borderWidth = `${geometry.strokeWidth}px`
       // translate3d, not left/top: layout per marker per frame is what makes a hotspot
       // layer feel heavy.
-      marker.style.transform = `translate3d(${placement.x.toFixed(1)}px, ${placement.y.toFixed(1)}px, 0) translate(-50%, -50%)`
-      marker.style.opacity = placement.occluded ? String(this.options.occludedOpacity ?? 0.25) : '1'
+      marker.style.transform = `translate3d(${geometry.x.toFixed(1)}px, ${geometry.y.toFixed(1)}px, 0) translate(-50%, -50%)`
+      marker.style.opacity = String(this.options.occludedOpacity !== undefined && placement.occluded ? this.options.occludedOpacity : geometry.alpha)
       marker.style.pointerEvents = placement.occluded ? 'none' : 'auto'
       marker.style.zIndex = String(Math.max(0, 100000 - Math.round(placement.distance * 100)))
+
+      // T-264 · 面板跟着标记走，而且**放不下就翻到左边**。在此之前面板一行定位代码都没有
+      // （`w3-hotspot-panel` 这个类名指向一份不存在的样式表），所以靠近右边界的热点，
+      // 它的面板有一半在画布外——用户看到半句话，而面板位置不是可编辑的东西。
+      this.positionPanel(hotspot.id, placement)
     }
 
     for (const [id, element] of this.markers) {
@@ -212,6 +241,25 @@ export class DomHotspotRenderer implements HotspotRenderer {
     }
   }
 
+  /**
+   * 把一个打开着的面板摆到它该在的位置。没打开就什么都不做。
+   *
+   * 画布尺寸取自容器：面板要夹在**看得见的那块区域**里，而不是文档坐标系里。
+   */
+  private positionPanel(hotspotId: string, placement: HotspotPlacement): void {
+    const panel = this.panels.get(hotspotId)
+    if (!panel) return
+    const container = this.options.container
+    const canvas = { width: container.clientWidth, height: container.clientHeight }
+    const layout = panelLayout(placement, canvas, estimatePanelHeight({ title: panel.querySelector('h3')?.textContent ?? '', text: panel.querySelector('p')?.textContent ?? '' }))
+    panel.style.position = 'absolute'
+    panel.style.left = `${layout.x.toFixed(1)}px`
+    panel.style.top = `${layout.y.toFixed(1)}px`
+    panel.style.width = `${layout.width}px`
+    panel.style.padding = `${HOTSPOT_PANEL_SPEC.padding}px`
+    panel.dataset.flipped = String(layout.flipped)
+  }
+
   private markerFor(hotspot: Hotspot): HTMLElement {
     const existing = this.markers.get(hotspot.id)
     if (existing) return existing
@@ -220,8 +268,19 @@ export class DomHotspotRenderer implements HotspotRenderer {
     marker.type = 'button'
     marker.className = `w3-hotspot w3-hotspot--${hotspot.style.marker}`
     marker.dataset.hotspotId = hotspot.id
-    marker.textContent = hotspot.style.marker === 'number' ? '' : ''
+    // T-264 · 这里原来是 `hotspot.style.marker === 'number' ? '' : ''` —— **两个分支都是
+    // 空串**，于是 number 标记从来没有显示过编号。文字改由 `update()` 每帧按
+    // `markerGeometry` 写（序号会随文档变），这里只负责建元素。
     marker.style.position = 'absolute'
+    marker.style.display = 'grid'
+    marker.style.placeItems = 'center'
+    marker.style.borderStyle = 'solid'
+    marker.style.borderRadius = '50%'
+    marker.style.borderColor = hotspot.style.color
+    marker.style.background = hotspot.style.color
+    marker.style.color = '#12171a'
+    marker.style.padding = '0'
+    marker.style.lineHeight = '1'
     marker.style.left = '0'
     marker.style.top = '0'
     marker.style.setProperty('--w3-hotspot-color', hotspot.style.color)

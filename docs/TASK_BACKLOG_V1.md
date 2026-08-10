@@ -2212,8 +2212,8 @@
   ③ reason 断言写成 `not.toBeNull()` → **必须证明它对 `undefined` 也成立**（E18 教训 3），
   改成断言具体措辞；④ 把「雾」加回文案 → 文案断言红。
 
-### [ ] T-264 · 热点视觉规范 + `style.label` + DOM 侧改读同一份
-- **依赖** T-225 · **预估** 1.2d · **实际** —
+### [x] T-264 · 热点视觉规范 + `style.label` + DOM 侧改读同一份
+- **依赖** T-225 · **预估** 1.2d · **实际** 1.1d
 - **独占** `packages/core/src/runtime/hotspot-visual.ts`(新) · `packages/core/src/runtime/hotspot-layer.ts` ·
   `packages/core/test/runtime/hotspot-visual.test.ts`(新) · `packages/editor/src/panels/HotspotPanel.tsx`（编号输入框）
 - **做** 热点的视觉表现**从来没有 CSS**（全仓一行都没有，靠内联样式活着），DOM 版本身就是一个

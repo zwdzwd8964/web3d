@@ -190,6 +190,30 @@ export function HotspotPanel() {
                       onChange={(e) => update(hotspot.id, '改热点颜色', (h) => void (h.style.color = e.target.value))}
                     />
                   </label>
+                  {/* T-264 · 编号。**只在「编号」标记下出现**——给一个小圆点填编号，填了也不显示。 */}
+                  {hotspot.style.marker === 'number' && (
+                    <label className="fields__row">
+                      <span className="fields__label">编号</span>
+                      <input
+                        className="field"
+                        type="text"
+                        maxLength={8}
+                        data-testid="hotspot-label"
+                        placeholder={`默认 ${doc.hotspots.findIndex((h) => h.id === hotspot.id) + 1}`}
+                        value={hotspot.style.label ?? ''}
+                        onChange={(e) =>
+                          update(hotspot.id, '改热点编号', (h) => {
+                            // 空串 = 回到缺省序号，而不是存一个空字符串。存空串的话，
+                            // `label ?? String(ordinal+1)` 会拿到 `''` 而不是走缺省分支，
+                            // 标记上从此一个字都没有。
+                            const next = e.target.value.trim()
+                            if (next === '') delete h.style.label
+                            else h.style.label = next
+                          })
+                        }
+                      />
+                    </label>
+                  )}
                   <label className="fields__row">
                     <span className="fields__label">偏移</span>
                     {(['X', 'Y', 'Z'] as const).map((axis, i) => (
