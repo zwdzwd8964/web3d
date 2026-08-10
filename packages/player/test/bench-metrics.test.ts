@@ -10,7 +10,9 @@ import {
   gradeFrames,
   gradeScene,
   gradeLighting,
+  gradeExplode,
   gradeLoad,
+  gradeSection,
   gradeStress,
   estimateShadowMemory,
   recommendShadowDefault,
@@ -558,5 +560,127 @@ describe('T-279 · JSON 报告', () => {
     // 脚本只能去正则匹配一段中文——而那段中文一改措辞，拒绝就失效了。
     expect(toJsonReport(input).capability.level).toBe('software')
     expect(toJsonReport({ ...input, capability: { ...software, level: 'ok' } }).capability.level).toBe('ok')
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* v1.0 · T-281 · 剖切与爆炸                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 断言的是**形状**，不是毫秒（同 `scale.test.ts` 的做法）。
+ *
+ * 「开一次剖切要花多少毫秒」是这台机器的属性，写死一个数等于把开发机的显卡写进测试。
+ * 能被钉住的是：两次切换各报各的数、program 差值是算出来的、没有剖切平面时报的是
+ * 「不适用」而不是一个 0。
+ */
+describe('T-281 · 剖切切换的首帧代价', () => {
+  const cost = {
+    onFirstFrameMs: 42.4,
+    offFirstFrameMs: 7.1,
+    programsBefore: 12,
+    programsAfterOn: 24,
+    programsAfterOff: 25,
+    clipPlanes: 2,
+  }
+
+  it('**开与关两次分别报数**，不是一个数字用两遍', () => {
+    // 卡面点名的那条：把首帧代价改成复用上一次的数字，只有这条断言抓得到。
+    // 两个输入故意差一个数量级——相等的话，「复用」与「分别量」产出同一张表。
+    const rows = gradeSection(cost)
+    const on = rows.find((r) => r.metric === '剖切切换首帧代价（开）')!
+    const off = rows.find((r) => r.metric === '剖切切换首帧代价（关）')!
+    expect(on.value).toBe('42 ms')
+    expect(off.value).toBe('7 ms')
+    expect(on.value).not.toBe(off.value)
+  })
+
+  it('回切那一行说清了为什么它要单独量', () => {
+    const off = gradeSection(cost).find((r) => r.metric === '剖切切换首帧代价（关）')!
+    expect(off.note).toContain('两次分别量')
+  })
+
+  it('shader 重编译那一行报的是差值，不是绝对数', () => {
+    const row = gradeSection(cost).find((r) => r.metric === '剖切引起的 shader 重编译')!
+    expect(row.value).toBe('+12 个 program')
+  })
+
+  it('program 数没涨时报 +0，不报负数', () => {
+    // 驱动缓存命中时 program 数可能不变甚至被回收。报一个负数会读成「剖切省了显存」。
+    const row = gradeSection({ ...cost, programsAfterOn: 10 }).find((r) => r.metric === '剖切引起的 shader 重编译')!
+    expect(row.value).toBe('+0 个 program')
+  })
+
+  it('两个毫秒数的 limit 都是「—」：这一档没有阈值来源', () => {
+    for (const row of gradeSection(cost)) expect(row.limit, row.metric).toBe('—')
+  })
+
+  it('裁剪平面条数与 program 变化都进了说明', () => {
+    const on = gradeSection(cost).find((r) => r.metric === '剖切切换首帧代价（开）')!
+    expect(on.note).toContain('2 条裁剪平面')
+    expect(on.note).toContain('12 → 24')
+  })
+
+  it('没有剖切平面时报「不适用」，而不是省掉这一档', () => {
+    // 一份少了一整档的报告与一份「这一档不适用」的报告，在读者眼里是两件事，
+    // 而只有后者能被信任。
+    const rows = gradeSection(null)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.value).toContain('不适用')
+    expect(rows[0]!.value).not.toBe('0 ms')
+  })
+})
+
+describe('T-281 · 爆炸进行中的稳态帧率', () => {
+  const cost = { groupName: '径向分组', members: 3, fps: 52.5, drawCalls: 210 }
+
+  it('按与其余各档同一条帧率线评级', () => {
+    expect(gradeExplode(cost)[0]!.verdict).toBe('pass')
+    expect(gradeExplode({ ...cost, fps: BENCH_LIMITS.fpsWarn - 0.1 })[0]!.verdict).toBe('warn')
+    expect(gradeExplode({ ...cost, fps: BENCH_LIMITS.fpsFail - 0.1 })[0]!.verdict).toBe('fail')
+  })
+
+  it('报的是分组名与在动的成员数', () => {
+    const row = gradeExplode(cost)[0]!
+    expect(row.value).toBe('52.5 fps · 210 drawcall')
+    expect(row.note).toContain('径向分组')
+    expect(row.note).toContain('3 个直接成员')
+  })
+
+  it('说清了量的是进行中而不是终态', () => {
+    // 终态与静止画面没有区别，量它会量出一个和没爆炸时一模一样的数。
+    expect(gradeExplode(cost)[0]!.note).toContain('终态与静止画面没有区别')
+  })
+
+  it('没有爆炸分组时报「不适用」', () => {
+    const rows = gradeExplode(null)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.value).toContain('不适用')
+  })
+})
+
+describe('T-281 · 两档都跟着软渲警告一起走', () => {
+  it('软渲时这两档的数字也在那段警告的管辖之下', () => {
+    // 这两档同样是帧率类数据。它们进的是同一张表、同一份 Markdown，于是那段
+    // 「不可作为验收依据」自动罩着它们——这一条断言的是「没有绕过去的第二条路」。
+    const md = toMarkdown({
+      capability: software,
+      rows: [...gradeSection({
+        onFirstFrameMs: 42,
+        offFirstFrameMs: 7,
+        programsBefore: 1,
+        programsAfterOn: 2,
+        programsAfterOff: 2,
+        clipPlanes: 1,
+      }), ...gradeExplode({ groupName: 'g', members: 1, fps: 10, drawCalls: 1 })],
+      scene: { triangles: 1, drawCalls: 2, geometries: 3, textures: 4, programs: 5, textureMemoryBytes: 6 },
+      userAgent: 'test',
+      screen: '800×600 @1x',
+      takenAt: '2026-08-10T00:00:00.000Z',
+      source: 'demo.w3p',
+    })
+    expect(md).toContain('不可作为验收依据')
+    expect(md).toContain('剖切切换首帧代价（开）')
+    expect(md).toContain('爆炸进行中帧率')
   })
 })

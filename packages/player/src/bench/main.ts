@@ -9,14 +9,16 @@ import {
   estimateTextureMemory,
   gradeFrames,
   gradeScene,
+  gradeExplode,
   gradeLighting,
   gradeLoad,
+  gradeSection,
   gradeStress,
   summariseFrames,
   toJsonReport,
   toMarkdown,
 } from './metrics.js'
-import type { BenchRow, LightLevel, LoadTiming, SceneStats, StressLevel } from './metrics.js'
+import type { BenchRow, ExplodeCost, LightLevel, LoadTiming, SceneStats, SectionCost, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -123,6 +125,10 @@ async function run(bytes: Uint8Array, sourceName: string) {
     show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
     const lighting = await lightingRamp(runtime, session)
 
+    show('<p class="bench__note">正在量剖切与爆炸…</p>')
+    const section = measureSection(runtime, session)
+    const explode = await measureExplode(runtime, session)
+
     const scene: SceneStats = {
       triangles: info?.triangles ?? 0,
       drawCalls: info?.calls ?? 0,
@@ -138,6 +144,8 @@ async function run(bytes: Uint8Array, sourceName: string) {
       ...gradeScene(scene),
       ...gradeStress(stress),
       ...gradeLighting(lighting),
+      ...gradeSection(section),
+      ...gradeExplode(explode),
     ]
 
     renderReport(rows, scene, sourceName)
@@ -334,6 +342,90 @@ async function stressRamp(
     for (const clone of copies) clone.removeFromParent()
   }
   return levels
+}
+
+/**
+ * T-281 · 剖切开 / 关各自的首帧代价。
+ *
+ * **两次分别量，不复用。** 复用一个数字看起来省事，代价是「回切也要重编译一遍」这件事
+ * 从报告上消失了——而用户点两下就会遇到两次卡顿，报告上只写了一次。
+ *
+ * 同步函数：`renderFrame()` 是同步的，而这一档要的正是「一帧画完花了多久」，中间插一次
+ * `await` 就把事件循环的调度混进读数里了。
+ */
+function measureSection(
+  runtime: ReturnType<typeof createPlayerSession>['runtime'],
+  session: ReturnType<typeof createPlayerSession>['session'],
+): SectionCost | null {
+  if (!runtime.doc.nodes.some((node) => node.section)) return null
+
+  /** 画一帧，返回它花了多久。 */
+  const frame = (): number => {
+    const started = performance.now()
+    session.tick()
+    runtime.renderFrame()
+    return performance.now() - started
+  }
+
+  try {
+    // 先确定地关掉并画几帧，让「切换前」是一个稳定的起点：上一档灯光扫描刚跑完，
+    // 直接读的话读到的是它留下的状态。
+    runtime.setSectionsEnabled(false)
+    for (let i = 0; i < 3; i++) frame()
+    const programsBefore = runtime.renderStats.programs
+
+    runtime.setSectionsEnabled(true)
+    const onFirstFrameMs = frame()
+    const { programs: programsAfterOn, clipPlanes } = runtime.renderStats
+
+    runtime.setSectionsEnabled(false)
+    const offFirstFrameMs = frame()
+    const programsAfterOff = runtime.renderStats.programs
+
+    return { onFirstFrameMs, offFirstFrameMs, programsBefore, programsAfterOn, programsAfterOff, clipPlanes }
+  } finally {
+    // 交还给文档。这一档是量，不是改——`setSectionsEnabled` 是会话开关，不进文档
+    // 也不进撤销栈（ADR-0040），但留着不还会让后面的读数带上它。
+    runtime.setSectionsEnabled(null)
+  }
+}
+
+/**
+ * T-281 · 爆炸**进行中**的稳态帧率。
+ *
+ * 进行中而不是终态：终态与静止画面没有区别，量它会量出一个和没爆炸时一模一样的数。
+ * 动画期间每一帧都要重算成员的世界矩阵并重传，那才是这一档的成本。
+ *
+ * 动画时长给得比采样窗口长，然后中途 abort：让动画自己跑完的话，采样窗口的后半段会
+ * 落在「已经停了」的画面上。
+ */
+async function measureExplode(
+  runtime: ReturnType<typeof createPlayerSession>['runtime'],
+  session: ReturnType<typeof createPlayerSession>['session'],
+): Promise<ExplodeCost | null> {
+  const group = runtime.doc.nodes.find((node) => node.explode)
+  if (!group) return null
+
+  const controller = new AbortController()
+  const running = runtime.setExplode(group.id, 1, { durationS: 60, signal: controller.signal })
+  // 中止是预期路径，不是错误。不接住的话它会变成一条 unhandled rejection，
+  // 而 e2e 里那条「页面不该抛异常」会红在一件本来正常的事情上。
+  running.catch(() => undefined)
+
+  try {
+    const stats = summariseFrames(await measure(runtime, session, SAMPLE_MS.stress, 5))
+    return {
+      groupName: group.name,
+      members: runtime.doc.nodes.filter((node) => node.parent === group.id).length,
+      fps: stats.fps,
+      drawCalls: runtime.info?.calls ?? 0,
+    }
+  } finally {
+    controller.abort()
+    // 还原到「没爆炸」。留着的话后面读到的 drawcall 与包围盒都带着散开的姿态。
+    const settle = runtime.setExplode(group.id, 0, { durationS: 0 })
+    settle.catch(() => undefined)
+  }
 }
 
 /** Roughly how wide the scene is, so copies can be placed side by side without overlapping. */

@@ -255,6 +255,115 @@ export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
   return rows
 }
 
+/* -------------------------------------------------------------------------- */
+/* v1.0 · T-281 · 剖切与爆炸                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 开 / 关剖切各自的**首帧**代价。
+ *
+ * 为什么单量首帧而不是稳态：three 把裁剪平面的**数量**放进 shader program 的 cache key
+ * （`SceneRuntime.renderStats` 的注释写着这件事，T-252 登记过）。于是开一次剖切 =
+ * 全场材质重编译一遍，代价一次性落在切换后的那一帧上，稳态帧率里一点都看不见。
+ *
+ * 用户的体感是「点一下剖切，卡一下」——而那一下正是这里要量的数。
+ */
+export interface SectionCost {
+  /** 从「关」切到「开」之后的第一帧，毫秒。 */
+  readonly onFirstFrameMs: number
+  /** 再切回「关」之后的第一帧，毫秒。 */
+  readonly offFirstFrameMs: number
+  /** 切换前 / 开之后 / 关之后，各自的 shader program 数。 */
+  readonly programsBefore: number
+  readonly programsAfterOn: number
+  readonly programsAfterOff: number
+  /** 开着的时候装了几条裁剪平面。 */
+  readonly clipPlanes: number
+}
+
+/**
+ * 剖切那一档，成表。
+ *
+ * `null` = 本场景没有剖切平面。**报一行说明而不是省掉这一档**：一份少了一整档的报告
+ * 与一份「这一档不适用」的报告，在读者眼里是两件事，而只有后者能被信任。
+ */
+export function gradeSection(cost: SectionCost | null): BenchRow[] {
+  if (cost === null) {
+    return [
+      {
+        metric: '剖切切换首帧代价',
+        value: '不适用（本场景没有剖切平面）',
+        limit: '—',
+        verdict: 'pass',
+        note: '这一档只有在场景里真的有剖切平面时才测得出来。送检资产带剖切时请重测。',
+      },
+    ]
+  }
+
+  const ms = (value: number) => `${value.toFixed(0)} ms`
+  return [
+    {
+      metric: '剖切切换首帧代价（开）',
+      value: ms(cost.onFirstFrameMs),
+      limit: '—',
+      verdict: 'pass',
+      note: `从「关」切到「开」之后的第一帧。装了 ${cost.clipPlanes} 条裁剪平面，shader program ${cost.programsBefore} → ${cost.programsAfterOn}。`,
+    },
+    {
+      metric: '剖切切换首帧代价（关）',
+      value: ms(cost.offFirstFrameMs),
+      limit: '—',
+      verdict: 'pass',
+      note: `再切回「关」之后的第一帧，shader program ${cost.programsAfterOn} → ${cost.programsAfterOff}。**两次分别量**——复用同一个数字会让「回切也要重编译一遍」这件事看不见。`,
+    },
+    {
+      metric: '剖切引起的 shader 重编译',
+      value: `+${Math.max(0, cost.programsAfterOn - cost.programsBefore)} 个 program`,
+      limit: '—',
+      verdict: 'pass',
+      note: 'three 把裁剪平面的**数量**放进 program 的 cache key，所以开一次剖切等于全场材质重编译一遍。这个数是上面那两个毫秒数的成因，不是另一件事。',
+    },
+  ]
+}
+
+/** 爆炸动画进行中的稳态读数。**不是终态**——终态与没爆炸时是同一种画面。 */
+export interface ExplodeCost {
+  readonly groupName: string
+  /** 这个分组下有几个直接成员在动。 */
+  readonly members: number
+  readonly fps: number
+  readonly drawCalls: number
+}
+
+/**
+ * 爆炸那一档，成表。
+ *
+ * 量的是**动画进行中**：那时每一帧都要重算成员的世界矩阵并重传，而终态与静止画面
+ * 没有区别。把终态当成「爆炸的性能」量，会量出一个和没爆炸时一模一样的数。
+ */
+export function gradeExplode(cost: ExplodeCost | null): BenchRow[] {
+  if (cost === null) {
+    return [
+      {
+        metric: '爆炸进行中帧率',
+        value: '不适用（本场景没有爆炸分组）',
+        limit: '—',
+        verdict: 'pass',
+        note: '这一档只有在场景里真的有爆炸分组时才测得出来。送检资产带爆炸视图时请重测。',
+      },
+    ]
+  }
+  return [
+    {
+      metric: '爆炸进行中帧率',
+      value: `${cost.fps.toFixed(1)} fps · ${cost.drawCalls} drawcall`,
+      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+      verdict: cost.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : cost.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
+      note: `分组「${cost.groupName}」的 ${cost.members} 个直接成员同时在动。量的是**动画进行中**，不是终态——终态与静止画面没有区别。`,
+    },
+  ]
+}
+
 /** 一次测量的全部输入。Markdown 与 JSON 两份产出都只从它出发。 */
 export interface BenchReportInput {
   readonly capability: CapabilityReport

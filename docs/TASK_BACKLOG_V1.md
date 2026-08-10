@@ -2538,8 +2538,10 @@
   ② `--check` 写成「文件存在即通过」→ 手改一个字那条红（**这是本卡最容易假绿的地方，
   `--check` 天生容易写成空转**）。
 
-### [ ] T-281 · 爆炸 / 剖切 benchmark 档位与性能预警
-- **依赖** T-243 · T-279 · **预估** 0.5d · **实际** —
+### [x] T-281 · 爆炸 / 剖切 benchmark 档位与性能预警
+- **依赖** T-243 · T-279 · **预估** 0.5d · **实际** 0.5d
+- **交付偏差** 一处：`packages/player/test/bench-metrics.test.ts` 不在独占清单里，但卡面的自测命令就是 `pnpm -F @w3/player test bench-metrics`——12 条新断言加在那里。
+- `measureSection` 读的是 `SceneRuntime.renderStats`（T-252 为这件事开的口），不是把 `renderer` 公开出来。
 - **独占** `packages/player/src/bench/main.ts` · `packages/player/src/bench/metrics.ts` ·
   `docs/BENCHMARK.md`（新章节）
 - **做** 两档——「剖切开 / 关的首帧代价」（**shader 重编译，`renderer.info.programs` 的变化也记**，
