@@ -2455,8 +2455,12 @@
 - **自测** `node scripts/check-deploy-headers.mjs`
 - **变异检验** ① 默认值改成 `*` → 红；② 删 bench 的 404 规则 → 红。
 
-### [ ] T-276 · E2E：真跨源宿主页面套 iframe
-- **依赖** T-273 · T-274 · **预估** 1.5d · **实际** —
+### [x] T-276 · E2E：真跨源宿主页面套 iframe
+- **依赖** T-273 · T-274 · **实际** 1.4d
+- **交付偏差**（两处，都因为「真跨源」把卡面没预见的东西暴露了出来）：
+  ① `packages/player/src/embed-sdk/index.ts` —— 默认 sandbox 少了 `allow-same-origin`，播放器在 iframe 里**根本起不来**（不透明源 → 模块脚本被 CORS 拦 + `resolveSource` 拿 `"null"` 比对）。这是本卡查出的缺陷，不是本卡的实现。
+  ② `packages/player/src/main.ts` —— 卡面验收要求 `screenshot` 返回真图，而 `CommandDeps.screenshot` 此前**从未被注入**，于是那条命令按 T-271 的设计根本不在 `ready.commands` 里。补了 15 行注入（记进 METRICS C3 表）。
+- **预估** 1.5d
 - **独占** `e2e/tests/embed.spec.ts`(新)
 - **做** 用 `page.route` + `route.fulfill` **凭空造一个真正的外部 origin**（`https://host.example`），
   不加第三个 dev server；策略文件也由路由伪造（**这样「策略在不在」本身成为被测对象**）；

@@ -88,6 +88,14 @@ async function attachEmbed(parts: { session: PlaybackSession; runtime: SceneRunt
         hasVariable: (id) => parts.runtime.doc.variables.some((v) => v.id === id),
         // 真正的实现由 `EmbedController` 的构造函数装上（订阅位图是它自己的状态）。
         subscribe: () => {},
+        // T-276 · 截图。**注入了它，`screenshot` 才进 `ready.commands`**（见 `commands.ts`
+        // 的三条路）。这里转成 data URL 而不是 blob URL：blob URL 只在铸它的那个 origin 里
+        // 解得开，而宿主按定义是另一个 origin——发过去的会是一个宿主永远打不开的字符串。
+        screenshot: async () => {
+          const result = await parts.runtime.captureImage({ background: 'opaque', format: 'png' })
+          if (!result.ok || !result.blob) return { ok: false, reason: result.reason || '导出失败。' }
+          return { ok: true, dataUrl: await toDataUrl(result.blob) }
+        },
       },
       send: (message) => broadcast?.(message),
       summary: () => summarizeScene(parts.runtime.doc),
@@ -99,6 +107,20 @@ async function attachEmbed(parts: { session: PlaybackSession; runtime: SceneRunt
   } catch (error) {
     console.warn('[player] 嵌入层未能启动，播放器仍可独立使用', error)
   }
+}
+
+/** 图片字节 → data URL。`FileReader` 而不是手搓 base64：后者在几 MB 的图上会卡住主线程。 */
+function toDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    // `result` 的类型是 string | ArrayBuffer | null，而 `readAsDataURL` 只会给 string。
+    // 但把这件事写成断言而不是 String() 强转：强转在另外两支上产出 '[object …]'，
+    // 而那是一条宿主拿去当图片地址、然后静默显示不出来的字符串。
+    reader.onload = () =>
+      typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('图片编码结果不是 data URL。'))
+    reader.onerror = () => reject(new Error('图片编码失败。'))
+    reader.readAsDataURL(blob)
+  })
 }
 
 /** 跑不了时，从嵌入通道说一声。 */

@@ -41,7 +41,7 @@ export interface MountOptions {
   src: string
   /** 挂在哪。 */
   container: HTMLElement
-  /** iframe 的 sandbox。默认给一组够用的最小权限。 */
+  /** iframe 的 sandbox。默认 `'allow-scripts allow-same-origin'`——**两个都不能少**，见 `mount` 里的说明。 */
   sandbox?: string
   /** 握手超时（毫秒）。默认 15 秒——一份大场景在慢网上确实要这么久。 */
   timeoutMs?: number
@@ -86,9 +86,19 @@ export function mount(options: MountOptions): Promise<PlayerHandle> {
   iframe.style.border = '0'
   iframe.style.width = '100%'
   iframe.style.height = '100%'
-  // 默认给最小够用的一组。**没有 `allow-same-origin`**：播放器不需要读宿主的存储，
-  // 而给了它就等于让 iframe 里的代码拿到宿主的同源权限。
-  iframe.setAttribute('sandbox', options.sandbox ?? 'allow-scripts')
+  // `allow-same-origin` **必须给**，而第一版没给。T-276 的真跨源 E2E 把代价摊开了：
+  //
+  // 少了它，iframe 落进一个**不透明源**（origin 字面量 `"null"`）。于是
+  //   ① 播放器的入口是 `<script type="module">`，模块脚本按 CORS 取，
+  //      而不透明源对自己的服务器也是跨源——脚本一个都加载不进来；
+  //   ② `resolveSource` 拿 `new URL(src, location.href).origin` 与 `location.origin` 比，
+  //      后者是 `"null"`，于是**每一个 `?src=` 都被判成跨源**而拒绝。
+  // 症状是宿主等满 15 秒然后拿到 `timeout`，而播放器那边连一行日志都没有。
+  //
+  // 第一版的理由（「给了它就等于让 iframe 拿到宿主的同源权限」）是错的：`allow-same-origin`
+  // 给的是 iframe **自己那个源**的权限，不是父页面的。它唯一的真风险是播放器与宿主
+  // 同源时 iframe 能自己摘掉 sandbox——而那种情况下 sandbox 本来就什么都没挡住。
+  iframe.setAttribute('sandbox', options.sandbox ?? 'allow-scripts allow-same-origin')
   options.container.appendChild(iframe)
 
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()

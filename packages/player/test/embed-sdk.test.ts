@@ -58,6 +58,20 @@ describe('T-274 · 协议一致性（读源码文本，不 import）', () => {
   })
 })
 
+describe('T-276 · 默认 sandbox 必须带 `allow-same-origin`', () => {
+  it('默认值两个都在', () => {
+    // 少了它，iframe 落进不透明源：模块脚本按 CORS 取而对自己的服务器也算跨源，
+    // `resolveSource` 又拿 `location.origin`（此时是 `"null"`）比对，于是每个 `?src=`
+    // 都被判成跨源。症状是宿主等满超时，播放器那边一行日志都没有。
+    //
+    // 真正的守卫是 `e2e/tests/embed.spec.ts` 的用例 1——它是这条被查出来的地方。
+    // 这里再钉一次，是因为 e2e 不在 `pnpm verify` 里，而这个默认值改回去只要删两个词。
+    const match = /setAttribute\('sandbox',\s*options\.sandbox \?\? '([^']*)'\)/.exec(readFileSync(SDK, 'utf8'))
+    expect(match, '应当有一行给 iframe 设 sandbox 默认值').not.toBeNull()
+    expect(match![1]!.split(/\s+/).sort()).toEqual(['allow-same-origin', 'allow-scripts'])
+  })
+})
+
 describe('T-274 · 产物', () => {
   /** 构建过才有。没构建时跳过而不是红——`pnpm test` 不该强制先跑一次构建。 */
   const built = existsSync(join(DIST, 'embed.js'))

@@ -130,6 +130,15 @@ SDK 里写着 `SUPPORTED_PROTOCOLS`，播放器在 `ready` 里报自己的 `prot
 **读不懂的配置 → 谁都不许嵌，不是全通。** 非白名单来源只会收到**一条** `denied`，
 之后完全沉默（防反射放大）。
 
+### 自己传 `sandbox` 的话，`allow-same-origin` 不能省
+
+默认值是 `'allow-scripts allow-same-origin'`。想收紧的话请注意：**去掉
+`allow-same-origin` 播放器就起不来**——iframe 会落进一个不透明源，于是它的模块脚本
+对自己的服务器都算跨源而被 CORS 拦下，`?src=` 也会被播放器自己的同源检查判成跨源。
+症状是你等满超时拿到 `timeout`，而播放器那边一行日志都没有。
+
+它不会让 iframe 拿到**你的**权限：`allow-same-origin` 给的是 iframe 自己那个源的权限。
+
 ---
 
 ## 7. 样板宿主页
