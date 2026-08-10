@@ -41,6 +41,7 @@
 | 2026-08-05 | T-265 | 22 | **28** | **+6，全部 owner 是紧接着的 T-266 / T-267。** sprite 层与它的消费者被卡面拆成了两张卡：本卡落栅格化与 `ops`（纯 Node 可穷举），T-266 落编排（还原栈 · 八步链路 · overlay pass）。六行都到期 v1.2——**下一张卡就该把它们全删掉**，删不掉就说明拆卡拆错了 |
 | 2026-08-05 | T-266 | 28 | **30** | **+2，而且 T-265 那六行一条都没删掉——这与我在上一行写的预期不符，如实记下。** 成因是拆卡的边界与我以为的不同：sprite 层的消费者不是 `captureImage`（它只调一个注入进来的 `composeOverlay`，好让不出图的宿主不背那份对象），而是**宿主侧的接线**，那属于 T-267 的 Viewport。新增两行是 `CaptureResult` 的 blob 与 panelCount，同样等 T-267 的对话框。**下一张卡应当一次性删掉八行**，删不掉就说明 M17 的拆卡真的有问题。⚠ 另一头是好消息：`beginCapture` / `endCapture` 两行退休了——T-235 为出图预付的那对接缝，这一卡真的用上了。连同 `HotspotSpriteLayer.surface`（`captureSurface` 的 instanceof 分支读它）与 `RendererLike.setClearAlpha`（透明背景那一步），一共退休**七行**（还包括 `planCapture` / `CapturePlan.notice` / `HotspotSpriteLayer` —— `captureImage` 一接线，T-262 与 T-265 预付的那几行同时兑现）。净 −5：28 → 23 |
 | 2026-08-05 | T-268 | 23 | 23 | **豁免表条数不动**（`SceneRuntime.captureImage` 退休的那一行在**冻结接口表**里，不计入这个棘轮）。真正下降的是另一把： `HeadlessRuntime` 从 v0/v0.5 遗留基线退休（`MAX_LEGACY` 86 → 85）：它一直只被测试引用，本卡第一次让它出现在生产代码路径上（契约里的双实现） |
+| 2026-08-05 | T-269 | 23 | **22** | `CaptureResult.blob` 退休：发布缩略图是它的第一个生产消费者（`captureThumbnail()` 把 blob 读成字节喂给 `publish`）。那一行的 owner 原本写的是 T-267，reason 里同时点了 T-269——**T-269 先落地，所以由它来删** |
 
 ## 豁免
 
@@ -53,7 +54,6 @@
 | core:HotspotSpriteLayer.prepare | T-266 在导出前等字体就绪、把媒体解码进缓存 | T-266 | v1.2 |
 | core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
 | core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |
-| core:CaptureResult.blob | 出图对话框（T-267）拿它触发浏览器下载，发布缩略图（T-269）把它当字节喂给 publish | T-267 | v1.2 |
 | core:CaptureResult.panelCount | 出图对话框显示「本次导出包含 N 个已打开面板」，也是面板重放的用户可见证据 | T-267 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |

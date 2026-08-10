@@ -43,7 +43,25 @@ export interface PublishOptions {
   readonly storage: StorageProvider
   readonly coreVersion: string
   readonly label?: string
+  /**
+   * 现成的缩略图字节。给了它就直接用，不再出图。
+   *
+   * ⚠ **这个参数从 T-100 起就在，而全仓没有一个调用方传过它**——`publish.ts` 声明它、
+   * `package.ts` 消费它、`manifest` 记录它，一条完整的路，走到头是空的。
+   * 发布包里因此从来没有过缩略图。T-269 接通的就是这条路。
+   */
   readonly thumbnail?: Uint8Array
+  /**
+   * T-269 · 发布前现出一张缩略图。**注入而不是让 `publish()` 自己去找运行时**。
+   *
+   * 理由是包边界：`publish()` 只认识文档与存储，让它 `import { getActiveRuntime }`
+   * 会把「发布」与「当前有没有一个活着的视口」绑死——而发布在逻辑上不需要视口。
+   * 注入之后，没有视口的调用方（脚本、测试、将来的批量发布）传 `undefined` 就是了。
+   *
+   * **失败不阻断发布**：拿不到图就发一个没有缩略图的包。一个能用的包 + 一句提示，
+   * 好过因为一张预览图发不出去。
+   */
+  readonly captureThumbnail?: () => Promise<Uint8Array | null>
   readonly newSnapshotId?: () => string
   readonly now?: () => string
 }
@@ -121,13 +139,16 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
   const snapshotId = mintId()
   const publishedAt = now()
 
+  // T-269 · 出图失败不阻断发布：拿不到图就发一个没有缩略图的包。
+  const thumbnail = options.thumbnail ?? (await captureThumbnailSafely(options))
+
   const bytes = packScene({
     document: doc,
     snapshotId,
     publishedAt,
     coreVersion: options.coreVersion,
     blobs,
-    ...(options.thumbnail ? { thumbnail: options.thumbnail } : {}),
+    ...(thumbnail ? { thumbnail } : {}),
     ...(options.label ? { label: options.label } : {}),
   })
 
@@ -149,6 +170,27 @@ export async function publish(options: PublishOptions): Promise<PublishResult> {
     snapshot,
     assetCount: blobs.size,
     filename: `${sanitiseFilename(doc.name)}.w3p`,
+  }
+}
+
+/**
+ * 取一张缩略图，**任何失败都吞掉**。
+ *
+ * 三种失败各自的表现都一样（返回 null，发一个没有缩略图的包）：注入方没给、出图被拒、
+ * 出图抛异常。三者不区分是有意的——调用方对这三种情况的处置完全相同，而区分它们只会
+ * 让一个「发布」按钮长出三条错误分支。
+ *
+ * ⚠ **零字节也算失败。** `new Uint8Array(0)` 是 truthy，而 `packScene` 与 `publish`
+ * 两处都是 truthy 判断——一次返回空 blob 的出图会让一个 0 字节的 `thumbnail.png` 进包，
+ * 而那比没有缩略图更糟：解析它的一方会拿到一个「有图但打不开」的包。
+ */
+async function captureThumbnailSafely(options: PublishOptions): Promise<Uint8Array | undefined> {
+  if (!options.captureThumbnail) return undefined
+  try {
+    const bytes = await options.captureThumbnail()
+    return bytes && bytes.byteLength > 0 ? bytes : undefined
+  } catch {
+    return undefined
   }
 }
 

@@ -188,3 +188,35 @@ interface MaterialProbe {
   /** three's class name, so a base change can be observed rather than inferred. */
   readonly base: string | null
 }
+
+/**
+ * T-269 · 出一张发布用的缩略图。**窄口，一件事。**
+ *
+ * 与 `previewAnimation` 同一条纪律：面板不能自己 `import { getActiveRuntime }` 之后随手
+ * 调任意方法。这里把「发布对话框需要的那一次出图」封成一个函数，参数写死——
+ * 512 长边、不含热点、不透明、JPEG。**这四项不是调用方的选择**：它们是「缩略图」这个
+ * 词的定义，让调用方传进来只会得到四种谁也没要过的组合。
+ *
+ * @returns 图片字节；此刻没有活着的运行时、或者出图被拒时返回 null。
+ */
+export async function captureThumbnail(): Promise<Uint8Array | null> {
+  const runtime = active
+  if (!runtime) return null
+  const result = await runtime.captureImage({
+    longEdge: THUMBNAIL_LONG_EDGE,
+    includeHotspots: false,
+    background: 'opaque',
+    format: 'jpeg',
+  })
+  if (!result.ok || !result.blob) return null
+  return new Uint8Array(await result.blob.arrayBuffer())
+}
+
+/**
+ * 缩略图长边。
+ *
+ * 512 而不是更大：它出现在项目列表的卡片上，而一张 2K 的缩略图会让一个装了二十个项目的
+ * 列表在打开时解码 20 张大图。也不能更小——`MIN_EXPORT_EDGE` 是 256，低于它 `planCapture`
+ * 会直接拒绝。
+ */
+export const THUMBNAIL_LONG_EDGE = 512

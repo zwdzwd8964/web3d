@@ -2316,8 +2316,8 @@
   这就是「冗余实现让变异失灵」（E18 教训 1）。**因此本卡额外加一条断言：headless 与 SceneRuntime
   必须引用同一个 `planCapture` 符号**（`expect(headlessPlanFn).toBe(planCapture)`）。
 
-### [ ] T-269 · 接通发布缩略图（并收口视点缩略图字段形状）
-- **依赖** T-266 · **预估** 0.5d · **实际** —
+### [x] T-269 · 接通发布缩略图（并收口视点缩略图字段形状）
+- **依赖** T-266 · **预估** 0.5d · **实际** 0.7d（验收第三条按规划 §1378 的收窄版执行，见 MUTATIONS ④）
 - **独占** `packages/editor/src/dialogs/PublishDialog.tsx` · `packages/editor/src/publish/publish.ts`
 - **做** 发布前调 `captureImage({longEdge:512, includeHotspots:false, background:'opaque', format:'jpeg'})`
   把 bytes 传给 `publish({thumbnail})`——**接通 `publish.ts:41` / `package.ts:24/135/213` 这条铺好

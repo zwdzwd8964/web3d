@@ -6,6 +6,7 @@ import { downloadPackage, precheck, publish } from '../publish/publish.js'
 import type { PublishPrecheck, PublishResult } from '../publish/publish.js'
 import { saveSnapshot } from '../publish/snapshots.js'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
+import { captureThumbnail } from '../viewport/runtime-registry.js'
 
 /**
  * T-100 · the publish dialog.
@@ -45,6 +46,10 @@ export function PublishDialog({ onClose }: { onClose: () => void }) {
         doc,
         storage: session.storage,
         coreVersion: CORE_VERSION,
+        // T-269 · 接通那条铺好没人走的路： 从 T-100 起就收 ，
+        //  从来就会写它，而全仓没有一个调用方传过——发布包里因此从来没有
+        // 过缩略图。出图失败不阻断发布（ 内部吞掉）。
+        captureThumbnail,
         ...(label.trim() ? { label: label.trim() } : {}),
       })
       // The snapshot is saved before the download: a download the user cancels still leaves
