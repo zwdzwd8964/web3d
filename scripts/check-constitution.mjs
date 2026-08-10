@@ -55,6 +55,10 @@ const GUARDS = [
   // v1.0 · T-261. 附件A 是合同的一部分，而它的每个数字在 DEFAULT_POLICY 里都有一个
   // 对应物，两边靠人手同步。人手同步的失效是**单向的**：有人为了让一份客户资产过检而
   // 调宽策略，附件A 不动——合同里写着 60 MB、系统里放行 80 MB，而没有任何测试会红。
+  // v1.0 · T-272. 嵌入控制器传输无关是它能在纯 Node 里被穷举的全部原因；而 postMessage
+  // 的 target origin 用 '*' 等于把回执广播给宿主页面上的每一个人，包括刚被拒绝掉的那些。
+  // 两条都是「改了照样跑得起来」的性质，只有静态断言拦得住。
+  { article: '嵌入分层', script: 'check-embed-layering.mjs', args: [], what: 'core embed layer is transport-agnostic; no wildcard postMessage target outside the handshake' },
   { article: '合同 · 附件A', script: 'check-annex-a.mjs', args: [], what: 'Appendix A numbers equal DEFAULT_POLICY; every metric is in the contract; no retired format names' },
   { article: 'NORTH_STAR §8', script: 'check-expiry.mjs', args: [], what: 'every CONSTITUTION-EXCEPTION parses and none has expired' },
 ]

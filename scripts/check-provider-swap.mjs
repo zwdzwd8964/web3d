@@ -74,6 +74,15 @@ const NETWORK_SITES = new Map([
       proof: 'resolveSource(',
     },
   ],
+  [
+    'packages/player/src/embed/boot.ts',
+    {
+      why: 'T-272 · 取嵌入白名单。**相对 URL、同源、随 --base 走**，所以内网部署下它取的是同一台机器上的那份文件；取不到时按「谁都不许嵌」处理，不是全通',
+      // 这条豁免成立的全部前提是那个常量**是相对路径**。把它写死成一个绝对地址的那天，
+      // 它就变成了一次外部请求，而内网部署会白屏——所以守卫检查它，不靠信任。
+      proof: 'const POLICY_URL =',
+    },
+  ],
 ])
 
 const NETWORK_PRIMITIVES = [

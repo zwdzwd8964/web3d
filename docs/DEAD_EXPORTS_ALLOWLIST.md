@@ -44,6 +44,7 @@
 | 2026-08-05 | T-269 | 23 | **22** | `CaptureResult.blob` 退休：发布缩略图是它的第一个生产消费者（`captureThumbnail()` 把 blob 读成字节喂给 `publish`）。那一行的 owner 原本写的是 T-267，reason 里同时点了 T-269——**T-269 先落地，所以由它来删** |
 | 2026-08-05 | T-267 | 22 | **21** | `HotspotSpriteLayer.fontSource` 退休：出图对话框显示当前字体来源（v1.0 是系统字体栈，不同机器字形不同——这一行是用户唯一能知道这件事的地方） |
 | 2026-08-05 | T-271 | 21 | **27** | +6，全部是嵌入协议的导出面，owner 是紧接着的 T-272 / T-274。**控制器传输无关是有意的**（协议是数据形状，postMessage 只是搬运方式之一），代价就是这一层的消费者天然在下一张卡。到期 v1.2 |
+| 2026-08-05 | T-272 | 27 | **26** | `EmbedController` 退休：传输层是它的第一个生产消费者。上一行预告的「消费者天然在下一张卡」当场兑现了一条 |
 
 ## 豁免
 
@@ -56,7 +57,6 @@
 | core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
 | core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |
 | core:CaptureResult.panelCount | 出图对话框显示「本次导出包含 N 个已打开面板」，也是面板重放的用户可见证据 | T-267 | v1.2 |
-| core:EmbedController | 嵌入控制器传输无关（这正是它可以在纯 Node 里被穷举的原因），消费它的是 T-272 的 postMessage 传输层与 T-273 的 player 接线 | T-272 | v1.2 |
 | core:summarizeScene | 握手时报的场景摘要，T-272 的传输层在 ready 那一步调它 | T-272 | v1.2 |
 | core:SceneSummary.nodeCount | 宿主握手后据此判断这份场景有多大，T-274 的 SDK 把它透给调用方 | T-274 | v1.2 |
 | core:SceneSummary.hotspotCount | 同上，宿主用它决定要不要显示热点目录 | T-274 | v1.2 |

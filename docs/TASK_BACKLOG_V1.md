@@ -2378,8 +2378,8 @@
   ④ `ready.commands` 改成手写数组并少一项 → 门槛红；⑤ 注入缺失时仍注册（返回
   `unsupported-capability`）→ 「注入缺失则命令不出现」红；⑥ `unknown-command` 改成静默返回 null → 对应红。
 
-### [ ] T-272 · postMessage 传输层与 origin 策略
-- **依赖** T-271 · **预估** 1.5d · **实际** —
+### [x] T-272 · postMessage 传输层与 origin 策略
+- **依赖** T-271 · **预估** 1.5d · **实际** 1.3d
 - **独占** `packages/player/src/embed/policy.ts`(新) · `transport.ts`(新) · `boot.ts`(新) ·
   `packages/player/test/embed-policy.test.ts`(新) · `scripts/check-embed-layering.mjs`(新) ·
   `scripts/check-constitution.mjs`（一行）
