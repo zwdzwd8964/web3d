@@ -5,6 +5,7 @@ import { Splitter } from './layout/Splitter.js'
 import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
+import { ExportImageDialog } from './dialogs/ExportImageDialog.jsx'
 import { PublishDialog } from './dialogs/PublishDialog.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
 import { HotspotPanel } from './panels/HotspotPanel.js'
@@ -25,7 +26,7 @@ import { usePreview } from './preview/PreviewContext.jsx'
 import { useAutoSave } from './project/useAutoSave.js'
 import { useDocumentActions, useDocumentSelector } from './store/StoreContext.js'
 import { Viewport } from './viewport/Viewport.js'
-import { fullRebuildCount } from './viewport/runtime-registry.js'
+import { exportImage, exportSettings, fullRebuildCount } from './viewport/runtime-registry.js'
 import { useShortcuts } from './shortcuts.js'
 
 /**
@@ -93,6 +94,7 @@ function TopBar() {
         重做
       </button>
       <SaveControl />
+      <ExportImageButton />
       <PublishButton />
       <div className="topbar__spacer" />
       <ModeSwitch />
@@ -133,6 +135,32 @@ const SAVE_LABELS: Record<ReturnType<typeof useAutoSave>['state'], string> = {
   saving: '保存中…',
   saved: '已保存',
   error: '保存失败',
+}
+
+/**
+ * T-267 · 出图入口，挨着发布。
+ *
+ * 没有活着的运行时时按钮禁用——而不是点开一个每个数字都是 0 的对话框。
+ */
+function ExportImageButton() {
+  const [open, setOpen] = useState(false)
+  const settings = open ? exportSettings() : null
+  return (
+    <>
+      <button type="button" className="tbtn" onClick={() => setOpen(true)} title="把当前视角导出为图片">
+        导出图片
+      </button>
+      {open && settings && (
+        <ExportImageDialog
+          viewport={settings.viewport}
+          limits={settings.limits}
+          fontSource={settings.fontSource}
+          onExport={exportImage}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
 }
 
 /** T-100 · the publish gate lives in the top bar, next to save. */

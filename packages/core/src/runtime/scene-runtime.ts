@@ -1573,6 +1573,21 @@ export class SceneRuntime implements RuntimeContext {
     })
   }
 
+  /**
+   * T-267 · 出图对话框开箱时要的三样读数。
+   *
+   * 收成一个方法而不是三个 getter：它们**必须一起取**——视口、机器上限、字体来源三者
+   * 描述的是「此刻这台机器能导出什么」，分三次取会拿到三个不同时刻的快照。
+   */
+  exportSettings(): { viewport: { width: number; height: number }; limits: CaptureLimits; fontSource: string } {
+    return {
+      viewport: { width: this.width, height: this.height },
+      limits: this.captureLimits(),
+      fontSource:
+        this.hotspotRenderer instanceof HotspotSpriteLayer ? this.hotspotRenderer.fontSource : '系统字体',
+    }
+  }
+
   /** 这台机器与当前管线状态的实测数字。 */
   private captureLimits(): CaptureLimits {
     const report = this.options.capability?.()

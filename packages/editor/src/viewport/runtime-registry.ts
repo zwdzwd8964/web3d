@@ -1,4 +1,4 @@
-import type { SceneRuntime } from '@w3/core'
+import type { CaptureLimits, CaptureOrder, CaptureResult, SceneRuntime } from '@w3/core'
 
 /**
  * The one live SceneRuntime, so the document store's `onPatch` can reach it.
@@ -220,3 +220,45 @@ export async function captureThumbnail(): Promise<Uint8Array | null> {
  * 会直接拒绝。
  */
 export const THUMBNAIL_LONG_EDGE = 512
+/**
+ * T-267 · 出图对话框开箱时要的三样读数。
+ *
+ * 与 `previewAnimation` / `captureThumbnail` 同一条纪律：面板不能自己拿到运行时之后
+ * 随手调任意方法。这里返回的是**三个只读值**，一个方法都不给。
+ *
+ * @returns 没有活着的运行时时返回 null，调用方据此禁用「导出图片」按钮。
+ */
+export function exportSettings(): {
+  viewport: { width: number; height: number }
+  limits: CaptureLimits
+  fontSource: string
+} | null {
+  const runtime = active
+  if (!runtime) return null
+  return runtime.exportSettings()
+}
+
+/**
+ * T-267 · 走一次导出。参数由对话框决定，**尺寸由 `planCapture` 决定**。
+ *
+ * @returns 没有活着的运行时时返回一个 `ok: false` 的结果——不是抛异常：
+ *   `captureImage` 永不 reject 是规划 §4 定死的，这一层不该破坏它。
+ */
+export async function exportImage(order: CaptureOrder, filename?: string): Promise<CaptureResult> {
+  const runtime = active
+  if (!runtime) {
+    return {
+      ok: false,
+      width: 0,
+      height: 0,
+      format: order.format,
+      background: order.background === 'transparent' ? 'transparent' : 'opaque',
+      filename: filename ?? '',
+      notice: '',
+      reason: '画面还没准备好，无法导出。',
+      blob: null,
+      panelCount: 0,
+    }
+  }
+  return runtime.captureImage(order, filename === undefined ? {} : { filename })
+}

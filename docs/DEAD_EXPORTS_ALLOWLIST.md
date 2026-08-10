@@ -42,6 +42,7 @@
 | 2026-08-05 | T-266 | 28 | **30** | **+2，而且 T-265 那六行一条都没删掉——这与我在上一行写的预期不符，如实记下。** 成因是拆卡的边界与我以为的不同：sprite 层的消费者不是 `captureImage`（它只调一个注入进来的 `composeOverlay`，好让不出图的宿主不背那份对象），而是**宿主侧的接线**，那属于 T-267 的 Viewport。新增两行是 `CaptureResult` 的 blob 与 panelCount，同样等 T-267 的对话框。**下一张卡应当一次性删掉八行**，删不掉就说明 M17 的拆卡真的有问题。⚠ 另一头是好消息：`beginCapture` / `endCapture` 两行退休了——T-235 为出图预付的那对接缝，这一卡真的用上了。连同 `HotspotSpriteLayer.surface`（`captureSurface` 的 instanceof 分支读它）与 `RendererLike.setClearAlpha`（透明背景那一步），一共退休**七行**（还包括 `planCapture` / `CapturePlan.notice` / `HotspotSpriteLayer` —— `captureImage` 一接线，T-262 与 T-265 预付的那几行同时兑现）。净 −5：28 → 23 |
 | 2026-08-05 | T-268 | 23 | 23 | **豁免表条数不动**（`SceneRuntime.captureImage` 退休的那一行在**冻结接口表**里，不计入这个棘轮）。真正下降的是另一把： `HeadlessRuntime` 从 v0/v0.5 遗留基线退休（`MAX_LEGACY` 86 → 85）：它一直只被测试引用，本卡第一次让它出现在生产代码路径上（契约里的双实现） |
 | 2026-08-05 | T-269 | 23 | **22** | `CaptureResult.blob` 退休：发布缩略图是它的第一个生产消费者（`captureThumbnail()` 把 blob 读成字节喂给 `publish`）。那一行的 owner 原本写的是 T-267，reason 里同时点了 T-269——**T-269 先落地，所以由它来删** |
+| 2026-08-05 | T-267 | 22 | **21** | `HotspotSpriteLayer.fontSource` 退休：出图对话框显示当前字体来源（v1.0 是系统字体栈，不同机器字形不同——这一行是用户唯一能知道这件事的地方） |
 
 ## 豁免
 
@@ -50,7 +51,6 @@
 | symbol | reason | owner | expires |
 |---|---|---|---|
 | core:CapturePlan.droppedOutline | T-263 的 resolveExportPipeline 返回同名字段，出图对话框据它显示「不含描边」那句 | T-263 | v1.2 |
-| core:HotspotSpriteLayer.fontSource | 出图对话框显示当前字体来源（T-267 验收点名） | T-267 | v1.2 |
 | core:HotspotSpriteLayer.prepare | T-266 在导出前等字体就绪、把媒体解码进缓存 | T-266 | v1.2 |
 | core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
 | core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |

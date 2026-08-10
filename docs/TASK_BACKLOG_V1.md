@@ -2284,8 +2284,8 @@
   ③ `compose()` 挪到 `drawScene()` 之前 → 顺序断言红；④ 删重入守卫 → 并发红；
   ⑤ 删 `resize` 的 `capturing` 分支 → pending 尺寸红。
 
-### [ ] T-267 · 编辑器出图对话框
-- **依赖** T-266 · **预估** 1.0d · **实际** —
+### [x] T-267 · 编辑器出图对话框
+- **依赖** T-266 · **预估** 1.0d · **实际** 0.9d
 - **独占** `packages/editor/src/dialogs/ExportImageDialog.tsx`(新) · `packages/editor/src/App.tsx`（列 A）·
   `packages/editor/test/dialogs/export-image-dialog.test.tsx`(新)
 - **做** 模态框（倍率 1/2/4 · 长边 1920/2560/3840 · 格式 PNG/JPEG · 背景 跟随场景/透明/不透明 ·
