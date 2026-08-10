@@ -2235,8 +2235,8 @@
   ② 排序方向反过来 → 顺序红；③ 删 `forceOcclusion` 判断 → raycast 计数红；
   ④ 删 `panelLayout` 翻边分支 → 边界红；⑤ 把编号输入框的 onChange 改成空操作 → UI 入口红。
 
-### [ ] T-265 · `HotspotSpriteLayer`（栅格化 + overlay pass）
-- **依赖** T-264 · **预估** 1.5d · **实际** —
+### [x] T-265 · `HotspotSpriteLayer`（栅格化 + overlay pass）
+- **依赖** T-264 · **预估** 1.5d · **实际** 1.2d（变异 ⑤ 随例外注释挪到 T-266）
 - **独占** `packages/core/src/runtime/hotspot-sprite.ts`(新) · `packages/core/src/runtime/font-provider.ts`(新) ·
   `packages/core/test/runtime/hotspot-sprite.test.ts`(新) · `vendor/fonts/README.md` ·
   `docs/adr/0025-出图新增一次-overlay-pass.md`(新)

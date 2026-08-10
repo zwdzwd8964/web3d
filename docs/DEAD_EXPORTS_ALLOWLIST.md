@@ -38,6 +38,7 @@
 | 2026-08-05 | T-262 | 23 | **24** | **净 +1，而两个方向都动了**：`captureDevicePixels` / `maxCaptureScale` 两行退休——T-214 当时只落公式不落 `planCapture`，本卡把钳位链接上，它们有生产调用者了；同时新增 `planCapture` / `CapturePlan.droppedOutline` / `CapturePlan.notice` 三行，owner 是同一个里程碑 M17 里排在后面的 T-263 / T-266 / T-267。`planCapture` 逐字出现在规划 §4 的代码跨度里，够得上冻结接口表的门锁，但那张表收的是「消费者排在**后面版本**」的东西，而这三行的消费者就在本版本内——放进四列表才是它们真实的形状 |
 | 2026-08-05 | T-259 | 24 | **23** | `suggestUnit` 退休。它从 T-051 起就躺在零调用者清单上——公式在、对话框不在，于是每一份模型都按米处理。本卡在 core 里加 `suggestUnitFromHeader`（从 GLB 头部的 POSITION 访问器 min/max 直接量，不解几何）作为它的生产调用者，编辑器再调这一层。**接线一张卡，表短一格** |
 | 2026-08-05 | T-260 | 23 | **22** | `AuditResult.summary` 退休。它一直算得好好的、从来没被显示过——一句「体检通过，但 2 项接近上限：三角面数、贴图数量」，用户一次都没看见。`AuditReport` 把它渲染出来，那一行随之删除 |
+| 2026-08-05 | T-265 | 22 | **28** | **+6，全部 owner 是紧接着的 T-266 / T-267。** sprite 层与它的消费者被卡面拆成了两张卡：本卡落栅格化与 `ops`（纯 Node 可穷举），T-266 落编排（还原栈 · 八步链路 · overlay pass）。六行都到期 v1.2——**下一张卡就该把它们全删掉**，删不掉就说明拆卡拆错了 |
 
 ## 豁免
 
@@ -48,6 +49,12 @@
 | core:planCapture | 出图对话框（T-267）与 exportImage 动作（T-266）下单前都过它一遍；本卡只落纯函数与两个矩阵，不落调用点 | T-266 | v1.2 |
 | core:CapturePlan.droppedOutline | T-263 的 resolveExportPipeline 返回同名字段，出图对话框据它显示「不含描边」那句 | T-263 | v1.2 |
 | core:CapturePlan.notice | 钳位说明，T-267 的对话框把它显示在尺寸下方；没有显示方就等于静默钳位 | T-267 | v1.2 |
+| core:HotspotSpriteLayer | 出图链路的热点层，T-266 的 captureImage 建它并在 drawScene 之后 compose；本卡只落栅格化与 ops，不落编排 | T-266 | v1.2 |
+| core:HotspotSpriteLayer.surface | T-266 的 overlay pass 拿这块画布当 three 贴图的源，并在导出前后按目标分辨率改它的尺寸 | T-266 | v1.2 |
+| core:HotspotSpriteLayer.fontSource | 出图对话框显示当前字体来源（T-267 验收点名） | T-267 | v1.2 |
+| core:HotspotSpriteLayer.prepare | T-266 在导出前等字体就绪、把媒体解码进缓存 | T-266 | v1.2 |
+| core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
+| core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |
