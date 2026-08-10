@@ -41,6 +41,17 @@ export interface PlaybackSessionOptions {
   readonly registry?: ActionRegistry
   /** Every finished rule execution, in order. The debug panel and parity both read it. */
   readonly onResult?: (result: ExecResult) => void
+  /**
+   * T-271 · 进入引擎的每一条事件，**恰好一次**。
+   *
+   * 「恰好一次」是这个回调唯一的契约，也是它唯一容易破的地方：漏发（某一处仍然直接
+   * `engine.dispatch`）与重发（发完又 dispatch 了一次）在长度断言之外都看不出来——
+   * 两种情况下宿主都「收到了事件」。嵌入控制器的全部事件来源就是这里。
+   *
+   * ⚠ 顺序是**先通知宿主、再进引擎**。反过来的话，规则在处理事件时改的状态会先于
+   * 事件本身到达宿主，宿主看到的是一个已经被处理过的世界。
+   */
+  readonly onEvent?: (event: RuntimeEvent) => void
 }
 
 export interface PlaybackSession {
@@ -79,6 +90,19 @@ export interface PlaybackSession {
 }
 
 export function createPlaybackSession(options: PlaybackSessionOptions): PlaybackSession {
+  /**
+   * T-271 · **进引擎的唯一一道门。**
+   *
+   * 全文件不再有第二处 `engine.dispatch(`（`engine.test.ts` 那种直接驱动引擎的用法
+   * 不算，那是引擎自己的测试）。写成一个函数而不是「在六处各加一行 onEvent」，
+   * 是因为后者的失效方式是漏掉第七处——而漏掉的那一处在宿主眼里只是「有时候收不到
+   * 某种事件」。
+   */
+  const fire = (event: RuntimeEvent): void => {
+    options.onEvent?.(event)
+    engine.dispatch(event)
+  }
+
   const { runtime } = options
 
   const engine = new EcaEngine(runtime, {
@@ -133,15 +157,15 @@ export function createPlaybackSession(options: PlaybackSessionOptions): Playback
       // Wiring this AFTER attach and BEFORE sceneReady is not incidental: an event raised
       // during the sceneReady chain must reach the engine, and one raised before attach
       // has no index to dispatch against.
-      detachRuntime = runtime.onEvent((event) => engine.dispatch(event))
+      detachRuntime = runtime.onEvent(fire)
 
       running = true
-      engine.dispatch({ event: 'sceneReady' })
+      fire({ event: 'sceneReady' })
     },
 
     click(nodeId, point, distance) {
       if (!running) return
-      engine.dispatch({
+      fire({
         event: 'click',
         nodeId,
         ...(point ? { point } : {}),
@@ -157,18 +181,18 @@ export function createPlaybackSession(options: PlaybackSessionOptions): Playback
       // new object's enter rule run against state the old object's leave rule is about to
       // undo — and leave-then-enter is the order every UI toolkit uses, so a rule author's
       // intuition matches what happens.
-      if (previous !== null) engine.dispatch({ event: 'hoverLeave', nodeId: previous })
-      if (nodeId !== null) engine.dispatch({ event: 'hoverEnter', nodeId })
+      if (previous !== null) fire({ event: 'hoverLeave', nodeId: previous })
+      if (nodeId !== null) fire({ event: 'hoverEnter', nodeId })
     },
 
     hotspotClick(hotspotId) {
       if (!running) return
-      engine.dispatch({ event: 'hotspotClick', hotspotId })
+      fire({ event: 'hotspotClick', hotspotId })
     },
 
     dispatch(event) {
       if (!running) return
-      engine.dispatch(event)
+      fire(event)
     },
 
     tick() {

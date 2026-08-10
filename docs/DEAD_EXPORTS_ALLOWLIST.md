@@ -43,6 +43,7 @@
 | 2026-08-05 | T-268 | 23 | 23 | **豁免表条数不动**（`SceneRuntime.captureImage` 退休的那一行在**冻结接口表**里，不计入这个棘轮）。真正下降的是另一把： `HeadlessRuntime` 从 v0/v0.5 遗留基线退休（`MAX_LEGACY` 86 → 85）：它一直只被测试引用，本卡第一次让它出现在生产代码路径上（契约里的双实现） |
 | 2026-08-05 | T-269 | 23 | **22** | `CaptureResult.blob` 退休：发布缩略图是它的第一个生产消费者（`captureThumbnail()` 把 blob 读成字节喂给 `publish`）。那一行的 owner 原本写的是 T-267，reason 里同时点了 T-269——**T-269 先落地，所以由它来删** |
 | 2026-08-05 | T-267 | 22 | **21** | `HotspotSpriteLayer.fontSource` 退休：出图对话框显示当前字体来源（v1.0 是系统字体栈，不同机器字形不同——这一行是用户唯一能知道这件事的地方） |
+| 2026-08-05 | T-271 | 21 | **27** | +6，全部是嵌入协议的导出面，owner 是紧接着的 T-272 / T-274。**控制器传输无关是有意的**（协议是数据形状，postMessage 只是搬运方式之一），代价就是这一层的消费者天然在下一张卡。到期 v1.2 |
 
 ## 豁免
 
@@ -55,6 +56,12 @@
 | core:HOTSPOT_SPRITE_MATERIAL | T-266 建 overlay 材质时按这三条设；本卡只落数据，因为它们只能靠属性断言守住 | T-266 | v1.2 |
 | core:withSystemFallback | 自托管字体加载失败时退回系统栈。v1.0 不带字体文件（vendor/fonts/README.md 写明代价），T-266 接线时按注入的 provider 包一层 | T-266 | v1.2 |
 | core:CaptureResult.panelCount | 出图对话框显示「本次导出包含 N 个已打开面板」，也是面板重放的用户可见证据 | T-267 | v1.2 |
+| core:EmbedController | 嵌入控制器传输无关（这正是它可以在纯 Node 里被穷举的原因），消费它的是 T-272 的 postMessage 传输层与 T-273 的 player 接线 | T-272 | v1.2 |
+| core:summarizeScene | 握手时报的场景摘要，T-272 的传输层在 ready 那一步调它 | T-272 | v1.2 |
+| core:SceneSummary.nodeCount | 宿主握手后据此判断这份场景有多大，T-274 的 SDK 把它透给调用方 | T-274 | v1.2 |
+| core:SceneSummary.hotspotCount | 同上，宿主用它决定要不要显示热点目录 | T-274 | v1.2 |
+| core:SceneSummary.viewpointCount | 同上，宿主用它决定要不要显示视点切换器 | T-274 | v1.2 |
+| core:Evt.payload | 推送的负载。T-272 的传输层原样搬运，T-274 的 SDK 交给宿主回调 | T-272 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |

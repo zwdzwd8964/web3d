@@ -2345,8 +2345,8 @@
 - ⚠ 登记：`openLink` **早已让文档携带任意外部 URL 且零校验**——「我们从不让文档决定外部地址」
   是错的，v0 就让了。v1.5 的白名单讨论要从这个既成事实出发。
 
-### [ ] T-271 · 嵌入控制器（core，传输无关）
-- **依赖** 无（与表现力线并行）· **预估** 2.0d · **实际** —
+### [x] T-271 · 嵌入控制器（core，传输无关）
+- **依赖** 无（与表现力线并行）· **预估** 2.0d · **实际** 1.6d
 - **独占** `packages/core/src/embed/**`(新) · `packages/core/test/embed/**`(新) ·
   `packages/core/src/index.ts`（一行导出）· `packages/core/src/runtime/playback-session.ts`（`onEvent`）·
   `packages/core/test/runtime/playback-session.test.ts`
