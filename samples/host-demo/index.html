@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>W3 播放器 · 嵌入样板</title>
+    <style>
+      /* 零外链、零依赖：把这个文件扔进任何一台静态服务器都能跑。 */
+      body { margin: 0; padding: 24px; font: 14px/1.7 system-ui, sans-serif; background: #15191c; color: #e6eaed; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lead { color: #8b969e; margin: 0 0 20px; }
+      #viewer { width: 960px; max-width: 100%; height: 540px; background: #0d1114; border: 1px solid #2a3238; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+      button { font: inherit; padding: 6px 14px; background: #232c33; color: #e6eaed; border: 1px solid #38434b; cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      #log { height: 180px; overflow: auto; background: #0d1114; border: 1px solid #2a3238; padding: 10px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>W3 播放器 · 嵌入样板</h1>
+    <p class="lead">
+      这一页演示宿主怎么把播放器嵌进来并指挥它。按钮是按 <code>player.commands</code> 启用的——
+      播放器说它不支持的，按钮就是灰的。
+    </p>
+
+    <div id="viewer"></div>
+
+    <div class="row">
+      <button id="play" disabled>播放</button>
+      <button id="pause" disabled>暂停</button>
+      <button id="shot" disabled>截图</button>
+      <button id="step" disabled>下一步</button>
+    </div>
+
+    <div id="log">等待握手…</div>
+
+    <script src="/player/embed.js"></script>
+    <script>
+      const log = (line) => {
+        const box = document.getElementById('log')
+        box.textContent += '\n' + line
+        box.scrollTop = box.scrollHeight
+      }
+
+      // ⚠ 下面这一段与 docs/EMBED_API.md §1 的代码块**逐字相同**，由一条测试盯着。
+      // 改这里就要改那里，反过来也一样。
+      // doc:quickstart:start
+      W3Player.mount({
+        src: '/player/index.html?embed=1&src=demo.w3p',
+        container: document.getElementById('viewer'),
+      }).then(async (player) => {
+        // 播放器报上来它支持什么。**据它判断，不要硬编码一份清单。**
+        console.log('可用命令：', player.commands.join(', '))
+
+        player.on('hotspotClick', (payload) => {
+          console.log('用户点了热点', payload)
+        })
+
+        await player.subscribe(['hotspotClick', 'variableChange'])
+        await player.setVariable('var_step', 2)
+      })
+      // doc:quickstart:end
+
+      // —— 以下是样板页自己的部分，不属于快速开始 ——————————————————————
+      W3Player.mount({
+        src: '/player/index.html?embed=1&src=demo.w3p',
+        container: document.getElementById('viewer'),
+      })
+        .then((player) => {
+          log('握手成功。协议 ' + player.protocol)
+          log('可用命令：' + player.commands.join(', '))
+
+          const bind = (id, name, run) => {
+            const button = document.getElementById(id)
+            // 播放器说它不支持的，按钮就是灰的——而不是点下去报错。
+            button.disabled = !player.can(name)
+            button.addEventListener('click', () => {
+              run(player).then(
+                () => log(name + ' 成功'),
+                (error) => log(name + ' 失败[' + error.code + ']：' + error.message),
+              )
+            })
+          }
+
+          bind('play', 'play', (p) => p.play())
+          bind('pause', 'pause', (p) => p.pause())
+          bind('shot', 'screenshot', (p) => p.screenshot().then((r) => log('截图 ' + (r.dataUrl || '').length + ' 字节')))
+          bind('step', 'goToStep', (p) => p.goToStep(2))
+
+          player.on('error', (payload) => log('播放器报错：' + JSON.stringify(payload)))
+          player.on('openLink', (payload) => {
+            // 嵌入时**由宿主决定要不要开**。这里只记一行，不导航。
+            log('场景想打开链接（宿主拦下了）：' + JSON.stringify(payload))
+          })
+          void player.subscribe(null)
+        })
+        .catch((error) => {
+          log('握手失败[' + error.code + ']：' + error.message)
+          log('检查三件事：地址带了 ?embed=1 吗；本页的 origin 在 embed-policy.json 里吗；nginx 的 frame-ancestors 放行了吗。')
+        })
+    </script>
+  </body>
+</html>

@@ -397,3 +397,41 @@ node scripts/check-deploy-headers.mjs
 四条：`/player/` 块含 `frame-ancestors` · 默认值是 `'none'` · bench 有 404 规则 ·
 模板里零 `X-Frame-Options`。它剥掉注释再判——一份好模板必然在注释里写示例，而第一版没剥
 注释时，示例注释被当成了生效的指令。
+
+---
+
+## 11. 嵌入：改了协议要同时改哪几处
+
+对外的嵌入 API 见 [EMBED_API.md](EMBED_API.md)，样板宿主页在
+[`samples/host-demo/index.html`](../samples/host-demo/index.html)。下面这一节说的是**改它的时候**
+要一起动哪几处——四处，少一处会有一处静静地不一致。
+
+### 11.1 加一条命令
+
+1. `packages/core/src/embed/commands.ts` 的 `COMMANDS` 加一项。**依赖注不进来时不要注册**——
+   让它出现在 `ready.commands` 里然后永远失败，比不存在更难排查。
+2. `packages/core/test/embed/embed-controller.test.ts` 的门槛测试里加名字（那条测试遍历
+   `Object.keys(COMMANDS)` 比对，不加就红）。
+3. `docs/EMBED_API.md` §2 的命令表加一行（`docs-sync.test.ts` **双向**查，不加就红）。
+4. `packages/player/src/embed-sdk/index.ts` 的 `PlayerHandle` 加一个方法。
+
+**协议版本号不用动**：新增命令不是不兼容变更，老宿主看不见它也不会调。
+
+### 11.2 加一种事件
+
+`packages/core/src/eca/types.ts` 的 `RuntimeEvent` 联合 → `protocol.ts` 的
+`RUNTIME_EVENT_TYPES`（**漏了会编译不过**，那里有一行哨兵）→ `EMBED_API.md` §3。
+
+### 11.3 改协议版本号
+
+只在**不兼容**变更时 +1。改 `EMBED_PROTOCOL` 之后，`packages/player/src/embed-sdk/index.ts`
+里那份手写的 `SUPPORTED_PROTOCOLS` 也要改——**它们是两份，故意的**（SDK 会被拷进客户页面、
+与播放器分别升级）。一致性由 `embed-sdk.test.ts` 读源码文本比对，不由 import 保证。
+
+### 11.4 三条守卫
+
+```bash
+node scripts/check-embed-layering.mjs   # core 的嵌入层零浏览器全局；无通配 postMessage target
+node scripts/check-deploy-headers.mjs   # frame-ancestors 默认 'none'；bench 页 404
+pnpm -F @w3/core test embed             # 控制器 + 事件恰好一次 + 文档双向一致
+```
