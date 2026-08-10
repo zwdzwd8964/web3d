@@ -126,6 +126,8 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 | 13 | 原始体的朝向与分段数：规范只冻结了语义尺寸，两者都没写 | ADR-0017 |
 | 14 | **T-262**：`MAX_SCALE_DIRECT` / `MAX_SCALE_COMPOSED` 落在 `image-export.ts`，卡面写的是「由 T-263 提供」（`render-pipeline.ts`）。T-263 排在后面且独占那个文件，等它落 = `maxScaleFor` 有公式没接线，正是 X-19 点名的形状。**T-263 落地时必须 import，不许再抄一份**（机器判据：`grep -c 'MAX_SCALE_COMPOSED = ' packages/core/src` 恒为 1） | ADR-0041 §4 |
 | 15 | **T-262**：常量是**六个**不是卡面写的五个，多出的 `MIN_EXPORT_EDGE = 256` 是拒绝矩阵 R3 / R4 共用的那条线；同时「尺寸太大」没有成为第四条拒绝——钳完之后总有一张图，硬凑成拒绝要引入一条没有需求支持的「不许缩小」假设 | ADR-0041 §1 §3 |
+| 16 | **T-270**：`openLink` 的 URL **零校验，且 v0 起就是这样**。`OpenLinkParams.url` 是 `z.string().min(1)`，`javascript:` / `data:` 开头的地址照样进文档、照样发布。所以「我们从不让文档决定外部地址」是错的。**本卡不修**（ADR-0024 决定 6 明确不修），只把「打开」变成可注入的口子。⚠ 实测顺带证伪了卡面提议的收紧：`z.string().url()` **接受** `javascript:alert(1)`、却**拒绝** `/manual.pdf`——代价是拦掉正当用法，收益是零。v1.5 的白名单讨论要从这个既成事实出发，走 `integrity.ts` 那对 `SAFE_SCHEME` / `ANY_SCHEME` 正则 | ADR-0024 决定 6 |
+| 17 | **T-270**：卡面的「一律发 `openLink` 事件」**没有落在 `RuntimeEvent` 上**。那是规划 §4 冻结的封闭联合，往里加一支会同时放宽 `RuntimeEventSchema`，让宿主能 `dispatchEvent({ event: 'openLink' })` 打进引擎（§4.4.4 明令禁止宿主自定义事件）。那条事件属于**嵌入协议的 Evt**，是 T-271/T-272 的另一条通道。本卡只交核心注入口 | 规划 §4.4.4 |
 
 `@w3/schema` 中另加了两个规范未列出的文件：`selectors.ts`（纯查询，T-014 点名要 `getAncestors`
 等）与 `rule.ts`（承载 EventDescriptor / Condition / Action 信封 / Rule 的数据形状——

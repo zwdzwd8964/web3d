@@ -79,6 +79,14 @@ export interface SceneRuntimeOptions {
    * 不出图的宿主也背上那份对象。没注入 = 没有第二次绘制 = 那条例外不生效。
    */
   readonly composeOverlay?: (layer: unknown) => void
+  /**
+   * T-270 · 宿主接管「打开链接」。
+   *
+   * 不传时走 {@link defaultOpenLink}，行为与 v0 逐字相同。传了就**完全取代**它——
+   * 不是「先发事件再打开」：嵌入场景下宿主要能拒绝导航，而一个「已经导航了，顺便通知你」
+   * 的接口给不了它这个能力。
+   */
+  readonly openLink?: (url: string, target: '_blank' | '_self', warn: (message: string) => void) => void
   readonly resolver: AssetResolver
   readonly mode: RuntimeMode
   /**
@@ -1476,12 +1484,21 @@ export class SceneRuntime implements RuntimeContext {
     return this.openPanels.has(hotspotId)
   }
 
+  /**
+   * T-270 · 打开一条链接，**或者把这件事交给宿主决定**。
+   *
+   * 不注入时行为与 v0 逐字相同（见 {@link defaultOpenLink}）。注入之后，宿主可以拒绝
+   * 导航、可以只发一条事件、可以弹一个确认框——嵌进别人页面的播放器不该有权把宿主的
+   * 整个标签页导走。
+   *
+   * ⚠ **这里不发 `RuntimeEvent`。** `RuntimeEvent` 是规划 §4 冻结的封闭联合，没有
+   * `openLink` 这一支；往里加一支会同时放宽 `RuntimeEventSchema`，让宿主能
+   * `dispatchEvent({ event: 'openLink' })` 打进引擎（§4.4.4 明令禁止宿主自定义事件）。
+   * 卡面说的「一律发 openLink 事件」指的是**嵌入协议的 Evt**，那是 T-271/T-272 的另一条
+   * 通道，不是这一条。
+   */
   openLink(url: string, target: '_blank' | '_self'): void {
-    if (typeof globalThis.open !== 'function') {
-      this.log('warn', `无头环境下不打开链接：${url}`)
-      return
-    }
-    globalThis.open(url, target, 'noopener,noreferrer')
+    ;(this.options.openLink ?? defaultOpenLink)(url, target, (message) => this.log('warn', message))
   }
 
   now(): number {
@@ -1746,4 +1763,24 @@ function writeShadowFlags(root: Object3D, cast: boolean, receive: boolean): void
  */
 function withoutSections(doc: SceneDocument): SceneDocument {
   return { ...doc, nodes: doc.nodes.map((node) => (node.section === null ? node : { ...node, section: null })) }
+}
+
+/**
+ * T-270 · 不注入时的行为，**与 v0 逐字相同**。
+ *
+ * 抽成自由函数是为了让「老行为」这件事可断言：一条回归测试拿它与 `globalThis.open` 的
+ * 实参逐字比对，改动这里就会红。
+ *
+ * ⚠ `warn` 由调用方传进来，不走 `this`：无头环境那条警告在重构前零测试覆盖，一个
+ * 「顺手改成自由函数」的重构会把它悄悄丢掉。
+ *
+ * ⚠ 三个参数里 `noopener,noreferrer` 是安全边界：没有 `noopener` 时新开的页面拿得到
+ * `window.opener`，可以把原页面导走（反向标签劫持）。这一串是逐字的，不许简写。
+ */
+export function defaultOpenLink(url: string, target: '_blank' | '_self', warn: (message: string) => void): void {
+  if (typeof globalThis.open !== 'function') {
+    warn(`无头环境下不打开链接：${url}`)
+    return
+  }
+  globalThis.open(url, target, 'noopener,noreferrer')
 }

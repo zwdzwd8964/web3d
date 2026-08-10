@@ -2329,8 +2329,8 @@
 - **自测** `pnpm -F @w3/editor test publish && pnpm -F @w3/schema test`
 - **变异检验** ① 删 thumbnail 透传 → `.w3p` 断言红；②「出图失败不阻断发布」改成抛错 → 降级红。
 
-### [ ] T-270 · `openLink` 注入口与嵌入语义
-- **依赖** T-235 · T-271 · **预估** 0.7d · **实际** —
+### [x] T-270 · `openLink` 注入口与嵌入语义
+- **依赖** T-235 · T-271 · **预估** 0.7d · **实际** 0.6d（核心注入口；播放器嵌入实现随 T-271/T-272 落）
 - **独占** `packages/core/src/runtime/scene-runtime.ts`（仅 options + `openLink` 方法，列 R）·
   `packages/core/test/runtime/open-link.test.ts`(新)
 - **做** `SceneRuntimeOptions` 加 `openLink?(url, target)`；`SceneRuntime.openLink` 改为
