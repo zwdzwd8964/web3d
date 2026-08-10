@@ -2501,8 +2501,10 @@
   是刻意的」这条纪律**）；② 让 `run()` 在解包后直接 return → 第 2 条红。
   **最容易假绿**：只断言「页面上有一个 table」——把 `rows` 换成空数组也会有 table。
 
-### [ ] T-279 · bench 增首屏加载时间、阴影四档与 JSON 报告
-- **依赖** T-278 · **预估** 1.0d · **实际** —
+### [x] T-279 · bench 增首屏加载时间、阴影四档与 JSON 报告
+- **依赖** T-278 · **预估** 1.0d · **实际** 1.0d
+- **单测 56 条**（门槛 40）。⚠ 债已还：卡面末尾那条「结论行只有 off 与 medium 两条」（遗留决议 S3）在本卡闭合——四条结论行 + 一行「建议出厂默认阴影档」。
+- **交付偏差** 两处：① `scripts/check-dead-exports.mjs` 与 `docs/DEAD_EXPORTS_ALLOWLIST.md`（`MAX_LEGACY` 85 → 83，删两行遗留基线——`shadowMapSizeFor` 与 `CapabilityReport.webgl2`接上了生产调用者）；② `docs/BENCHMARK.md` 除「指标说明段」外还改了「怎么用」与「软件渲染」两节（下载 JSON 这一步与「回填脚本据 `capability.level` 拒绝软渲报告」这句话没有别处可放）。
 - **独占** `packages/player/src/bench/metrics.ts` · `packages/player/src/bench/main.ts` ·
   `packages/player/test/bench-metrics.test.ts` · `docs/BENCHMARK.md`（指标说明段）
 - **做** `SHADOW_MODES` 加 `'low'`（**今天是 `['off','medium','high']` 而 schema 的三档是

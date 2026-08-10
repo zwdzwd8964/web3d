@@ -10,11 +10,13 @@ import {
   gradeFrames,
   gradeScene,
   gradeLighting,
+  gradeLoad,
   gradeStress,
   summariseFrames,
+  toJsonReport,
   toMarkdown,
 } from './metrics.js'
-import type { BenchRow, LightLevel, StressLevel } from './metrics.js'
+import type { BenchRow, LightLevel, LoadTiming, SceneStats, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -75,7 +77,12 @@ async function run(bytes: Uint8Array, sourceName: string) {
   stage.replaceChildren()
 
   try {
+    // T-279 · 首屏三段计时。**三次读表都夹在真正的边界上**，不是事后估的：
+    // 解包完 / start 返回 / 第一帧画完。
+    const t0 = performance.now()
     const pkg = unpackScene(bytes)
+    const t1 = performance.now()
+
     const canvas = document.createElement('canvas')
     canvas.className = 'player__canvas'
     stage.append(canvas)
@@ -83,6 +90,17 @@ async function run(bytes: Uint8Array, sourceName: string) {
     const { runtime, session } = createPlayerSession({ pkg, canvas })
     runtime.resize(stage.clientWidth, stage.clientHeight)
     await session.start()
+    const t2 = performance.now()
+
+    // 第一帧单独画一次再读表。跟着 `measure` 一起测的话，首帧的着色器编译会被算进
+    // 稳态帧率里——那正是 `measure` 丢掉前 30 帧要避开的东西。
+    session.tick()
+    runtime.renderFrame()
+    const timing: LoadTiming = {
+      unpackMs: t1 - t0,
+      buildMs: t2 - t1,
+      firstFrameMs: performance.now() - t2,
+    }
 
     show(`<p class="bench__note">正在测量…（约 ${SAMPLE_MS.main / 1000} 秒，期间相机会自动环绕）</p>`)
     const frameTimes = await measure(runtime, session)
@@ -105,21 +123,24 @@ async function run(bytes: Uint8Array, sourceName: string) {
     show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
     const lighting = await lightingRamp(runtime, session)
 
+    const scene: SceneStats = {
+      triangles: info?.triangles ?? 0,
+      drawCalls: info?.calls ?? 0,
+      geometries: info?.geometries ?? 0,
+      textures: info?.textures ?? 0,
+      programs: info?.programs ?? 0,
+      textureMemoryBytes: estimateTextureMemory(textures),
+    }
+
     const rows: BenchRow[] = [
+      ...gradeLoad(timing),
       ...gradeFrames(summariseFrames(frameTimes)),
-      ...gradeScene({
-        triangles: info?.triangles ?? 0,
-        drawCalls: info?.calls ?? 0,
-        geometries: info?.geometries ?? 0,
-        textures: info?.textures ?? 0,
-        programs: info?.programs ?? 0,
-        textureMemoryBytes: estimateTextureMemory(textures),
-      }),
+      ...gradeScene(scene),
       ...gradeStress(stress),
       ...gradeLighting(lighting),
     ]
 
-    renderReport(rows, sourceName)
+    renderReport(rows, scene, sourceName)
     session.dispose()
     runtime.dispose()
     canvas.remove()
@@ -226,7 +247,10 @@ async function lightingRamp(
             decay: 2,
             angleDeg: 30,
             penumbra: 0.2,
-            shadow: { enabled: shadows !== 'off', quality: shadows === 'high' ? 'high' : 'medium', bias: -0.0005 },
+            // T-279 · 档位**原样传下去**。这里原本写的是 `shadows === 'high' ? 'high' : 'medium'`——
+            // 在只有 off/medium/high 三种输入时它恰好等价，而 `low` 一加进来，low 那一档
+            // 会静静地用 medium 的贴图去测，报告上仍写着 low。
+            shadow: { enabled: shadows !== 'off', quality: shadows === 'off' ? 'medium' : shadows, bias: -0.0005 },
           }) as unknown as { position: { set(x: number, y: number, z: number): void }; removeFromParent(): void }
           // Ringed around the scene so each one lights a different side: stacking them in
           // one place measures overdraw on one face rather than N lights on a model.
@@ -338,17 +362,12 @@ function texturesOf(material: unknown): { image?: { width: number; height: numbe
   return out
 }
 
-function renderReport(rows: readonly BenchRow[], sourceName: string) {
+function renderReport(rows: readonly BenchRow[], scene: SceneStats, sourceName: string) {
   const takenAt = new Date().toISOString()
   const screen = `${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio}x`
-  const markdown = toMarkdown({
-    capability,
-    rows,
-    userAgent: navigator.userAgent,
-    screen,
-    takenAt,
-    source: sourceName,
-  })
+  const input = { capability, rows, scene, userAgent: navigator.userAgent, screen, takenAt, source: sourceName }
+  const markdown = toMarkdown(input)
+  const json = JSON.stringify(toJsonReport(input), null, 2)
 
   const table = rows
     .map(
@@ -370,8 +389,24 @@ function renderReport(rows: readonly BenchRow[], sourceName: string) {
       <tbody>${table}</tbody>
     </table>
     <button type="button" id="copy" class="bench__copy">复制为 Markdown</button>
+    <button type="button" id="download" class="bench__copy">下载 JSON</button>
     <pre class="bench__md">${escapeHtml(markdown)}</pre>
   `)
+
+  // T-279 · 机器可读的那一份。回填脚本（T-280）读它，而不是去解析上面那张 Markdown
+  // 表格——那等于让一份给人看的排版成为机器契约，改一个空格就断。
+  //
+  // 文件名带上时间戳与档位：这些报告会一份份躺进 `docs/bench-reports/`，同名覆盖
+  // 意味着第二台机器的结果把第一台的抹掉，而抹掉的那一刻没有任何提示。
+  document.getElementById('download')?.addEventListener('click', () => {
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `bench-${takenAt.replace(/[:.]/g, '-')}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  })
 
   document.getElementById('copy')?.addEventListener('click', () => {
     void navigator.clipboard.writeText(markdown).then(

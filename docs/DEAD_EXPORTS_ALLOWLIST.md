@@ -174,9 +174,7 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 - `core:CameraController.frameNode`
 - `core:EnvironmentController.disposedEnvironments`
 - `core:EnvironmentController.hasEnvironment`
-- `core:shadowMapSizeFor`
 - `core:primitiveSegments`
-- `core:CapabilityReport.webgl2`
 - `core:HighlightLayer.activeNodeIds`
 - `core:HighlightLayer.isHighlighted`
 - `core:HighlightLayer.presetNames`

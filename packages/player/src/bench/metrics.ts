@@ -1,5 +1,7 @@
-import { DEFAULT_POLICY } from '@w3/core'
+import { DEFAULT_POLICY, shadowMapSizeFor } from '@w3/core'
 import type { CapabilityReport } from '@w3/core'
+import { SHADOW_QUALITIES } from '@w3/schema'
+import type { ShadowQuality } from '@w3/schema'
 
 /**
  * T-110 · what the benchmark measures, and how it turns numbers into a verdict.
@@ -253,32 +255,93 @@ export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
   return rows
 }
 
-/** Copy-to-clipboard Markdown. The card asks for it: this is what gets pasted into a ticket. */
-export function toMarkdown(options: {
+/** 一次测量的全部输入。Markdown 与 JSON 两份产出都只从它出发。 */
+export interface BenchReportInput {
   readonly capability: CapabilityReport
   readonly rows: readonly BenchRow[]
+  readonly scene: SceneStats
   readonly userAgent: string
   readonly screen: string
   readonly takenAt: string
   readonly source: string
-}): string {
+}
+
+/**
+ * T-279 · 机器可读的那一份。
+ *
+ * `apply-bench-report.mjs`（T-280）拿它回填附件A，而回填脚本**不该去解析 Markdown 表格**：
+ * 那等于让一份给人看的排版成为机器契约，改一个空格就断。
+ *
+ * `version` 是给回填脚本用的：报告文件会躺在 `docs/bench-reports/` 里跨版本存在，
+ * 而读它的脚本要能说出「这份是旧格式」而不是默默读出 undefined。
+ */
+export interface BenchReport {
+  readonly version: 1
+  readonly takenAt: string
+  readonly source: string
+  readonly capability: {
+    readonly level: CapabilityReport['level']
+    readonly vendor: string | null
+    readonly renderer: string | null
+    readonly webgl2: boolean
+    readonly maxTextureSize: number
+  }
+  readonly machine: { readonly userAgent: string; readonly screen: string }
+  readonly scene: SceneStats
+  readonly rows: readonly BenchRow[]
+}
+
+/** 结构化报告。**Markdown 由它渲染**，两者不会分叉。 */
+export function toJsonReport(options: BenchReportInput): BenchReport {
+  return {
+    version: 1,
+    takenAt: options.takenAt,
+    source: options.source,
+    capability: {
+      level: options.capability.level,
+      vendor: options.capability.vendor ?? null,
+      renderer: options.capability.renderer ?? null,
+      webgl2: options.capability.webgl2,
+      maxTextureSize: options.capability.maxTextureSize,
+    },
+    machine: { userAgent: options.userAgent, screen: options.screen },
+    scene: options.scene,
+    rows: options.rows,
+  }
+}
+
+/**
+ * Copy-to-clipboard Markdown. The card asks for it: this is what gets pasted into a ticket.
+ *
+ * T-279 起它**从 `toJsonReport` 的产物渲染**。两份产出各自读一遍输入的话，迟早会有一份
+ * 少一个字段——而少的那份通常是没人天天看的那份。
+ */
+export function toMarkdown(options: BenchReportInput): string {
+  // 解构而不是 `const report = …` 之后一路 `report.xxx`。
+  //
+  // 不是风格偏好：`check-dead-exports.mjs` 的成员扫描是跨包全文正则（`[.?]\s*name\b`），
+  // 任意一处同名属性访问都算「这个成员有调用者」。写成 `report.rows` 会让遗留基线里
+  // 那条 `schema:RemapResult.report` 变成陈旧记录，守卫于是要求把它删掉并调低棘轮——
+  // 而它其实一个调用者都没有。**闸门失明的第四个实例，且是第一次朝「误判为活着」
+  // 这个方向失明**（前三次记在 T-246 / T-256 / T-262，都是新成员被误判为死的）。
+  const { takenAt, source, capability: env, machine, rows } = toJsonReport(options)
   const symbol = (v: Verdict) => (v === 'pass' ? '✅' : v === 'warn' ? '⚠️' : '❌')
   const lines = [
     '# Web3D 播放器 · 性能实测',
     '',
-    `- 测试时间：${options.takenAt}`,
-    `- 场景来源：${options.source}`,
-    `- 图形环境：${options.capability.vendor ?? '未知'} · ${options.capability.renderer ?? '未知'}`,
-    `- 渲染方式：${options.capability.level === 'software' ? '**软件渲染（数据仅供相对参考）**' : '硬件加速'}`,
-    `- 分辨率：${options.screen}`,
-    `- UA：\`${options.userAgent}\``,
+    `- 测试时间：${takenAt}`,
+    `- 场景来源：${source}`,
+    `- 图形环境：${env.vendor ?? '未知'} · ${env.renderer ?? '未知'}`,
+    `- 渲染方式：${env.level === 'software' ? '**软件渲染（数据仅供相对参考）**' : '硬件加速'}`,
+    `- 分辨率：${machine.screen}`,
+    `- UA：\`${machine.userAgent}\``,
     '',
     '| 指标 | 实测 | 上限 | 结论 | 说明 |',
     '|---|---|---|---|---|',
-    ...options.rows.map((r) => `| ${r.metric} | ${r.value} | ${r.limit} | ${symbol(r.verdict)} | ${r.note} |`),
+    ...rows.map((r) => `| ${r.metric} | ${r.value} | ${r.limit} | ${symbol(r.verdict)} | ${r.note} |`),
     '',
   ]
-  if (options.capability.level === 'software') {
+  if (env.level === 'software') {
     lines.push(
       '> ⚠️ 本次为软件渲染（未启用硬件加速或无独立显卡）。帧率类数据**不可作为验收依据**，',
       '> 仅可用于同一台机器上不同模型之间的相对比较。',
@@ -292,11 +355,14 @@ export function toMarkdown(options: {
 /* v0.5 · T-174 · the lighting ladder                                          */
 /* -------------------------------------------------------------------------- */
 
+/** 一档阴影设置：关，或者文档能表达的三档之一。 */
+export type ShadowSetting = 'off' | ShadowQuality
+
 /** One measured rung of the lighting ladder. */
 export interface LightLevel {
   /** Dynamic lights added on top of the scene's own. */
   readonly lights: number
-  readonly shadows: 'off' | 'medium' | 'high'
+  readonly shadows: ShadowSetting
   readonly fps: number
   readonly drawCalls: number
 }
@@ -304,8 +370,15 @@ export interface LightLevel {
 /** Light counts the page climbs. 0 is the baseline: the scene as published. */
 export const LIGHT_COUNTS: readonly number[] = [0, 1, 4, 8]
 
-/** Shadow settings each light count is measured at. */
-export const SHADOW_MODES: readonly LightLevel['shadows'][] = ['off', 'medium', 'high']
+/**
+ * Shadow settings each light count is measured at.
+ *
+ * T-279 · **测的档必须等于文档能表达的档。** 到 T-279 之前这里是 `['off','medium','high']`，
+ * 而 `ShadowQualitySchema` 的三档是 low/medium/high——于是 `low` 是一档**用户选得到、
+ * 报告里永远没有数**的设置。写成从 `SHADOW_QUALITIES` 派生而不是再抄一遍：抄的那份
+ * 迟早会和 schema 分叉，而分叉的症状恰好是「某一档静静地没被测过」。
+ */
+export const SHADOW_MODES: readonly ShadowSetting[] = ['off', ...SHADOW_QUALITIES]
 
 /**
  * The lighting ladder, graded.
@@ -323,32 +396,57 @@ export const SHADOW_MODES: readonly LightLevel['shadows'][] = ['off', 'medium', 
 export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
   if (levels.length === 0) return []
 
-  const ceilingFor = (shadows: LightLevel['shadows']): LightLevel | null =>
-    levels
-      .filter((l) => l.shadows === shadows && l.fps >= BENCH_LIMITS.fpsWarn)
-      .reduce<LightLevel | null>((best, l) => (best && best.lights >= l.lights ? best : l), null)
-
-  const noShadow = ceilingFor('off')
-  const withShadow = ceilingFor('medium')
-
   const rows: BenchRow[] = [
     {
       metric: '动态灯上限（无阴影）',
-      value: noShadow ? `${noShadow.lights} 盏 · ${noShadow.fps.toFixed(1)} fps` : '不足 1 盏',
+      value: describeCeiling(ceilingFor(levels, 'off')),
       limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: noShadow ? 'pass' : 'fail',
+      verdict: ceilingFor(levels, 'off') ? 'pass' : 'fail',
       note: '灯数只增加逐像素的着色量，代价是平滑上升的。',
     },
-    {
-      metric: '动态灯上限（medium 阴影）',
-      value: withShadow ? `${withShadow.lights} 盏 · ${withShadow.fps.toFixed(1)} fps` : '不足 1 盏',
-      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: withShadow ? 'pass' : 'fail',
-      note:
-        '每一盏投影灯多一遍深度 pass，代价是**阶梯式**上升的。' +
-        '这一行与上一行分开报，是因为把两者混成一个数字会让人得出「灯很慢」然后干脆不用灯。',
-    },
   ]
+
+  // T-279 · 三档各一行。到这张卡之前只有 off 与 medium 两条结论行，high 只落在明细里——
+  // 于是「出厂默认该开哪一档」这个问题在报告里**拿不到可比较的第三个数**（遗留决议 S3）。
+  for (const quality of SHADOW_QUALITIES) {
+    const ceiling = ceilingFor(levels, quality)
+    rows.push({
+      metric: `动态灯上限（${quality} 阴影）`,
+      value: describeCeiling(ceiling),
+      limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+      verdict: ceiling ? 'pass' : 'fail',
+      note:
+        quality === 'low'
+          ? `阴影贴图 ${shadowMapSizeFor(quality)}²。`
+          : `阴影贴图 ${shadowMapSizeFor(quality)}²，是 low 的 ${(shadowMapSizeFor(quality) / shadowMapSizeFor('low')) ** 2} 倍像素。`,
+    })
+  }
+
+  const recommendation = recommendShadowDefault(levels)
+  rows.push({
+    metric: '建议出厂默认阴影档',
+    value: recommendation.setting === 'off' ? '关闭阴影' : recommendation.setting,
+    limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
+    verdict: recommendation.setting === 'off' ? 'warn' : 'pass',
+    note: recommendation.reason,
+  })
+
+  // 阴影贴图显存。**估算**，与「贴图显存（估算）」同一个口径：它给的是数量级，
+  // 而这个数量级正是「为什么开到 8 盏 high 会掉帧」的那半个解释——另外半个是深度 pass。
+  const worst = levels.reduce<LightLevel | null>(
+    (best, l) => (l.shadows !== 'off' && (!best || l.lights > best.lights) ? l : best),
+    null,
+  )
+  if (worst) {
+    const bytes = estimateShadowMemory(worst.lights, worst.shadows as ShadowQuality)
+    rows.push({
+      metric: '阴影贴图显存（估算）',
+      value: `${(bytes / (1024 * 1024)).toFixed(1)} MB（${worst.lights} 盏 · ${worst.shadows}）`,
+      limit: '—',
+      verdict: 'pass',
+      note: `按「投影灯数 × 贴图边长² × 4 字节」推算，边长取 ${shadowMapSizeFor(worst.shadows as ShadowQuality)}。与灯数成正比，与档位成平方。`,
+    })
+  }
 
   for (const level of levels) {
     rows.push({
@@ -360,4 +458,107 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
     })
   }
   return rows
+}
+
+/** 某一档设置下，还能跑在黄灯线以上的最多灯数。 */
+function ceilingFor(levels: readonly LightLevel[], shadows: ShadowSetting): LightLevel | null {
+  return levels
+    .filter((l) => l.shadows === shadows && l.fps >= BENCH_LIMITS.fpsWarn)
+    .reduce<LightLevel | null>((best, l) => (best && best.lights >= l.lights ? best : l), null)
+}
+
+const describeCeiling = (level: LightLevel | null): string =>
+  level ? `${level.lights} 盏 · ${level.fps.toFixed(1)} fps` : '不足 1 盏'
+
+/** 阴影贴图占的显存，字节。`投影灯数 × 边长² × 4`。 */
+export function estimateShadowMemory(castingLights: number, quality: ShadowQuality): number {
+  const size = shadowMapSizeFor(quality)
+  return Math.max(0, castingLights) * size * size * 4
+}
+
+/** 一条出厂默认档的建议。 */
+export interface ShadowRecommendation {
+  readonly setting: ShadowSetting
+  /** 中文理由。它会被抄进验收单，所以不是调试信息。 */
+  readonly reason: string
+}
+
+/**
+ * T-279 · 遗留决议 S3：这台机器上出厂默认该开哪一档阴影。
+ *
+ * 规则是一句话：**取「至少还能带 1 盏投影灯跑在黄灯线以上」的最高一档**。
+ *
+ * 为什么门槛是 1 盏而不是 4 盏：一盏投影灯是「阴影这个功能开着」的最低成立条件，
+ * 而默认档要回答的是「开还是不开」。带不动 1 盏就该默认关——给用户一个开着但一开
+ * 就掉帧的默认值，比默认关掉更糟，因为他不会把掉帧归因到这个开关上。
+ *
+ * 纯函数，不碰 GPU：四种情形（三档全过 / 只到 medium / 只到 low / 一档都不过）
+ * 都在单测里，见 `bench-metrics.test.ts`。
+ */
+export function recommendShadowDefault(levels: readonly LightLevel[]): ShadowRecommendation {
+  // 从高到低找第一档过线的。顺序取自 `SHADOW_QUALITIES` 的倒序而不是手写
+  // ['high','medium','low']：手写的那份在 schema 加第四档时不会有任何东西提醒它。
+  for (const quality of [...SHADOW_QUALITIES].reverse()) {
+    const ceiling = ceilingFor(levels, quality)
+    if (ceiling && ceiling.lights >= 1) {
+      return {
+        setting: quality,
+        reason: `这台机器在 ${quality} 档下还能带 ${ceiling.lights} 盏投影灯跑到 ${ceiling.fps.toFixed(1)} fps。`,
+      }
+    }
+  }
+  return {
+    setting: 'off',
+    reason: '三档阴影都带不动 1 盏投影灯。默认开着而一开就掉帧，比默认关掉更糟——用户不会把掉帧归因到这个开关上。',
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* v1.0 · T-279 · 首屏加载时间                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 首屏三段计时，毫秒。
+ *
+ * 拆三段而不是报一个总数：三段各有各的成因，而合起来那个数没有任何可操作性。
+ * 解包慢 = 包大或者机器 IO 慢；建场景慢 = 几何/贴图多；首帧慢 = 着色器编译。
+ * 客户说「打开要好几秒」时，只有分段的数能回答「该改模型还是该换机器」。
+ */
+export interface LoadTiming {
+  /** `.w3p` 解压 + 解析。 */
+  readonly unpackMs: number
+  /** 建运行时、加载资产、`session.start()`。 */
+  readonly buildMs: number
+  /** 从 start 返回到第一帧画完。着色器编译主要落在这里。 */
+  readonly firstFrameMs: number
+}
+
+/**
+ * 首屏加载时间，四行。
+ *
+ * `limit` 一律写 `—`：**这四个数没有阈值来源**。首屏时间的可接受范围取决于包多大、
+ * 网络在哪一端、客户的耐心，没有一条能写进合同的通用线。报一个编出来的阈值，比不
+ * 报更糟——它会被当成实测结论引用。
+ */
+export function gradeLoad(timing: LoadTiming): BenchRow[] {
+  const total = timing.unpackMs + timing.buildMs + timing.firstFrameMs
+  const ms = (value: number) => `${value.toFixed(0)} ms`
+  return [
+    { metric: '首屏 · 解包', value: ms(timing.unpackMs), limit: '—', verdict: 'pass', note: '解压 .w3p 并解析文档。与包的字节数成正比。' },
+    { metric: '首屏 · 建场景', value: ms(timing.buildMs), limit: '—', verdict: 'pass', note: '建运行时、上传几何与贴图、跑完 start()。与模型复杂度成正比。' },
+    {
+      metric: '首屏 · 首帧',
+      value: ms(timing.firstFrameMs),
+      limit: '—',
+      verdict: 'pass',
+      note: '从 start() 返回到第一帧画完。着色器编译主要落在这里，所以它与材质种类数相关，与面数关系不大。',
+    },
+    {
+      metric: '首屏 · 合计',
+      value: ms(total),
+      limit: '—',
+      verdict: 'pass',
+      note: '**无阈值来源**：可接受的首屏时间取决于包多大、网络在哪一端、客户的耐心。这里只报数，不判定。',
+    },
+  ]
 }
