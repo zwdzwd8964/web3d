@@ -30,6 +30,31 @@ import './bench.css'
  * benchmark of a synthetic scene measures the benchmark.
  */
 
+/**
+ * T-278 · `?fast=1` —— 把每一档的采样时长按同一个比例缩短。
+ *
+ * 全跑一遍要 30 秒以上（6 秒主采样 + 4 档 ×1.2 秒压力 + 12 档 ×0.9 秒灯光 + 后处理对比），
+ * 而浏览器级 e2e 要证明的是**这一页从选文件到出报告这条链是通的**，不是这台 CI 机器的
+ * 帧率。缩短之后的读数没有验收价值——所以它只由 URL 参数打开，页面上没有这个开关，
+ * 客户不会误按。
+ *
+ * 报告里那张表的**行数与结构完全不变**，这正是 e2e 要断言的东西。
+ */
+const FAST = new URLSearchParams(location.search).get('fast') === '1'
+
+/**
+ * 四处采样时长，一处一个名字。散在调用点上时没人看得出它们是同一组旋钮。
+ *
+ * 显式标 `number` 而不是 `as const`：后者会把 `measure` 的默认参数窄成 `600 | 6000`，
+ * 于是另外三处传 200 的调用点全部编译不过。
+ */
+const SAMPLE_MS: Record<'main' | 'lighting' | 'stress' | 'postFx', number> = {
+  main: FAST ? 600 : 6000,
+  lighting: FAST ? 200 : 900,
+  stress: FAST ? 200 : 1200,
+  postFx: FAST ? 200 : 600,
+}
+
 const host = document.getElementById('bench')!
 const stage = document.getElementById('stage') as HTMLDivElement
 const out = document.getElementById('out') as HTMLDivElement
@@ -59,7 +84,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
     runtime.resize(stage.clientWidth, stage.clientHeight)
     await session.start()
 
-    show('<p class="bench__note">正在测量…（约 6 秒，期间相机会自动环绕）</p>')
+    show(`<p class="bench__note">正在测量…（约 ${SAMPLE_MS.main / 1000} 秒，期间相机会自动环绕）</p>`)
     const frameTimes = await measure(runtime, session)
 
     // Counters are read AFTER a render, because three resets `info.render` each frame —
@@ -117,7 +142,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
 function measure(
   runtime: ReturnType<typeof createPlayerSession>['runtime'],
   session: ReturnType<typeof createPlayerSession>['session'],
-  durationMs = 6000,
+  durationMs = SAMPLE_MS.main,
   warmupFrames = 30,
 ): Promise<number[]> {
   return new Promise((resolve) => {
@@ -212,7 +237,7 @@ async function lightingRamp(
         }
         while (added.length > count) added.pop()?.removeFromParent()
 
-        const stats = summariseFrames(await measure(runtime, session, 900, 4))
+        const stats = summariseFrames(await measure(runtime, session, SAMPLE_MS.lighting, 4))
         levels.push({ lights: count, shadows, fps: stats.fps, drawCalls: runtime.info?.calls ?? 0 })
 
         if (stats.fps < BENCH_LIMITS.fpsFail) break
@@ -226,9 +251,9 @@ async function lightingRamp(
       // `applyBackground`，测出来的是两件事混在一起的数。量完交还给文档（`null`）。
       if (shadows === 'off') {
         runtime.setPostFxEnabled(true)
-        const composed = summariseFrames(await measure(runtime, session, 600, 4))
+        const composed = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
         runtime.setPostFxEnabled(false)
-        const direct = summariseFrames(await measure(runtime, session, 600, 4))
+        const direct = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
         runtime.setPostFxEnabled(null)
         postFx = { composedFps: composed.fps, directFps: direct.fps, mode: runtime.pipelineMode }
       }
@@ -268,7 +293,7 @@ async function stressRamp(
         copies.push(clone)
       }
 
-      const stats = summariseFrames(await measure(runtime, session, 1200, 5))
+      const stats = summariseFrames(await measure(runtime, session, SAMPLE_MS.stress, 5))
       const info = runtime.info
       levels.push({
         copies: target,
@@ -377,4 +402,4 @@ picker.addEventListener('change', () => {
   if (file) void file.arrayBuffer().then((buffer) => run(new Uint8Array(buffer), file.name))
 })
 
-show('<p class="bench__note">把 .w3p 拖到页面上，或点上方按钮选择文件。测量约需 6 秒。</p>')
+show(`<p class="bench__note">把 .w3p 拖到页面上，或点上方按钮选择文件。测量约需 ${SAMPLE_MS.main / 1000} 秒。</p>`)

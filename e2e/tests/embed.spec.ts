@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { packScene } from '@w3/storage'
+import { buildScenePackage } from '../fixtures/scene-package.js'
 
 /**
  * T-276 · 真跨源宿主页面套 iframe。
@@ -58,70 +58,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** 宿主页面的尺寸。截图的宽高要和它对得上——这是「与请求一致」的可断言形式。 */
 const STAGE = { width: 640, height: 400 }
 
-/* ── 被嵌的那份包 ──────────────────────────────────────────────────────────── */
-
-/**
- * 一份最小但**真的会渲染出东西**的场景。
- *
- * 从 schema 的 v3 fixture 派生而不是手写：那份 fixture 有 `fixtures.test.ts` 盯着，
- * 手写一份等于在 e2e 里维护第二份文档形状。派生时只做减法（清空全部引用型集合），
- * 再加一个原始体——原始体不需要任何 blob，于是这个包零资产，`packScene` 不会因为
- * 缺字节而拒绝。
- */
-function buildPackage(): Uint8Array {
-  const base = JSON.parse(
-    readFileSync(join(ROOT, 'packages', 'schema', 'test', 'fixtures', 'v3', 'golden-path-3.json'), 'utf8'),
-  ) as Record<string, unknown>
-
-  const meta = base['meta'] as Record<string, unknown>
-  const document = {
-    ...base,
-    name: '嵌入用例场景',
-    meta: {
-      ...meta,
-      // 雾会把远处的几何体染成背景色。截图那条断言要数「画面上有几种颜色」，
-      // 把雾留着等于让断言去赌相机离盒子多远。
-      fog: { ...(meta['fog'] as Record<string, unknown>), enabled: false },
-    },
-    assets: [],
-    nodes: [
-      {
-        id: 'nd_embed001',
-        name: '样例立方体',
-        parent: null,
-        order: 1000,
-        assetRef: null,
-        primitive: { kind: 'box', size: [1.4, 1.4, 1.4] },
-        light: null,
-        section: null,
-        transform: { p: [0, 0, 0], r: [0, 0, 0, 1], s: [1, 1, 1] },
-        visible: true,
-        locked: false,
-        explode: null,
-        explodeOffset: null,
-        prefabRef: null,
-        overrides: {},
-      },
-    ],
-    animations: [],
-    hotspots: [],
-    viewpoints: [],
-    rules: [],
-    pages: [],
-    flows: [],
-    media: [],
-    dataSources: [],
-    prefabs: [],
-  }
-
-  return packScene({
-    document: document as never,
-    snapshotId: 'snp_embed001',
-    publishedAt: '2026-08-10T00:00:00.000Z',
-    coreVersion: '0.0.0-e2e',
-    blobs: new Map(),
-  })
-}
+/* ── 被嵌的那份包与那份 SDK ────────────────────────────────────────────────── */
 
 /**
  * 宿主拿到的那份 SDK —— **构建产物本身**，不是源码。
@@ -311,7 +248,7 @@ function playerUrl(options: { embed: boolean }): string {
 }
 
 test.beforeAll(() => {
-  const bytes = buildPackage()
+  const bytes = buildScenePackage({ name: '嵌入用例场景' })
   const dir = join(ROOT, 'packages', 'player', 'public')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'embed.w3p'), bytes)
