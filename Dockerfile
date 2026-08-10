@@ -32,7 +32,8 @@ RUN pnpm install --frozen-lockfile
 # 播放器挂在 /player/ 下，用 CLI 的 --base 覆盖，不动 vite.config.ts ——
 # 那份配置是 dev server 的唯一事实来源，部署路径不该渗进去。
 RUN pnpm -r --filter "./packages/**" build \
- && pnpm -F @w3/player build --base=/player/
+ && pnpm -F @w3/player build:app --base=/player/ \
+ && pnpm -F @w3/player build:embed
 
 # ---- 运行时 ---------------------------------------------------------------
 FROM nginx:alpine AS runtime

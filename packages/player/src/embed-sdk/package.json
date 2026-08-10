@@ -1,0 +1,11 @@
+{
+  "name": "@w3/player-embed",
+  "version": "1.0.0",
+  "description": "Host SDK for embedding the W3 player. Zero dependencies.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "../../dist/embed.js",
+  "module": "../../dist/embed.mjs",
+  "types": "./index.ts",
+  "_note": "T-274 · 故意不做成 workspace 包：check-deps-direction.mjs 的白名单是硬编码的，而 SDK 是依赖图的叶子——它不 import 仓库里的任何东西（协议版本号自己写一份字面量）。做成 workspace 包只会让它出现在一张它不该出现的图上。"
+}

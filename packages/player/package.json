@@ -7,11 +7,13 @@
   "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "pnpm run build:app && pnpm run build:embed",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:app": "vite build",
+    "build:embed": "vite build -c vite.embed.config.ts"
   },
   "dependencies": {
     "@w3/core": "workspace:*",

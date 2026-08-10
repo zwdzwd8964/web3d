@@ -2422,8 +2422,8 @@
   ② `unsupported` 改回直接 return → capability 那条红；③ 去掉 `?embed=1` 判断 →
   「不带参数时不加载」红。
 
-### [ ] T-274 · 宿主 SDK（单文件 + npm 包 + 版本闸门 + 构建接线）
-- **依赖** T-271（可与 T-272 / T-273 **并行**）· **预估** 1.5d · **实际** —
+### [x] T-274 · 宿主 SDK（单文件 + npm 包 + 版本闸门 + 构建接线）
+- **依赖** T-271（可与 T-272 / T-273 **并行**）· **预估** 1.5d · **实际** 1.2d
 - **独占** `packages/player/src/embed-sdk/**`(新) · `packages/player/vite.embed.config.ts`(新) ·
   `packages/player/package.json` · `Dockerfile`
 - **做** `mount()` / `player.*` 全套，**零依赖，自己写 `SUPPORTED_PROTOCOLS = [1]` 字面量**；

@@ -46,6 +46,7 @@
 | 2026-08-05 | T-271 | 21 | **27** | +6，全部是嵌入协议的导出面，owner 是紧接着的 T-272 / T-274。**控制器传输无关是有意的**（协议是数据形状，postMessage 只是搬运方式之一），代价就是这一层的消费者天然在下一张卡。到期 v1.2 |
 | 2026-08-05 | T-272 | 27 | **26** | `EmbedController` 退休：传输层是它的第一个生产消费者。上一行预告的「消费者天然在下一张卡」当场兑现了一条 |
 | 2026-08-05 | T-273 | 26 | **25** | `summarizeScene` 退休：main.ts 的嵌入接线在握手时调它 |
+| 2026-08-05 | T-274 | 25 | **24** | `Evt.payload` 退休：宿主 SDK 的 `on(event, handler)` 把它交给宿主回调 |
 
 ## 豁免
 
@@ -61,7 +62,6 @@
 | core:SceneSummary.nodeCount | 宿主握手后据此判断这份场景有多大，T-274 的 SDK 把它透给调用方 | T-274 | v1.2 |
 | core:SceneSummary.hotspotCount | 同上，宿主用它决定要不要显示热点目录 | T-274 | v1.2 |
 | core:SceneSummary.viewpointCount | 同上，宿主用它决定要不要显示视点切换器 | T-274 | v1.2 |
-| core:Evt.payload | 推送的负载。T-272 的传输层原样搬运，T-274 的 SDK 交给宿主回调 | T-272 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |
