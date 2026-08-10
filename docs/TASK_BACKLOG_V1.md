@@ -2441,8 +2441,8 @@
   证明的东西；**提交信息里记录这次「变异不转红」的观察与改法**；
   ③ `build` 写回 `vite build && vite build -c …` 并用 `--base` 跑 → base 断言红。
 
-### [ ] T-275 · 部署侧：`frame-ancestors`、策略文件示例、bench 页封堵
-- **依赖** T-221 · **预估** 0.5d · **实际** —
+### [x] T-275 · 部署侧：`frame-ancestors`、策略文件示例、bench 页封堵
+- **依赖** T-221 · **预估** 0.5d · **实际** 0.5d
 - **独占** `deploy/nginx.conf.template` · `deploy/embed-policy.example.json`(新) ·
   `docs/DEVELOPMENT.md`（部署一节）· `scripts/check-deploy-headers.mjs`(新)
 - **做** `location /player/` 加 `add_header Content-Security-Policy "frame-ancestors 'none'" always;`

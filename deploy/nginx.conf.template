@@ -54,8 +54,30 @@ server {
         try_files $uri =404;
     }
 
+    # bench 页：**默认封死。**
+    #
+    # 它随 dist 一起部署到 /player/bench.html，是第二个公开入口且没有任何访问控制——
+    # 任何知道地址的人都能让这台机器跑一轮压力测试。它只在验收时用一次，平时是纯风险。
+    #
+    # 临时开启：把下面这一行注释掉，reload nginx，用完再改回来。
+    location = /player/bench.html {
+        return 404;
+    }
+
     # 播放器（构建时 --base=/player/）。
     location /player/ {
+        # 谁可以把播放器嵌进 iframe。**默认谁都不许。**
+        #
+        # 改成客户的宿主域：frame-ancestors https://customer.example https://*.customer.example
+        # 多个域用空格分开。改完之后还要同步 embed-policy.json 的白名单——
+        # 这一条挡的是「谁能把我们放进 iframe」，那一份挡的是「谁能对我们说话」，
+        # 两道锁各管一半，只配一半等于没配。
+        #
+        # **不用 X-Frame-Options**：它只认 DENY / SAMEORIGIN / 单个 ALLOW-FROM，而
+        # ALLOW-FROM 早已被主流浏览器移除（Chrome 从未支持）。写一个客户域进去的结果是
+        # 「在 Chrome 上等于没写、在 Firefox 上等于 DENY」——两种失败方式都不报错。
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+
         try_files $uri $uri/ /player/index.html;
     }
 

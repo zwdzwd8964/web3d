@@ -339,3 +339,61 @@ pnpm verify:full   # 再加 e2e
 | 状态栏「全量重建」变成非 0 | 有一条 patch 路径 `apply-patch.ts` 不认识。补分发，别回落 |
 | 撤销之后场景不对 | 十有八九是绕过了 commit 通道 |
 | StrictMode 下东西只工作一次 | effect 的清理函数销毁了本该活到会话结束的对象。React 挂载后会立刻清理一次 |
+
+---
+
+## 10. 部署：两道锁，只配一半等于没配
+
+嵌入（把播放器放进客户页面的 iframe）由**两道互相独立的锁**把关。它们各管一半，配一半
+的后果是另一半完全敞开——而两种半开状态都不报错、页面都照常打开。
+
+### 10.1 第一道 · `frame-ancestors`：谁能把我们放进 iframe
+
+`deploy/nginx.conf.template` 的 `location /player/` 块里：
+
+```nginx
+add_header Content-Security-Policy "frame-ancestors 'none'" always;
+```
+
+**模板里的默认值是 `'none'`，且 `scripts/check-deploy-headers.mjs` 盯着它。** 改成客户
+宿主域是部署时的动作，不是模板的默认：模板里写一个宽松值，等于每一次新部署都默认敞开。
+
+```nginx
+add_header Content-Security-Policy "frame-ancestors https://customer.example https://*.customer.example" always;
+```
+
+**为什么不用 `X-Frame-Options`**：它只认 `DENY` / `SAMEORIGIN` / 单个 `ALLOW-FROM`，而
+`ALLOW-FROM` 早已被主流浏览器移除（Chrome 从未支持）。写一个客户域进去的结果是「在
+Chrome 上等于没写、在 Firefox 上等于 DENY」——两种失败方式都不报错。守卫因此断言模板里
+**零** `X-Frame-Options`。
+
+### 10.2 第二道 · `embed-policy.json`：谁能对我们说话
+
+放在播放器部署目录里，与 `index.html` 同级。播放器在 `?embed=1` 时取它。
+样例见 `deploy/embed-policy.example.json`（**它不在 `packages/player/public/`**——
+那个目录的东西会被打进 dist，而白名单是一份**每次部署都不同**的运维文件）。
+
+规则：精确 origin · 最左单标签通配（`https://*.customer.example` 不匹配
+`a.b.customer.example`，也不匹配裸域）· 显式 `"*"` · scheme 必须 https（localhost 例外）。
+**整份文件读不懂 → 谁都不许嵌，不是全通。**
+
+### 10.3 bench 页默认封死
+
+`bench.html` 随 dist 一起部署到 `/player/bench.html`，是**第二个公开入口且没有任何访问
+控制**——任何知道地址的人都能让这台机器跑一轮压力测试。它只在验收时用一次，平时是纯风险。
+
+```nginx
+location = /player/bench.html { return 404; }
+```
+
+临时开启：把那一行注释掉，`nginx -s reload`，**用完改回来**。
+
+### 10.4 机器校验
+
+```bash
+node scripts/check-deploy-headers.mjs
+```
+
+四条：`/player/` 块含 `frame-ancestors` · 默认值是 `'none'` · bench 有 404 规则 ·
+模板里零 `X-Frame-Options`。它剥掉注释再判——一份好模板必然在注释里写示例，而第一版没剥
+注释时，示例注释被当成了生效的指令。

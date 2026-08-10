@@ -1,0 +1,12 @@
+{
+  "_comment": "把这份文件改名成 embed-policy.json 放进播放器的部署目录（与 index.html 同级）。播放器在 ?embed=1 时取它。",
+  "_rules": [
+    "精确 origin：https://customer.example —— 只匹配它自己",
+    "最左单标签通配：https://*.customer.example —— 匹配 a.customer.example，不匹配 a.b.customer.example，也不匹配 customer.example 本身",
+    "显式全通：* —— 一个条目就是它自己，写下它的人应当知道自己在做什么",
+    "scheme 必须是 https，唯一例外是 localhost / 127.0.0.1（本地开发）",
+    "读不懂的条目会被忽略并 warn；整份文件读不懂 → 谁都不许嵌（不是全通）"
+  ],
+  "_两道锁": "这份文件挡的是「谁能对我们说话」。「谁能把我们放进 iframe」由 nginx 的 frame-ancestors 挡。只配一半等于没配。",
+  "allow": ["https://customer.example", "https://*.customer.example"]
+}
