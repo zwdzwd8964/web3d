@@ -2695,8 +2695,15 @@
 - ⚠ v1.2 加 8 个编排动作 + 3 个新事件时，本卡的三条测试**必须变红**——那正是它存在的意义，
   由 T-329 复跑并把样板补齐。
 
-### [ ] T-286 · `StorageProvider` v2：接口 + facets 声明机制 + 两实现 + 契约扩展
-- **依赖** T-202（列 S）· **预估** 1.0d · **实际** —
+### [x] T-286 · `StorageProvider` v2：接口 + facets 声明机制 + 两实现 + 契约扩展
+- **依赖** T-202（列 S）· **预估** 1.0d · **实际** 1.2d
+- 契约用例 **93 → 109**（每个实现 +8，卡面要的是 +6）。`grep` 实测：`saveDocument` 在 `packages/editor/src`
+  里**仍然只有一个真调用点**（session.ts），另两处是 JSDoc 散文——调用方未被迫改。
+- **撞墙并拍板**：40 个零调用者的冻结类型撞上 `MAX_EXEMPTIONS = 20`（只能降不能升）。
+  产品选**甲**：写进规划 §4.6 走冻结接口表，见 [ADR-0043](adr/0043-provider-v2-接口写进冻结清单.md)。
+  冻结接口 7 → 39 行；同时 `touch` 接线让 `MAX_EXEMPTIONS` **20 → 19**。
+- **交付偏差** 两处：① 新增 `docs/adr/0043` 与规划 §4.6（卡面独占里没有它们，但甲方案要求）；
+  ② `useAutoSave.ts` 改一行（`save` 现在返回回执，钩子要的是 `Promise<void>`）。
 - **独占** `packages/storage/src/provider.ts` · `memory-provider.ts` · `idb-provider.ts` ·
   `packages/storage/test/contract.ts` · `packages/editor/src/project/session.ts`
 - **做** **统一一条扩张纪律：凡是不是所有 provider 都能实现的，一律 optional facet**

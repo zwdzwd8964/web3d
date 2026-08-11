@@ -1,7 +1,8 @@
 import type { SceneDocument } from '@w3/schema'
+import { touch } from '@w3/schema'
 import type { AssetResolver } from '@w3/storage'
 import { AssetLoader, auditGlb } from '@w3/core'
-import type { StorageProvider } from '@w3/storage'
+import type { SaveReceipt, StorageProvider } from '@w3/storage'
 import { IndexedDbProvider, MemoryProvider, extensionOf, hashBytes, hashToPath, pathToHash } from '@w3/storage'
 
 /**
@@ -122,8 +123,21 @@ export class ProjectSession {
     return { ...doc, assets }
   }
 
-  async save(doc: SceneDocument): Promise<void> {
-    await this.storage.saveDocument(doc)
+  /**
+   * 存一份文档。
+   *
+   * T-286 ⑤ · **写进去之前先 `touch(doc)`。**
+   *
+   * `meta.updatedAt` 在此之前**自创建起就再没前进过**——`touch` 从 v0 起躺在
+   * `@w3/schema` 里零调用者。而 `listProjects` 与冷启动的 `restoreLastDocument` 都按它
+   * 倒序排：于是「最近动过的那一份」其实是「最早建的那一份」，工程一多就完全排反。
+   * 症状很温和——列表顺序看起来只是「没按我想的排」——所以它躺了两个版本。
+   *
+   * @returns 存储侧的回执（修订号与落盘时间）。v1.0 没有调用方消费它；
+   *   它在这里是因为 `saveDocument` 现在返回它，把它吞掉等于让上层永远拿不到修订号。
+   */
+  async save(doc: SceneDocument): Promise<SaveReceipt> {
+    return this.storage.saveDocument(touch(doc))
   }
 
   async load(projectId: string): Promise<SceneDocument | null> {

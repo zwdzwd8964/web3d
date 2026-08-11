@@ -2,7 +2,7 @@ import type { SceneDocument } from '@w3/schema'
 import type { DBSchema, IDBPDatabase } from 'idb'
 import { openDB } from 'idb'
 import { hashBytes } from './hash.js'
-import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider } from './provider.js'
+import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, FacetName, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt } from './provider.js'
 import { StorageError, mapWriteError } from './provider.js'
 
 /**
@@ -84,6 +84,18 @@ export interface IndexedDbProviderOptions {
 export class IndexedDbProvider implements StorageProvider {
   readonly kind = 'indexeddb'
 
+  /**
+   * T-286 · 本地实现一个 facet 都不声明。理由与 `MemoryProvider` 相同：单机没有并发
+   * 编辑、没有成员、没有审计、没有历史修订、没有直传。
+   *
+   * ⚠ `drafts` 与 `leases` 两个 objectStore 已经在 DB_VERSION 2 里建好了（T-202），
+   * 但**它们不是 facet**——草稿与会话租约是 T-287 要加进接口本体的东西，因为每一个
+   * provider 都做得到。
+   */
+  readonly facets: readonly FacetName[] = []
+
+  readonly ext: ProviderFacets = {}
+
   private db: IDBPDatabase<W3DB> | null = null
   private opening: Promise<IDBPDatabase<W3DB>> | null = null
   private readonly databaseName: string
@@ -152,9 +164,16 @@ export class IndexedDbProvider implements StorageProvider {
     return (await db.get('documents', projectId)) ?? null
   }
 
-  async saveDocument(document: SceneDocument): Promise<void> {
+  async saveDocument(document: SceneDocument, options?: SaveOptions): Promise<SaveReceipt> {
+    if (options?.expectedRev !== undefined) {
+      const stored = await this.loadDocument(document.projectId)
+      const current = stored ? revOf(stored) : undefined
+      if (current !== options.expectedRev) {
+        throw new StorageError('conflict', `保存失败：期望修订号 ${options.expectedRev}，实际 ${current ?? '（不存在）'}`)
+      }
+    }
     const db = await this.open()
-    return mapWriteError('保存工程', async () => {
+    await mapWriteError('保存工程', async () => {
       // One transaction across both stores: a summary that disagrees with its document is
       // worse than no summary, and a reload is exactly when it would be discovered.
       const tx = db.transaction(['documents', 'projects'], 'readwrite')
@@ -168,6 +187,15 @@ export class IndexedDbProvider implements StorageProvider {
         tx.done,
       ])
     })
+    // 回执在写**成功之后**才算数：写失败时 `mapWriteError` 抛出去，这一行根本到不了。
+    return { rev: revOf(document), updatedAt: document.meta.updatedAt }
+  }
+
+  /** T-286 · 带修订号地读。修订号由文档自己派生，见 `revOf`。 */
+  async readDocument(projectId: string): Promise<DocumentRecord | null> {
+    const document = await this.loadDocument(projectId)
+    if (!document) return null
+    return { document, rev: revOf(document), updatedAt: document.meta.updatedAt }
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -185,9 +213,12 @@ export class IndexedDbProvider implements StorageProvider {
     })
   }
 
-  async putBlob(bytes: Uint8Array): Promise<BlobHash> {
+  async putBlob(bytes: Uint8Array, options?: PutBlobOptions): Promise<BlobHash> {
     const db = await this.open()
     const hash = await hashBytes(bytes)
+    if (options?.hash !== undefined && options.hash !== hash) {
+      throw new StorageError('corrupt', `调用方给的内容地址与字节对不上：${options.hash} ≠ ${hash}`)
+    }
     if (await db.getKey('blobs', hash)) return hash
     // The most likely write to hit the quota by a wide margin: a 4K texture or a video is
     // three orders of magnitude larger than a document.
@@ -249,4 +280,17 @@ export class IndexedDbProvider implements StorageProvider {
         reject(new StorageError('unavailable', `删除本地数据库失败：${this.databaseName}`, { cause: request.error }))
     })
   }
+}
+
+/**
+ * T-286 · 一份文档的修订号。
+ *
+ * IndexedDB 侧没有服务端自增序列，所以修订号从**文档自己**派生：`updatedAt` 加内容长度。
+ * 它不需要全局唯一，只需要「同一份文档改过之后不同」——而乐观并发比的正是这一件事。
+ *
+ * 用 `updatedAt` 单独一项不够：同一毫秒内的两次保存会得到同一个号，而
+ * `AutoSaver` 的批量 flush 恰好会那样（T-288 要在这上面加草稿通道）。
+ */
+function revOf(document: SceneDocument): string {
+  return `${document.meta.updatedAt}#${JSON.stringify(document).length}`
 }

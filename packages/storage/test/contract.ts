@@ -2,7 +2,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { expect, it } from 'vitest'
 import { hashBytes } from '../src/hash.js'
-import { StorageError } from '../src/provider.js'
+import { FACET_NAMES, StorageError } from '../src/provider.js'
 import type { Snapshot, StorageProvider } from '../src/provider.js'
 
 /**
@@ -233,6 +233,118 @@ export function describeProviderContract(
       }
     })
   }
+
+  /* --- T-286 · provider v2 ------------------------------------------------ */
+
+  /**
+   * facet 的声明与实际挂着的东西必须一致。
+   *
+   * **这一条是显式声明机制存在的全部理由。** 探测式（`'locks' in provider.ext`）看起来
+   * 更省事，代价是「悄悄长出一个 facet」抓不到：有人给 `MemoryProvider` 挂一个空的
+   * `locks` 只为让某个调用点编译过，探测式的套件当场开始跑 locks 子套件，而那些用例
+   * 会以某种方式绿。
+   *
+   * 卡面把这条写成了验收：给 `MemoryProvider` 挂一个空的 `locks` 但不改 `facets`，
+   * 契约套件**必须 fail**。
+   */
+  it(`${label} · 声明的 facet 与实际挂着的一致`, async () => {
+    await withProvider(async (provider) => {
+      const declared = [...provider.facets].sort()
+      const attached = FACET_NAMES.filter((name) => provider.ext[name] !== undefined).sort()
+      expect(attached, `声明了 ${declared.join(',') || '（无）'}，实际挂着 ${attached.join(',') || '（无）'}`).toEqual(
+        declared,
+      )
+    })
+  })
+
+  it(`${label} · 声明的 facet 名字都在闭集里`, async () => {
+    await withProvider(async (provider) => {
+      const unknown = provider.facets.filter((name) => !FACET_NAMES.includes(name))
+      expect(unknown, `这些不是合法的 facet 名：${unknown.join(', ')}`).toEqual([])
+    })
+  })
+
+  /**
+   * `readDocument` 与 `loadDocument` 看到的是同一份文档，而且**都是副本**。
+   *
+   * 返回内部对象本身的实现，会让调用方一次无心的 mutate 改掉库里的东西——而症状是
+   * 「我什么都没保存，它自己变了」。
+   */
+  it(`${label} · readDocument 与 loadDocument 一致，且都返回副本`, async () => {
+    await withProvider(async (provider) => {
+      const doc = docNamed('修订', 'prj_rev00001', '2026-08-11T00:00:00.000Z')
+      await provider.saveDocument(doc)
+
+      const record = await provider.readDocument(doc.projectId)
+      expect(record).not.toBeNull()
+      expect(record!.document).toEqual(await provider.loadDocument(doc.projectId))
+      expect(record!.rev.length).toBeGreaterThan(0)
+
+      // 拿到手就改，再读一次——库里那份不该跟着变。
+      ;(record!.document as { name: string }).name = '被改过了'
+      expect((await provider.loadDocument(doc.projectId))!.name).toBe('修订')
+    })
+  })
+
+  it(`${label} · readDocument 对不存在的工程返回 null`, async () => {
+    await withProvider(async (provider) => {
+      expect(await provider.readDocument('prj_nothere1')).toBeNull()
+    })
+  })
+
+  /**
+   * 乐观并发：**不给 `expectedRev` 就是无条件覆盖**（v1.0 之前的行为，逐字不变）；
+   * 给了就必须匹配，不匹配抛 `conflict` 而**不是覆盖**。
+   */
+  it(`${label} · 不给 expectedRev 时无条件覆盖`, async () => {
+    await withProvider(async (provider) => {
+      const doc = docNamed('原名', 'prj_ovr00001', '2026-08-11T00:00:00.000Z')
+      await provider.saveDocument(doc)
+      await provider.saveDocument({ ...doc, name: '新名' })
+      expect((await provider.loadDocument(doc.projectId))!.name).toBe('新名')
+    })
+  })
+
+  it(`${label} · expectedRev 对得上就放行，对不上抛 conflict 且**不覆盖**`, async () => {
+    await withProvider(async (provider) => {
+      const doc = docNamed('原名', 'prj_cfl00001', '2026-08-11T00:00:00.000Z')
+      const first = await provider.saveDocument(doc)
+
+      // 对得上：放行。
+      const second = await provider.saveDocument(
+        { ...doc, name: '第二版', meta: { ...doc.meta, updatedAt: '2026-08-11T00:00:01.000Z' } },
+        { expectedRev: first.rev },
+      )
+      expect((await provider.loadDocument(doc.projectId))!.name).toBe('第二版')
+
+      // 对不上：抛 conflict。**而且库里那份一个字都不该变**——只断言「抛了」的话，
+      // 一个「先写再抛」的实现照样绿，而它已经把别人的改动盖掉了。
+      await expect(
+        provider.saveDocument({ ...doc, name: '不该落地' }, { expectedRev: 'r-not-a-real-rev' }),
+      ).rejects.toMatchObject({ code: 'conflict' })
+      expect((await provider.loadDocument(doc.projectId))!.name).toBe('第二版')
+      expect(second.rev).not.toBe(first.rev)
+    })
+  })
+
+  it(`${label} · putBlob 的 hash 对不上时抛 corrupt，不落盘`, async () => {
+    await withProvider(async (provider) => {
+      const bytes = bytesOf('T-286 · 调用方算错了地址')
+      const wrong = `sha256:${'0'.repeat(64)}`
+      await expect(provider.putBlob(bytes, { hash: wrong })).rejects.toMatchObject({ code: 'corrupt' })
+      expect(await provider.hasBlob(wrong)).toBe(false)
+    })
+  })
+
+  it(`${label} · putBlob 的 hash 对得上时与不给它逐字等价`, async () => {
+    await withProvider(async (provider) => {
+      const bytes = bytesOf('T-286 · 调用方算对了地址')
+      const hash = await hashBytes(bytes)
+      expect(await provider.putBlob(bytes, { hash })).toBe(hash)
+      expect(await provider.hasBlob(hash)).toBe(true)
+    })
+  })
+
 }
 
 /**

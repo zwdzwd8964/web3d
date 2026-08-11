@@ -25,7 +25,10 @@ export function useAutoSave(): { state: SaveState; error: string | null; saveNow
   const saver = useMemo(
     () =>
       new AutoSaver({
-        save: (doc) => session.save(doc),
+        // T-286 · `save` 现在返回回执，而 AutoSaver 的钩子要的是 `Promise<void>`。
+        // 显式丢掉它而不是改钩子的签名：AutoSaver 不消费修订号，让它的类型跟着变
+        // 只会把一个它用不到的概念带进来。
+        save: async (doc) => void (await session.save(doc)),
         onStateChange: (next, message) => {
           setState(next)
           setError(message ?? null)

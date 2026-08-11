@@ -130,7 +130,7 @@ pnpm verify:full         # 含 e2e
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | 在客户机器上出性能报告 |
 | [docs/EMBED_API.md](docs/EMBED_API.md) | 把播放器嵌进别人的页面，并从那个页面指挥它 |
 | [docs/附件A_数字资产规范_草案.md](docs/附件A_数字资产规范_草案.md) | 和客户谈资产交付标准 |
-| [docs/adr/](docs/adr/) | 41 条架构决策记录，每条都有代价与撤销条件 |
+| [docs/adr/](docs/adr/) | 42 条架构决策记录，每条都有代价与撤销条件 |
 
 ---
 

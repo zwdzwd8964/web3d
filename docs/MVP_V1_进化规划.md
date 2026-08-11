@@ -1921,6 +1921,105 @@ reject」** · **§6 `waitForMediaEnd` 的 `neverEnds()` 语义** · **§10 三�
 
 ---
 
+### 4.6 `StorageProvider` v2 的冻结接口（T-286 · 消费者在 v1.5）
+
+> **本节是 T-286 落地时补写的**，不是 v1 起草时就有的。补写的理由与代价记在
+> [ADR-0043](adr/0043-provider-v2-接口写进冻结清单.md)：这批类型今天**一个实现都没有**
+> （X-27 的裁决就是「凡是不是所有 provider 都能实现的，一律 optional facet」），
+> 于是它们全部是零调用者导出；而四列豁免表的 `MAX_EXEMPTIONS` 只能降不能升，冻结接口表
+> 的门锁又要求符号名逐字出现在这一节里。**先冻规范、再落接口**是这三条约束下唯一自洽的
+> 顺序。
+>
+> ⚠ 本节**与 §4.0 的「一次性冻结」不冲突**：§4.0 冻的是 `SceneDocument` 的字段、动作与
+> 事件（那三样一次 bump 全落地）。`StorageProvider` 不在 `SceneDocument` 里、不 bump
+> `schemaVersion`，铁律 4 完全覆盖不到它——这正是台账新纪律 8 存在的理由。
+
+#### 4.6.1 为什么现在就把 v1.5 的形状写死
+
+v1.5 的 `HttpApiProvider` 要按这些形状分工。等到那时再定，编辑器已经绕着 v1.0 的接口
+写过两个版本，而「换一个 provider，业务代码零改动」是 MVP_V0 §0 写进 v1 验收的一句话。
+
+**扩张纪律，一条**：接口本体只放**每一个 provider 都做得到**的东西；做不到的进
+**optional facet**。X-27 记的那三份设计里，有一份把「零改动既有实现」当作选 facet 方案的
+最强论据，另两份要求既有实现补方法——加起来那条论据就不成立了，所以这里统一成一条。
+
+#### 4.6.2 逐字清单
+
+```ts
+// --- 值类型 ---------------------------------------------------------------
+export type DocumentRev = string
+export interface Identity { userId: string; displayName: string }
+export interface DocumentRecord { document: SceneDocument; rev: DocumentRev; updatedAt: string; updatedBy?: Identity }
+export interface SaveOptions { expectedRev?: DocumentRev }
+export interface SaveReceipt { rev: DocumentRev; updatedAt: string }
+export interface PutBlobOptions { hash?: BlobHash }
+export interface Page<T> { items: readonly T[]; cursor: string | null }
+export type ProjectRole = 'owner' | 'editor' | 'viewer'
+export interface ProjectMember { identity: Identity; role: ProjectRole }
+export interface Lease { projectId: string; heldBy: Identity; expiresAt: string }
+export interface AuditEntry { at: string; by: Identity; what: string; projectId: string }
+
+// --- 五个 facet：v1.0 全是类型，零实现 --------------------------------------
+export interface LocksFacet { acquire(projectId: string): Promise<Lease | null>; release(projectId: string): Promise<void> }
+export interface MembersFacet { list(projectId: string): Promise<ProjectMember[]>; setRole(projectId: string, userId: string, role: ProjectRole): Promise<void> }
+export interface AuditFacet { append(entry: AuditEntry): Promise<void>; list(projectId: string, cursor?: string): Promise<Page<AuditEntry>> }
+export interface RevisionsFacet { list(projectId: string, cursor?: string): Promise<Page<RevisionSummary>>; read(projectId: string, rev: DocumentRev): Promise<DocumentRecord | null> }
+export interface AssetsFacet { presignUpload(hash: BlobHash, bytes: number): Promise<PresignedUpload>; presignDownload(hash: BlobHash): Promise<string> }
+export interface RevisionSummary { rev: DocumentRev; at: string; by?: Identity }
+export interface PresignedUpload { url: string; headers: Record<string, string> }
+
+// --- 声明机制 -------------------------------------------------------------
+export const FACET_NAMES = ['locks', 'members', 'audit', 'revisions', 'assets'] as const
+export type FacetName = (typeof FACET_NAMES)[number]
+export interface ProviderFacets {
+  locks?: LocksFacet
+  members?: MembersFacet
+  audit?: AuditFacet
+  revisions?: RevisionsFacet
+  assets?: AssetsFacet
+}
+
+// --- 接口本体的加宽（既有调用点零改动） -------------------------------------
+export interface StorageProviderV2Additions {
+  readonly facets: readonly FacetName[]
+  readonly ext: ProviderFacets
+  readDocument(projectId: string): Promise<DocumentRecord | null>
+  saveDocument(document: SceneDocument, options?: SaveOptions): Promise<SaveReceipt>
+  putBlob(bytes: Uint8Array, options?: PutBlobOptions): Promise<BlobHash>
+}
+
+// --- StorageError 的四个新码 ------------------------------------------------
+export const STORAGE_ERROR_CODES = [
+  'not-found', 'conflict', 'unavailable', 'corrupt', 'quota-exceeded',
+  'unauthenticated', 'forbidden', 'rate-limited', 'unsupported',
+] as const
+export type StorageErrorCode = (typeof STORAGE_ERROR_CODES)[number]
+export interface StorageErrorV2Additions {
+  readonly retryable: boolean
+  readonly userMessage: string
+}
+```
+
+#### 4.6.3 三条约束，逐字
+
+1. **`facets` 是显式声明，不许改成 `in` 探测。** 探测更省事，代价是「悄悄长出一个 facet」
+   抓不到：有人给 `MemoryProvider` 挂一个空的 `locks` 只为让某个调用点编译过，探测式的
+   契约套件当场开始跑 locks 子套件，而那些用例会以某种方式绿。显式声明让这件事变成一处
+   必须有人写下来的改动，而契约套件核对**声明与实际挂着的东西一致**。
+2. **`saveDocument` 不给 `options` 就是无条件覆盖**，与 v1.0 之前逐字相同——既有调用点
+   一个字都不用改（T-286 的验收里有一条 grep 断言盯着）。给了 `expectedRev` 才是乐观并发，
+   不匹配时抛 `conflict` 而不是覆盖。
+3. **`PutBlobOptions.hash` 允许调用方传入已算好的内容地址。** HTTP 实现要么把全部字节读进
+   内存再算一遍（一个 80 MB 的模型上不可行），要么信任调用方。本地实现可以校验也可以直接用，
+   **但不许假装自己算过**——那样两种实现会对同一份字节给出两个地址。
+
+#### 4.6.4 到期
+
+五个 facet 与 `Page` / `ProjectRole` / `ProjectMember` / `Lease` / `AuditEntry` /
+`RevisionSummary` / `PresignedUpload` 的消费者排在 **v1.5**（M25 起的后端线）。
+到期未接线，`check-dead-exports` 会照 NORTH_STAR §8 转红——**到期检查一字不改**。
+
+
 ## 5. 关键设计决策（D21 – D40，续 v0 的 D1–D10 与 v0.5 的 D11–D20）
 
 ### D21 · v1 拆成三级台阶，切分依据是「接缝密度」不是「功能大小」
@@ -2361,7 +2460,7 @@ v1.0 地基与表现力 · v1.2 编排与复用 · v1.5 合同交付。
 | **G1.0-16** | `action-refs-gate`：**用生产解析器**遍历 `allActions()`，声明了 `refs` 的动作 100% 有悬空引用断言 | `pnpm -F @w3/core test action-refs-gate`（`packages/core/test/eca/action-refs-gate.test.ts` **本版新建，由 T-226 交付**——**必须与 `i14-gate.test.ts` 同目录**：`allActions()` 住在 `@w3/core`，放进 `@w3/schema` 撞包边界） | T-176 存活 blocker 的逐字复现：测试自造假解析器，而生产解析器根本不产出那些 ref |
 | **G1.0-17** | 引用体系注册表化之后 `executor.ts` 的 `refExists`/`refOptions` switch **消失**；加第九种 kind 必须 typecheck 红 | `grep -c "case '" packages/core/src/eca/executor.ts` == 0 + 一条 type-test + `pnpm check:constitution`（两条新 `EXECUTOR_SMELLS` 正则**由 T-203 交付**） | C5；以及 `check-core-purity` 今天的两条正则**不匹配裸 `switch (kind)` 与其上的 case**（守卫绿、纪律破）——补齐的那两条正则加进去当天必须是绿的，**绿本身就是 `refExists` 已迁走的证据** |
 | **G1.0-18** | **能力入口体检表**逐条 `toBeEnabled()` | `pnpm test:e2e golden-path-3`（`e2e/tests/golden-path-3.spec.ts` **本版新建，由 T-296 交付**） | T-137：字段有了、用户造不出来 |
-| **G1.0-19** | **注册表 ↔ 样板双向体检**：每个已注册动作 / 每种事件，要么样板工程演示了它，要么豁免表里写了理由 | `pnpm -F @w3/core test pump-demo-coverage`（`packages/core/test/pump-demo-coverage.test.ts` **本版新建，由 T-285 交付**，v1.2 由 T-329 复跑；**不是** `pump-demo`——那个过滤器会同时命中 T-222 的 `test/assets/pump-demo.test.ts`，两份混在一起门槛的证据面就糊了） | 正向手写清单必然退化；反向遍历让「注册了新动作」当场变红 |
+| **G1.0-19** | **注册表 ↔ 样板双向体检**：每个已注册动作 / 每种事件，要么样板工程演示了它，要么豁免表里写了理由 | `pnpm -F @w3/editor test pump-demo-coverage`（`packages/editor/test/pump-demo-coverage.test.ts` **本版新建，由 T-285 交付**，v1.2 由 T-329 复跑；**不是** `pump-demo`——那个过滤器会同时命中 T-222 在 core 里建的同名文件，两份混在一起门槛的证据面就糊了。⚠ 落在 editor 而不是卡面写的 core：第三条测试要遍历 T-205 的「可编辑字段」清单，而那份清单在 `packages/editor/test/capability-entries.ts`，core 够不着它） | 正向手写清单必然退化；反向遍历让「注册了新动作」当场变红 |
 | **G1.0-20** | **播种一份 v2 文档进存储 → 编辑器打开的是它，不是样例场景** | `pnpm -F @w3/editor test restore-migrates`（`packages/editor/test/restore-migrates.test.ts` **本版新建，由 T-229 交付**。**不是** `boot-migrate`——那个过滤器匹配 0 个文件，而 vitest 匹配 0 个文件时退出码是 0，门槛会静默通过） | T-120 原样复发：v2 上线那天用户盘上每份 v1 工程静默回落样例场景；今天三条生产路径改对了但**靠人记住** |
 | **G1.0-21** | 崩溃恢复三条 E2E 全绿，**含「干净退出不该提示」的反向断言** | `pnpm test:e2e crash-recovery`（`e2e/tests/crash-recovery.spec.ts` **本版新建，由 T-289 交付**） | 「reload 后数据还在」冒充崩溃恢复（那测的是自动保存） |
 | **G1.0-22** | 变异检验登记完整：每张标 `[x]` 且**「变异检验」栏不含「不适用」**的卡在 `MUTATIONS.md` 里至少一行；「实际」为 `绿` / `绿→红` 时后两列必填 | `node scripts/check-mutations.mjs`（**本版新建，由 T-297 交付**；同卡挂进 `pnpm verify`） | 「记进提交信息」不可查询、不可统计、不可回填 |

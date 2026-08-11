@@ -1,6 +1,6 @@
 import type { SceneDocument } from '@w3/schema'
 import { hashBytes } from './hash.js'
-import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider } from './provider.js'
+import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, DocumentRev, FacetName, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt } from './provider.js'
 import { StorageError } from './provider.js'
 
 /**
@@ -28,10 +28,25 @@ export interface MemoryProviderOptions {
 export class MemoryProvider implements StorageProvider {
   readonly kind = 'memory'
 
+  /**
+   * T-286 · **一个 facet 都不声明。**
+   *
+   * 单机内存实现没有并发编辑、没有成员、没有审计、没有历史修订、没有直传——五个 facet
+   * 一个都不适用。声明成空数组而不是「让契约套件自己探测」：探测式的套件在有人给这个
+   * 类挂一个空的 `locks` 时会当场开始跑 locks 子套件，而那些用例会以某种方式绿。
+   */
+  readonly facets: readonly FacetName[] = []
+
+  /** 没有挂任何 facet。与上面那行**必须一致**，契约套件核对它们。 */
+  readonly ext: ProviderFacets = {}
+
   private documents = new Map<string, SceneDocument>()
   private blobs = new Map<BlobHash, Uint8Array>()
   private snapshots = new Map<string, Snapshot>()
   private closed = false
+  /** T-286 · 每份文档的当前修订号。乐观并发比的就是它。 */
+  private readonly revs = new Map<string, DocumentRev>()
+  private revCounter = 0
   private readonly maxBytes: number
   private storedBytes = 0
 
@@ -76,9 +91,48 @@ export class MemoryProvider implements StorageProvider {
     return doc ? MemoryProvider.clone(doc) : null
   }
 
-  async saveDocument(document: SceneDocument): Promise<void> {
+  /**
+   * T-286 · 存一份文档，返回回执。
+   *
+   * `options` 不给就是无条件覆盖——与 v1.0 之前逐字相同的行为。给了 `expectedRev` 才是
+   * 乐观并发：修订号对不上抛 `conflict`，**而不是覆盖**。
+   */
+  async saveDocument(document: SceneDocument, options?: SaveOptions): Promise<SaveReceipt> {
     this.assertOpen()
+    if (options?.expectedRev !== undefined) {
+      const current = this.revs.get(document.projectId)
+      // `current === undefined` 时也算冲突：调用方说「我是基于某一版改的」，而这里
+      // 根本没有那一版——那多半是它读到的和它要写的不是同一份工程。
+      if (current !== options.expectedRev) {
+        throw new StorageError(
+          'conflict',
+          `保存失败：期望修订号 ${options.expectedRev}，实际 ${current ?? '（不存在）'}`,
+        )
+      }
+    }
+    const bytes = JSON.stringify(document).length
+    this.reserve(bytes, '保存工程')
     this.documents.set(document.projectId, MemoryProvider.clone(document))
+    const rev = `r${(this.revCounter += 1)}`
+    this.revs.set(document.projectId, rev)
+    return { rev, updatedAt: document.meta.updatedAt }
+  }
+
+  /**
+   * T-286 · 带修订号地读。
+   *
+   * `loadDocument` 返回文档本身，拿不到修订号，于是也就做不了乐观并发。两者并存
+   * 而不是替换——`loadDocument` 的调用点一个都不用改。
+   */
+  async readDocument(projectId: string): Promise<DocumentRecord | null> {
+    this.assertOpen()
+    const document = this.documents.get(projectId)
+    if (!document) return null
+    return {
+      document: MemoryProvider.clone(document),
+      rev: this.revs.get(projectId) ?? 'r0',
+      updatedAt: document.meta.updatedAt,
+    }
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -89,9 +143,15 @@ export class MemoryProvider implements StorageProvider {
     }
   }
 
-  async putBlob(bytes: Uint8Array): Promise<BlobHash> {
+  async putBlob(bytes: Uint8Array, options?: PutBlobOptions): Promise<BlobHash> {
     this.assertOpen()
+    // T-286 · 调用方算好的地址可以直接用，但**本地实现仍然自己算一遍并核对**：
+    // 内存里算一次哈希是微秒级的，而一个算错的地址会让这份字节永远取不回来。
+    // HTTP 实现没有这个余裕（80 MB 的模型读进内存不可行），那里才是真的信任调用方。
     const hash = await hashBytes(bytes)
+    if (options?.hash !== undefined && options.hash !== hash) {
+      throw new StorageError('corrupt', `调用方给的内容地址与字节对不上：${options.hash} ≠ ${hash}`)
+    }
     // D4: identical bytes are the same asset. Re-storing is a no-op, not a duplicate —
     // and therefore costs no quota either.
     if (!this.blobs.has(hash)) {

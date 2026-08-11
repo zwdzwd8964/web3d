@@ -62,7 +62,6 @@
 | core:SceneSummary.nodeCount | 宿主握手后据此判断这份场景有多大，T-274 的 SDK 把它透给调用方 | T-274 | v1.2 |
 | core:SceneSummary.hotspotCount | 同上，宿主用它决定要不要显示热点目录 | T-274 | v1.2 |
 | core:SceneSummary.viewpointCount | 同上，宿主用它决定要不要显示视点切换器 | T-274 | v1.2 |
-| schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | core:renderTestCasesMarkdown | 验收用例生成器由 T-317 在 v1.2 接上，v1.0 明确不接 | T-317 | v1.2 |
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
@@ -94,6 +93,38 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | core:SceneRuntime.swapDocument | T-429 的多场景切换按七步清场顺序换文档 | T-429 | v1.5 | 规划§4 |
 | core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 | 规划§4 |
 | core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 | 规划§4 |
+| storage:IndexedDbProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
+| storage:IndexedDbProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
+| storage:IndexedDbProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
+| storage:MemoryProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
+| storage:MemoryProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
+| storage:MemoryProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
+| storage:Identity.userId | v1.5 的后端把当前登录者填进来，成员列表与审计日志两处都按它区分人 | T-286 | v1.5 | 规划§4 |
+| storage:Identity.displayName | v1.5 的成员面板与审计日志显示这个名字，用户看不懂用户标识本身 | T-286 | v1.5 | 规划§4 |
+| storage:DocumentRecord.rev | v1.5 的乐观并发保存拿它做期望值，冲突时据它告诉用户别人改过了 | T-286 | v1.5 | 规划§4 |
+| storage:DocumentRecord.updatedBy | v1.5 的协作提示要显示上一次是谁改的，否则冲突提示说不清跟谁冲突 | T-286 | v1.5 | 规划§4 |
+| storage:SaveReceipt.rev | v1.5 的乐观并发保存拿它做期望值，冲突时据它告诉用户别人改过了 | T-286 | v1.5 | 规划§4 |
+| storage:Page.cursor | v1.5 的审计与历史修订列表可能有上万条，游标分页是那时唯一不改调用点的形状 | T-286 | v1.5 | 规划§4 |
+| storage:ProjectMember.identity | v1.5 的成员面板逐行显示这个人是谁，与他的角色一起 | T-286 | v1.5 | 规划§4 |
+| storage:ProjectMember.role | v1.5 的成员面板据它决定这一行能不能改，以及当前用户能不能改这一行 | T-286 | v1.5 | 规划§4 |
+| storage:Lease.heldBy | v1.5 的编辑锁被别人持有时，界面要说清是被谁持有的 | T-286 | v1.5 | 规划§4 |
+| storage:Lease.expiresAt | v1.5 的编辑锁到期后自动可抢，界面据它显示还剩多久 | T-286 | v1.5 | 规划§4 |
+| storage:AuditEntry.by | v1.5 的审计日志与历史修订都要显示这一条是谁产生的 | T-286 | v1.5 | 规划§4 |
+| storage:LocksFacet.acquire | v1.5 的多人编辑在打开工程时抢一把锁，抢不到就进只读模式 | T-286 | v1.5 | 规划§4 |
+| storage:MembersFacet.list | v1.5 的成员面板、审计面板、历史修订面板各自用它取一页数据 | T-286 | v1.5 | 规划§4 |
+| storage:MembersFacet.setRole | v1.5 的工程所有者在成员面板上改别人的角色时调它 | T-286 | v1.5 | 规划§4 |
+| storage:AuditFacet.list | v1.5 的成员面板、审计面板、历史修订面板各自用它取一页数据 | T-286 | v1.5 | 规划§4 |
+| storage:RevisionSummary.rev | v1.5 的乐观并发保存拿它做期望值，冲突时据它告诉用户别人改过了 | T-286 | v1.5 | 规划§4 |
+| storage:RevisionSummary.by | v1.5 的审计日志与历史修订都要显示这一条是谁产生的 | T-286 | v1.5 | 规划§4 |
+| storage:PresignedUpload.headers | v1.5 的后端 provider 消费它，v1.0 只落形状不落实现 | T-286 | v1.5 | 规划§4 |
+| storage:RevisionsFacet.list | v1.5 的成员面板、审计面板、历史修订面板各自用它取一页数据 | T-286 | v1.5 | 规划§4 |
+| storage:AssetsFacet.presignUpload | v1.5 的大模型直传对象存储，浏览器不经过后端上传字节 | T-286 | v1.5 | 规划§4 |
+| storage:AssetsFacet.presignDownload | v1.5 的播放器按预签名地址取资产，后端不代理字节流 | T-286 | v1.5 | 规划§4 |
+| storage:ProviderFacets.locks | v1.5 的编辑器在打开工程时问它有没有锁这个能力，没有就跳过抢锁 | T-286 | v1.5 | 规划§4 |
+| storage:ProviderFacets.revisions | v1.5 的历史面板问它有没有修订能力，没有就不显示那个入口 | T-286 | v1.5 | 规划§4 |
+| storage:StorageProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
+| storage:StorageProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
+| storage:StorageProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
 
 ## v0 / v0.5 遗留基线
 

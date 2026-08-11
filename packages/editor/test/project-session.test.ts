@@ -106,7 +106,14 @@ describe('ProjectSession · one owner of asset bytes', () => {
   it('round-trips a document through storage', async () => {
     const doc = createGoldenPathDocument()
     await session.save(doc)
-    expect(await session.load(doc.projectId)).toEqual(doc)
+    // T-286 ⑤ · `save` 现在先 `touch`，所以存进去的那份的 `updatedAt` 比手上这份新。
+    // **除了它以外一个字节都不该变**——这条断言因此比原来的 `toEqual(doc)` 更紧。
+    const stored = await session.load(doc.projectId)
+    expect(stored).not.toBeNull()
+    // **严格大于**，不是 >=。写成 >= 的话，删掉 `touch()` 这条变异是绿的——
+    // 而 `touch` 零调用者正是本卡要修的那件事。
+    expect(stored!.meta.updatedAt > doc.meta.updatedAt, `写进去的时间戳要前进：${stored!.meta.updatedAt} vs ${doc.meta.updatedAt}`).toBe(true)
+    expect({ ...stored!, meta: { ...stored!.meta, updatedAt: doc.meta.updatedAt } }).toEqual(doc)
   })
 })
 
