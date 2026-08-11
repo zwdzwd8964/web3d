@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createGoldenPathDocument } from '@w3/schema'
+import { createGoldenPathDocument, createPumpDemoDocument } from '@w3/schema'
 import type { Node, SceneDocument } from '@w3/schema'
 import { Plane, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
@@ -430,5 +430,108 @@ describe('ADR-0042 · setSectionsEnabled 没有「强制开」', () => {
     expect(match![1]!.trim()).toBe('false | null')
     // 读源码文本而不是靠类型：类型在编译后就没了，而这条纪律要在运行时也能被检出来。
     expect(source).not.toContain('setSectionsEnabled(enabled: boolean | null)')
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* T-284 · 泵组样板里的剖切编排                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('T-284 · 「剖开 → 合上」两次往返后平面数回到 0', () => {
+  /**
+   * 卡面的验收里唯一一条机器可判的：**两次往返后 `renderer.clippingPlanes.length` 回到 0**。
+   *
+   * 在这里而不是在 e2e 里跑，因为它不需要 GL（C8：无显卡可测），而且**读的是渲染器**——
+   * 只读 `layer.livePlanes` 的断言对一个「算对了但没写给渲染器」的实现同样为真，那是
+   * v0.5 M11 记过四次的同形。
+   *
+   * 「剖开」在这份样板里就是 `setVisible(剖切面, true)`——**零新增动作**。所以这条测试
+   * 直接改 `node.visible` 再 resync，与那条规则跑起来的效果逐字相同。
+   */
+  const pump = createPumpDemoDocument()
+  const sectionId = pump.nodes.find((n) => n.section !== null)!.id
+
+  /** 把剖切面开 / 关，返回一份新文档——`setVisible` 动作落到文档上就是这一下。 */
+  const withCut = (open: boolean): SceneDocument => ({
+    ...pump,
+    nodes: pump.nodes.map((n) => (n.id === sectionId ? { ...n, visible: open } : n)),
+  })
+
+  it('样板的**静息态是 0 条平面** —— 开场看到的是一台完整的泵', () => {
+    // T-283 一度让它默认可见。T-284 的验收要的是静息态 0 条，否则「回到 0」无从谈起。
+    expect(pump.nodes.find((n) => n.id === sectionId)!.visible).toBe(false)
+    expect(setup(pump).renderer.clippingPlanes).toHaveLength(0)
+  })
+
+  it('两次往返：0 → 1 → 0 → 1 → 0', () => {
+    const graph = new SceneGraph({ sections: sectionFactory })
+    const renderer = fakeRenderer()
+    const layer = new SectionLayer(graph)
+
+    const sync = (open: boolean) => {
+      const doc = withCut(open)
+      graph.build(doc)
+      layer.sync(doc, renderer)
+      return renderer.clippingPlanes.length
+    }
+
+    expect(sync(false), '静息').toBe(0)
+    expect(sync(true), '第一次剖开').toBe(1)
+    expect(sync(false), '第一次合上').toBe(0)
+    expect(sync(true), '第二次剖开').toBe(1)
+    expect(sync(false), '第二次合上 —— 平面必须回到 0').toBe(0)
+  })
+
+  it('剖开时装上的那一条是**样板里那把刀**，不是随便一条', () => {
+    // 只数条数的话，一个「无论如何都装一条固定平面」的实现照样绿。
+    const { renderer } = setup(withCut(true))
+    expect(renderer.clippingPlanes).toHaveLength(1)
+    const plane = renderer.clippingPlanes[0]!
+    // 节点绕 X 轴 -90°：局部 +Z 转到世界 +Y。位置 y = 0.28 → 常数 = -0.28。
+    expect(plane.normal.x).toBeCloseTo(0, 6)
+    expect(plane.normal.y).toBeCloseTo(1, 6)
+    expect(plane.normal.z).toBeCloseTo(0, 6)
+    expect(plane.constant).toBeCloseTo(-0.28, 6)
+  })
+
+  it('**扫掠补间的目标就是这把刀** —— 剖切是节点，补间不需要认识「剖切」', () => {
+    // T-284 ⑥。换成一个 `setSection` 动作的话，这条扫掠得再写一套动画通道。
+    const sweep = pump.animations.find((a) => a.kind === 'tween')!
+    expect(sweep.targets.map((t) => t.nodeId)).toContain(sectionId)
+    // 而且它真的在移动那把刀（不是一条不动的补间）。
+    expect(sweep.targets.find((t) => t.nodeId === sectionId)!.to.p).not.toEqual(
+      pump.nodes.find((n) => n.id === sectionId)!.transform.p,
+    )
+  })
+
+  it('两条互斥规则组成开关：同一个触发点，靠 `cut` 变量分岔', () => {
+    const open = pump.rules.find((r) => r.name.includes('剖开'))!
+    const close = pump.rules.find((r) => r.name.includes('合上'))!
+    // 同一个触发点。
+    expect(open.when).toEqual(close.when)
+    // 条件互斥——否则一次点击会同时点着两条。
+    // `if[]` 是判别联合，只有比较类的分支带 `right`；这里两条都是 `eq`，所以窄一下再读。
+    const rightOf = (rule: typeof open): unknown => {
+      const cond = rule.if[0]!
+      return 'right' in cond ? cond.right : undefined
+    }
+    expect(rightOf(open)).toEqual({ const: 0 })
+    expect(rightOf(close)).toEqual({ const: 1 })
+    // 各自把变量翻到另一边，否则开关只能拨一次。
+    const setVar = (r: typeof open) => r.then.find((a) => a.action === 'setVariable')!.params['value']
+    expect(setVar(open)).toEqual({ const: 1 })
+    expect(setVar(close)).toEqual({ const: 0 })
+  })
+
+  it('「剖开」用的是 `setVisible` —— 零新增动作，代价写在明处', () => {
+    // X-03 / T-243 整条成本论证的兑现：剖切作为第四种承载体，自动继承了变换手柄、
+    // 层级树、撤销、`setVisible` 动作、退出预览还原。
+    //
+    // ⚠ 代价：自动生成的验收用例措辞会是「显示对象「水平剖切面」」而不是「打开剖切」。
+    // 这一句要不要接受是合同措辞层面的事（台账 T-284 的 ⚠），本测试只钉住现状。
+    const open = pump.rules.find((r) => r.name.includes('剖开'))!
+    const action = open.then.find((a) => a.action === 'setVisible')!
+    expect(action.params['nodeId']).toBe(sectionId)
+    expect(action.params['visible']).toBe(true)
   })
 })

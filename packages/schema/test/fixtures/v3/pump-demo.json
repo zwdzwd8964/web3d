@@ -738,7 +738,7 @@
       "transform": {
         "p": [
           0,
-          0.62,
+          0.28,
           0
         ],
         "r": [
@@ -753,7 +753,7 @@
           1
         ]
       },
-      "visible": true,
+      "visible": false,
       "locked": false,
       "explode": null,
       "explodeOffset": null,
@@ -819,6 +819,27 @@
       "clampWhenFinished": true,
       "startS": 0,
       "endS": null
+    },
+    {
+      "kind": "tween",
+      "id": "anm_pumpswp1",
+      "name": "剖面扫掠",
+      "duration": 2.4,
+      "easing": "easeInOutCubic",
+      "loop": false,
+      "yoyo": true,
+      "targets": [
+        {
+          "nodeId": "nd_sect0001",
+          "to": {
+            "p": [
+              0,
+              0.95,
+              0
+            ]
+          }
+        }
+      ]
     }
   ],
   "hotspots": [
@@ -1036,12 +1057,43 @@
       "default": 1,
       "persist": false,
       "scope": "scene"
+    },
+    {
+      "id": "cut",
+      "name": "剖面已打开",
+      "type": "number",
+      "default": 0,
+      "persist": false,
+      "scope": "scene"
     }
   ],
   "rules": [
     {
       "id": "rl_pump0001",
-      "name": "点阀盖 → 播拆装动画并高亮",
+      "name": "开场飞到整机全览",
+      "enabled": true,
+      "when": {
+        "event": "sceneReady"
+      },
+      "if": [],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "ignore",
+      "onError": "continue",
+      "then": [
+        {
+          "action": "moveCamera",
+          "params": {
+            "viewpointId": "vp_pump0001",
+            "duration": 0.8,
+            "await": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_pump0002",
+      "name": "点泵组 → 三级拆开",
       "enabled": true,
       "when": {
         "event": "click",
@@ -1062,16 +1114,9 @@
       ],
       "ifAny": [],
       "mode": "sequence",
-      "reentry": "restart",
+      "reentry": "ignore",
       "onError": "abort",
       "then": [
-        {
-          "action": "playAnimation",
-          "params": {
-            "animationId": "anm_pumpdis1",
-            "await": true
-          }
-        },
         {
           "action": "highlight",
           "params": {
@@ -1080,9 +1125,49 @@
           }
         },
         {
+          "action": "explode",
+          "params": {
+            "nodeId": "nd_lvecover",
+            "factor": 0.35,
+            "durationS": 0.5,
+            "await": true
+          }
+        },
+        {
           "action": "openPanel",
           "params": {
             "hotspotId": "hs_pump0001"
+          }
+        },
+        {
+          "action": "explode",
+          "params": {
+            "nodeId": "nd_lvecover",
+            "factor": 0.7,
+            "durationS": 0.5,
+            "await": true
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_pump0002"
+          }
+        },
+        {
+          "action": "explode",
+          "params": {
+            "nodeId": "nd_lvecover",
+            "factor": 1,
+            "durationS": 0.6,
+            "await": true
+          }
+        },
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_pumpdis1",
+            "await": false
           }
         },
         {
@@ -1097,8 +1182,191 @@
       ]
     },
     {
-      "id": "rl_pump0002",
-      "name": "点叶轮 → 跳到剖面视角",
+      "id": "rl_pump0003",
+      "name": "点泵组 → 复原",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_lvecover"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 2
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "ignore",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "stopAnimation",
+          "params": {
+            "animationId": "anm_pumpdis1"
+          }
+        },
+        {
+          "action": "explode",
+          "params": {
+            "nodeId": "nd_lvecover",
+            "factor": 0,
+            "durationS": 0.5,
+            "await": true
+          }
+        },
+        {
+          "action": "closePanel",
+          "params": {}
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_pump0004",
+      "name": "剖开看内部",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_volute00"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "cut"
+          },
+          "right": {
+            "const": 0
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "ignore",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "setVisible",
+          "params": {
+            "nodeId": "nd_sect0001",
+            "visible": true
+          }
+        },
+        {
+          "action": "moveCamera",
+          "params": {
+            "viewpointId": "vp_pump0003",
+            "duration": 0.6,
+            "await": true
+          }
+        },
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_pumpswp1",
+            "await": false
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_pump0003"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "cut",
+            "value": {
+              "const": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_pump0005",
+      "name": "合上剖面",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_volute00"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "cut"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "ignore",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "stopAnimation",
+          "params": {
+            "animationId": "anm_pumpswp1"
+          }
+        },
+        {
+          "action": "setVisible",
+          "params": {
+            "nodeId": "nd_sect0001",
+            "visible": false
+          }
+        },
+        {
+          "action": "closePanel",
+          "params": {}
+        },
+        {
+          "action": "moveCamera",
+          "params": {
+            "viewpointId": "vp_pump0001",
+            "duration": 0.6,
+            "await": false
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "cut",
+            "value": {
+              "const": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_pump0006",
+      "name": "点叶轮 → 扫掠剖面",
       "enabled": true,
       "when": {
         "event": "click",
@@ -1106,17 +1374,27 @@
           "nodeId": "nd_impeller"
         }
       },
-      "if": [],
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "cut"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
       "ifAny": [],
       "mode": "sequence",
-      "reentry": "ignore",
+      "reentry": "restart",
       "onError": "continue",
       "then": [
         {
-          "action": "setViewpoint",
+          "action": "playAnimation",
           "params": {
-            "viewpointId": "vp_pump0003",
-            "durationS": 0.8
+            "animationId": "anm_pumpswp1",
+            "await": true
           }
         },
         {

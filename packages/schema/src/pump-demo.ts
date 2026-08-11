@@ -124,7 +124,16 @@ const MATERIAL_OF: Record<string, string> = {
 
 const HOTSPOT_IDS = ['hs_pump0001', 'hs_pump0002', 'hs_pump0003', 'hs_pump0004', 'hs_pump0005'] as const
 const VIEWPOINT_IDS = ['vp_pump0001', 'vp_pump0002', 'vp_pump0003'] as const
-const RULE_IDS = ['rl_pump0001', 'rl_pump0002'] as const
+const RULE_IDS = ['rl_pump0001', 'rl_pump0002', 'rl_pump0003', 'rl_pump0004', 'rl_pump0005', 'rl_pump0006'] as const
+
+/** 剖切平面节点。规则里要按 id 指它，所以提出来。 */
+const SECTION_NODE_ID = 'nd_sect0001'
+
+/** 剖面扫掠动画：一条**目标是剖切平面节点**的补间。 */
+const SWEEP_ANIMATION_ID = 'anm_pumpswp1'
+
+/** 剖开 / 合上的开关变量。两条互斥规则靠它分岔。 */
+const CUT_VARIABLE = 'cut'
 
 const PUMP_HASH = `sha256:${'0'.repeat(64)}`
 
@@ -212,9 +221,12 @@ export function createPumpDemoDocument(): SceneDocument {
 
     nodes: [
       ...nodes,
-      // 剖切平面。**默认可见**：它是这份样板要演示的能力之一，而一把关着的刀在
-      // bench 的剖切档里只会得到「未测到」（ADR-0042 决策 3）。
-      // 摆在泵壳中心偏上，法向 +Y —— 切掉上半，正好露出叶轮。
+      // 剖切平面。**默认关着**（T-284）：样板的开场是一台完整的泵，用户点蜗壳才剖开。
+      // T-283 一度让它默认可见（为了让 bench 的剖切档量得到东西），而 T-284 的验收要的是
+      // 「剖开 → 合上」两次往返后 `clippingPlanes.length` 回到 0 —— 静息态必须是 0 条平面。
+      // bench 那一档在这份文档上会如实报「未测到（剖切平面都是关的）」，那正是 ADR-0042
+      // 决策 3 造出来的那个形态，不是缺陷。
+      // 摆在泵壳中心偏下，法向 +Y —— 往上扫掠时逐步切开，正好露出叶轮。
       {
         id: 'nd_sect0001',
         name: '水平剖切面',
@@ -225,13 +237,13 @@ export function createPumpDemoDocument(): SceneDocument {
         light: null,
         section: { scope: 'scene' as const, size: [2.4, 2.4] as [number, number] },
         transform: {
-          p: [0, 0.62, 0] as [number, number, number],
+          p: [0, 0.28, 0] as [number, number, number],
           // 绕 X 轴 -90°，让平面法向从 +Z 转到 +Y。**非单位旋转**是刻意的：
           // 单位旋转下「有没有把节点的世界矩阵算进法向」这件事没有观测后果。
           r: [-Math.SQRT1_2, 0, 0, Math.SQRT1_2] as [number, number, number, number],
           s: [1, 1, 1] as [number, number, number],
         },
-        visible: true,
+        visible: false,
         locked: false,
         explode: null,
         explodeOffset: null,
@@ -262,6 +274,21 @@ export function createPumpDemoDocument(): SceneDocument {
         clampWhenFinished: true,
         startS: 0,
         endS: null,
+      },
+      // T-284 ⑥ · **剖面扫掠**：一条普通的补间，目标就是剖切平面那个节点。
+      //
+      // 这是「剖切作为第四种承载体」（X-03 / T-243）最有说服力的一行：补间系统不知道
+      // 「剖切」这回事，它只是在移动一个节点——而那个节点恰好是一把刀。换成一个
+      // `setSection` 动作的话，这条扫掠得再写一套动画通道。
+      {
+        kind: 'tween' as const,
+        id: SWEEP_ANIMATION_ID,
+        name: '剖面扫掠',
+        duration: 2.4,
+        easing: 'easeInOutCubic' as const,
+        loop: false,
+        yoyo: true,
+        targets: [{ nodeId: SECTION_NODE_ID, to: { p: [0, 0.95, 0] as [number, number, number] } }],
       },
     ],
 
@@ -296,38 +323,142 @@ export function createPumpDemoDocument(): SceneDocument {
       },
     ],
 
-    variables: [{ id: PUMP_DEMO_IDS.variable, name: '当前步骤', type: 'number' as const, default: 1, persist: false, scope: 'scene' as const }],
+    variables: [
+      { id: PUMP_DEMO_IDS.variable, name: '当前步骤', type: 'number' as const, default: 1, persist: false, scope: 'scene' as const },
+      // 剖开 / 合上是两条互斥规则，靠它分岔。做成变量而不是一个 toggle 动作，是因为
+      // **规则的条件是可读的**：作者在规则编辑器里看到「当 cut = 1 时……」，而一个
+      // toggle 动作的当前状态藏在运行时里，谁都读不到。
+      { id: CUT_VARIABLE, name: '剖面已打开', type: 'number' as const, default: 0, persist: false, scope: 'scene' as const },
+    ],
 
     rules: [
+      // ① 开场飞位。`sceneReady` 是全仓第一条真用上它的规则——在此之前它只在事件枚举里。
       {
         id: RULE_IDS[0],
-        name: '点阀盖 → 播拆装动画并高亮',
+        name: '开场飞到整机全览',
         enabled: true,
-        when: { event: 'click' as const, target: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH) } },
-        if: [{ op: 'eq' as const, left: { var: PUMP_DEMO_IDS.variable }, right: { const: 1 } }],
-        ifAny: [],
-        mode: 'sequence' as const,
-        reentry: 'restart' as const,
-        onError: 'abort' as const,
-        then: [
-          { action: 'playAnimation', params: { animationId: PUMP_DEMO_IDS.animation, await: true } },
-          { action: 'highlight', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), preset: 'outline_amber' } },
-          { action: 'openPanel', params: { hotspotId: HOTSPOT_IDS[0] } },
-          { action: 'setVariable', params: { variableId: PUMP_DEMO_IDS.variable, value: { const: 2 } } },
-        ],
-      },
-      {
-        id: RULE_IDS[1],
-        name: '点叶轮 → 跳到剖面视角',
-        enabled: true,
-        when: { event: 'click' as const, target: { nodeId: nodeIdOf('Root/Pump/Casing/Impeller') } },
+        when: { event: 'sceneReady' as const },
         if: [],
         ifAny: [],
         mode: 'sequence' as const,
         reentry: 'ignore' as const,
         onError: 'continue' as const,
+        then: [{ action: 'moveCamera', params: { viewpointId: VIEWPOINT_IDS[0], duration: 0.8, await: false } }],
+      },
+
+      // ② 点泵组 → 三级拆开。
+      //
+      // `reentry: 'ignore'` 而不是默认的 `restart`：这是一段**有先后的工艺动作**，连点两下
+      // 应当把第二下丢掉，而不是从头再来一遍——restart 会让已经散开的零件瞬间弹回去再散一次。
+      {
+        id: RULE_IDS[1],
+        name: '点泵组 → 三级拆开',
+        enabled: true,
+        when: { event: 'click' as const, target: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH) } },
+        if: [{ op: 'eq' as const, left: { var: PUMP_DEMO_IDS.variable }, right: { const: 1 } }],
+        ifAny: [],
+        mode: 'sequence' as const,
+        reentry: 'ignore' as const,
+        onError: 'abort' as const,
         then: [
-          { action: 'setViewpoint', params: { viewpointId: VIEWPOINT_IDS[2], durationS: 0.8 } },
+          { action: 'highlight', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), preset: 'outline_amber' } },
+          { action: 'explode', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), factor: 0.35, durationS: 0.5, await: true } },
+          { action: 'openPanel', params: { hotspotId: HOTSPOT_IDS[0] } },
+          { action: 'explode', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), factor: 0.7, durationS: 0.5, await: true } },
+          { action: 'openPanel', params: { hotspotId: HOTSPOT_IDS[1] } },
+          { action: 'explode', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), factor: 1, durationS: 0.6, await: true } },
+          { action: 'playAnimation', params: { animationId: PUMP_DEMO_IDS.animation, await: false } },
+          { action: 'setVariable', params: { variableId: PUMP_DEMO_IDS.variable, value: { const: 2 } } },
+        ],
+      },
+
+      // ③ 复原。`factor: 0` 就是复原——动作自己的 `describe` 里写着「复原分组」。
+      {
+        id: RULE_IDS[2],
+        name: '点泵组 → 复原',
+        enabled: true,
+        when: { event: 'click' as const, target: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH) } },
+        if: [{ op: 'eq' as const, left: { var: PUMP_DEMO_IDS.variable }, right: { const: 2 } }],
+        ifAny: [],
+        mode: 'sequence' as const,
+        reentry: 'ignore' as const,
+        onError: 'abort' as const,
+        then: [
+          { action: 'stopAnimation', params: { animationId: PUMP_DEMO_IDS.animation } },
+          { action: 'explode', params: { nodeId: nodeIdOf(EXPLODE_GROUP_PATH), factor: 0, durationS: 0.5, await: true } },
+          { action: 'closePanel', params: {} },
+          { action: 'setVariable', params: { variableId: PUMP_DEMO_IDS.variable, value: { const: 1 } } },
+        ],
+      },
+
+      // ④ 剖开看内部。
+      //
+      // **零新增动作**：`setVisible(剖切面, true)` 就是「打开剖切」。这是「剖切作为第四种
+      // 承载体」（X-03 / T-243）整条成本论证的兑现——它自动继承了变换手柄、层级树、撤销、
+      // `setVisible` 动作、退出预览还原，一条新代码都没有。
+      //
+      // ⚠ 代价写在明处：**自动生成的验收用例措辞会是「显示对象「水平剖切面」」**，
+      // 而不是「打开剖切」。这一句要不要接受，是合同措辞层面的事（见台账 T-284 的 ⚠）。
+      {
+        id: RULE_IDS[3],
+        name: '剖开看内部',
+        enabled: true,
+        when: { event: 'click' as const, target: { nodeId: nodeIdOf('Root/Pump/Casing/Volute') } },
+        if: [{ op: 'eq' as const, left: { var: CUT_VARIABLE }, right: { const: 0 } }],
+        ifAny: [],
+        mode: 'sequence' as const,
+        reentry: 'ignore' as const,
+        onError: 'abort' as const,
+        then: [
+          { action: 'setVisible', params: { nodeId: SECTION_NODE_ID, visible: true } },
+          { action: 'moveCamera', params: { viewpointId: VIEWPOINT_IDS[2], duration: 0.6, await: true } },
+          { action: 'playAnimation', params: { animationId: SWEEP_ANIMATION_ID, await: false } },
+          { action: 'openPanel', params: { hotspotId: HOTSPOT_IDS[2] } },
+          { action: 'setVariable', params: { variableId: CUT_VARIABLE, value: { const: 1 } } },
+        ],
+      },
+
+      // ⑤ 合上。与 ④ 互斥：同一个触发点，靠 `cut` 变量分岔，两条规则组成一个开关。
+      //
+      // 一个开关做成两条互斥规则而不是一个 toggle 动作，是因为**规则的条件是可读的**：
+      // 作者在规则编辑器里看到的是「当 cut = 1 时……」，而一个 toggle 动作的当前状态
+      // 藏在运行时里，谁都读不到。
+      {
+        id: RULE_IDS[4],
+        name: '合上剖面',
+        enabled: true,
+        when: { event: 'click' as const, target: { nodeId: nodeIdOf('Root/Pump/Casing/Volute') } },
+        if: [{ op: 'eq' as const, left: { var: CUT_VARIABLE }, right: { const: 1 } }],
+        ifAny: [],
+        mode: 'sequence' as const,
+        reentry: 'ignore' as const,
+        onError: 'abort' as const,
+        then: [
+          { action: 'stopAnimation', params: { animationId: SWEEP_ANIMATION_ID } },
+          { action: 'setVisible', params: { nodeId: SECTION_NODE_ID, visible: false } },
+          { action: 'closePanel', params: {} },
+          { action: 'moveCamera', params: { viewpointId: VIEWPOINT_IDS[0], duration: 0.6, await: false } },
+          { action: 'setVariable', params: { variableId: CUT_VARIABLE, value: { const: 0 } } },
+        ],
+      },
+
+      // ⑥ 剖面扫掠。**这一条是本卡最有说服力的一行**：
+      //
+      // 补间动画的 `targets[].nodeId` 直接指向剖切平面节点，把它从 y=0.28 推到 y=0.95。
+      // 剖切平面是节点，所以补间系统不需要知道「剖切」这回事——**一行新代码都不需要**。
+      // 换成一个 `setSection` 动作的话，这条扫掠就得再写一套动画通道。
+      {
+        id: RULE_IDS[5],
+        name: '点叶轮 → 扫掠剖面',
+        enabled: true,
+        when: { event: 'click' as const, target: { nodeId: nodeIdOf('Root/Pump/Casing/Impeller') } },
+        if: [{ op: 'eq' as const, left: { var: CUT_VARIABLE }, right: { const: 1 } }],
+        ifAny: [],
+        mode: 'sequence' as const,
+        reentry: 'restart' as const,
+        onError: 'continue' as const,
+        then: [
+          { action: 'playAnimation', params: { animationId: SWEEP_ANIMATION_ID, await: true } },
           { action: 'openPanel', params: { hotspotId: HOTSPOT_IDS[2] } },
         ],
       },
