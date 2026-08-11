@@ -435,6 +435,31 @@ export function sessionIdOf(): string {
   return currentSessionId
 }
 
+/**
+ * DEV 专用 · 这个标签页「已经崩了」。
+ *
+ * 崩溃恢复是**唯一一条必须靠「进程没了」才能走到的路径**，而 E2E 里没法真的杀掉
+ * 渲染进程。所以这里模拟它，且模拟的是**进程停了**，不是「报了个错」：
+ *
+ * - 心跳停了 → 租约会过期；
+ * - `pagehide` 不再释放租约 → 下一次开机看到的是一份没标记干净退出的租约；
+ * - **正式保存永远不返回** → `clearDraft` 那一步永远走不到，草稿留在库里。
+ *
+ * 第三条是关键。一个「抛异常」的模拟会让 UI 显示「保存失败」，那是另一种状态；
+ * 真崩了的时候没有任何东西被显示，因为那个进程已经不在了。
+ */
+let crashed = false
+
+/** DEV 专用 · 见 `crashSimulated`。 */
+export function simulateCrash(): void {
+  crashed = true
+}
+
+/** DEV 专用 · 这个标签页是不是已经「崩了」。 */
+export function crashSimulated(): boolean {
+  return crashed
+}
+
 /** 这个 provider 支持崩溃恢复吗。不支持时整条路径静默跳过——不是报错。 */
 export function draftsOf(session: ProjectSession): DraftsFacet | null {
   return session.storage.facets.includes('drafts') ? (session.storage.ext.drafts ?? null) : null

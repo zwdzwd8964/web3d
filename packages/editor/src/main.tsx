@@ -5,7 +5,7 @@ import { App } from './App.js'
 import { PreviewProvider } from './preview/PreviewContext.jsx'
 import { createPreviewStore } from './preview/preview-store.js'
 import { ProjectProvider } from './project/ProjectContext.jsx'
-import { draftsOf, runBoot, sessionIdOf, startHeartbeat } from './project/project-lifecycle.js'
+import { crashSimulated, draftsOf, runBoot, sessionIdOf, simulateCrash, startHeartbeat } from './project/project-lifecycle.js'
 import type { LeaseRequest } from '@w3/storage'
 import { ProjectSession } from './project/session.js'
 import { StoreProvider } from './store/StoreContext.js'
@@ -23,14 +23,6 @@ import './styles.css'
  * viewport, which immediately asks the resolver for bytes. Doing it the other way round
  * is what produced `资产加载失败：pump.glb` on every cold start.
  */
-
-/**
- * T-288 · 伪造崩溃时置真：`pagehide` 里就不再释放租约了。
- *
- * 模块级，因为 `pagehide` 的监听器和 `__w3SimulateCrash` 都要看到它，而它们之间没有
- * 别的通路。运行时瞬态，不进文档。
- */
-let simulatingCrash = false
 
 /**
  * 这次开机的租约申请。
@@ -78,7 +70,7 @@ async function boot() {
   const drafts = draftsOf(session)
   const stopHeartbeat = heartbeat ? startHeartbeat({ beat: () => heartbeat(Date.now()) }) : null
   window.addEventListener('pagehide', () => {
-    if (simulatingCrash) return
+    if (crashSimulated()) return
     stopHeartbeat?.()
     void drafts?.releaseLease(doc.projectId, sessionIdOf())
   })
@@ -90,7 +82,7 @@ async function boot() {
     // 只读的 `__w3Dev*` 那一族不同，这一个会改状态，所以它带一个更直白的名字，
     // 并且只在 DEV 构建里存在。
     ;(globalThis as Record<string, unknown>)['__w3SimulateCrash'] = () => {
-      simulatingCrash = true
+      simulateCrash()
       stopHeartbeat?.()
     }
   }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from './ProjectContext.jsx'
 import { AutoSaver } from './autosave.js'
 import type { AutoSaverOptions, SaveState } from './autosave.js'
-import { draftsOf, sessionIdOf } from './project-lifecycle.js'
+import { crashSimulated, draftsOf, sessionIdOf } from './project-lifecycle.js'
 import { useDocumentStore } from '../store/StoreContext.js'
 
 /**
@@ -36,7 +36,13 @@ export function useAutoSave(): {
         // T-286 · `save` 现在返回回执，而 AutoSaver 的钩子要的是 `Promise<void>`。
         // 显式丢掉它而不是改钩子的签名：AutoSaver 不消费修订号，让它的类型跟着变
         // 只会把一个它用不到的概念带进来。
-        save: async (doc) => void (await session.save(doc)),
+        save: async (doc) => {
+          // DEV 专用 · 「这个进程已经不在了」。**永不 resolve**，不是抛异常：
+          // 抛异常会显示「保存失败」，而真崩了的时候什么都不会被显示。
+          // 它的直接效果是 `clearDraft` 那一步走不到，于是草稿留在库里等下一次开机。
+          if (import.meta.env.DEV && crashSimulated()) return new Promise<void>(() => {})
+          await session.save(doc)
+        },
         // T-288 · 草稿通道。provider 没有 `drafts` facet 时**两个钩子都不给**——
         // 给一对空函数的话，「顺序是 saveDraft → save → clearDraft」那条断言会在一个
         // 根本没有草稿的实现上照样绿。
