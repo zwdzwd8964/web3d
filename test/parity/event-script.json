@@ -15,7 +15,8 @@
     "  hs_q1s3u5w7 拆卸提示                      step (number, default 1)",
     "hover 与 hotspotClick 必须在脚本里：它们是唯一两条曾经在两侧含义不同的输入路径，",
     "脚本不含它们时 parity 会一直绿着，而分叉照旧存在。",
-    "v0.5 · T-171：末尾两步覆盖 setLight 与 playMedia(await:true)。灯与媒体是 v0.5 新增的两条轨迹，脚本不含它们时 parity 会一直绿着而分叉照旧存在——与 hover / hotspotClick 当年同理。时刻必须排在既有末步之后：replay 的 while(clock < atMs) 只前进不后退，插一个更小的 atMs 会让它在末尾瞬间触发，await 那一步来不及跑完就被拆台打断。"
+    "v0.5 · T-171：末尾两步覆盖 setLight 与 playMedia(await:true)。灯与媒体是 v0.5 新增的两条轨迹，脚本不含它们时 parity 会一直绿着而分叉照旧存在——与 hover / hotspotClick 当年同理。时刻必须排在既有末步之后：replay 的 while(clock < atMs) 只前进不后退，插一个更小的 atMs 会让它在末尾瞬间触发，await 那一步来不及跑完就被拆台打断。",
+    "T-294 · 8200 之后追加爆炸与剖切三步。atMs 只增不减是这份脚本的硬纪律：replay 的 while(clock < atMs) 只前进不后退，插一个更小的值会让它在末尾瞬间触发，await 那一步来不及跑完就被 stop() 拆台 —— 而两侧同样地被拆，比较仍然绿。"
   ],
   "steps": [
     {
@@ -133,6 +134,28 @@
     {
       "atMs": 8200,
       "note": "v0.5 · 空转到音频播完之后：await 的那一步必须在两侧同一时刻结束",
+      "event": {
+        "kind": "idle"
+      }
+    },
+    {
+      "atMs": 8600,
+      "note": "T-294 · 点聚光灯触发爆炸 + 打开剖切面。explode(await:true) 会挂起 ~0.5s 的过渡",
+      "event": {
+        "kind": "click",
+        "nodeId": "nd_light001"
+      }
+    },
+    {
+      "atMs": 10200,
+      "note": "T-294 · 空转到 imported 片段(0.8s) + 爆炸过渡(0.5s) 都走完。**这段留白是算出来的**：链从 8600 起，0.8+0.5=1.3s，所以最早 9900 才结束。第一版留到 9800 就收，规则被 stop() 拆台 —— 编辑器报 aborted、播放器一条都不报，parity 当场红。红得对：那是两侧对同一次拆台的不同反应，不是功能不一致",
+      "event": {
+        "kind": "idle"
+      }
+    },
+    {
+      "atMs": 10600,
+      "note": "T-294 · 再空转一轮，让剖切面的世界可见性变化被 applySections 消化",
       "event": {
         "kind": "idle"
       }

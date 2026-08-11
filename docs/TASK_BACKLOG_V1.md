@@ -2976,7 +2976,41 @@
   ⑤ `SHA256SUMS` 里改一位哈希 → 第 1 步红。
 
 ### [ ] T-294 · parity v1.0 全域扩展
-- **依赖** T-246 · T-254 · T-265 · T-268 · T-283 · T-240 · **预估** 2.5d · **实际** —
+- **依赖** T-246 · T-254 · T-265 · T-268 · T-283 · T-240 · **预估** 2.5d · **实际** 1.6d（**部分交付，卡未闭合**）
+- ⚠ **这张卡没有做完，故意不标 `[x]`。** 已交付的是卡面 1 / 2 / 4 三项与整组变异检验；
+  未交付的四项与原因逐条列在下面。
+
+  **已交付**：
+  - **动画**：`sample.ts` 加了一条真的 0.8 秒片段（`SAMPLE_CLIP`）。在此之前那份 GLB 里
+    **一条动画通道都没有**，而文档的资产记录手写着 `animations: ['Disassemble']`——
+    `ClipPlayer.play` 找不到名字时只 warn 然后 resolve，于是 `playAnimation` 那一步两侧
+    对称地什么都不做，`ExecResult` 照样 completed。parityDocument 另加一条**带区间的
+    imported 段落**（`startS/endS` 在 v1.0 的 core 里零消费，规划 §4 标为「冻结，v1.2 通电」，
+    所以比的是「两侧对同一份文档的解释一致」，**不是**「区间被裁了」——卡面没写这一点）。
+  - **表现力**：文档开雾 + 开描边；轨迹比较加 `scene.fog` 快照与 `highlightOf` 账本。
+    雾在无 renderer 下真的生效（`applyFog` 排在 renderer 早退之前），所以它是可比的量。
+  - **爆炸剖切**：加爆炸分组与一把默认关着的剖切刀，脚本里 `explode(await) → setVisible`；
+    比较加**几何量** `explodedY`（ops 与 highlights 都是账本，只有它能证明东西真被挪开了）。
+  - **热点栅格化第一次进比较面**：两侧各注入一个 `HotspotSpriteLayer`（假 canvas，无 GPU 无 DOM），
+    逐项比 `ops`。⚠ 全仓在此之前**没有任何宿主构造过这个层**，两侧用的都是 `NullHotspotRenderer`。
+  - **六条防空转自检**：片段真被找到（读运行时警告）· 那条规则真挂满 · 爆炸真跑完 ·
+    ops 非空 · 有 marker · 有 panel op · 有节点被高亮。
+
+  **未交付，四项**：
+  1. **`exportImage` 比对**——两侧都没有 renderer，`readPixels` 返回 null，比的是**两次失败**
+     （`ok:false, width:0, height:0`，`toEqual` 会绿）。补播放器侧的 `createRenderer` 注入口
+     要动 `packages/player/src/session.ts`，**不在 C3 允许的 diff 面里**（只许 `bench/`、
+     `embed/` 与 `app.ts` 的装配段）。这一项要么单开一张卡带 ADR，要么并进 T-295。
+  2. **样板工程作为第二份 parity 输入**（`event-script-pump.json`）。
+  3. **E2E 两条新 spec**（`postfx.spec.ts` / `explode-section.spec.ts`）与两个 DEV 探针
+     （`__w3DevSectionPlanes` / `__w3DevPositionOf`，今天全仓不存在）。
+  4. **bench 增三档后处理**。今天 `main.ts:328-335` 已经在量 composed/direct 两档，但只
+     `console.info`，不产出 `BenchRow`。
+
+- **本卡最值钱的一条**：变异 ② 是 ADR-0019 那句「双向比较看不见对称的错误」的**机器证明**
+  ——两侧同时让 sprite 层不画东西，`toEqual` 全绿，抓住它的是那条断绝对量的自检。
+- **自己写坏又自己抓出来两处**（都记在 MUTATIONS）：④ 第一版的动画自检稳定量到的是
+  黄金路径那条 tween，不是新加的 imported 片段；③ 那次变异改的是两边共用的常量，链根本没断。
 - **独占** `test/parity/parity.test.ts` · `test/parity/event-script.json` ·
   `test/parity/event-script-pump.json`(新) · `packages/core/src/assets/sample.ts` ·
   `packages/editor/src/viewport/runtime-registry.ts` · `e2e/tests/postfx.spec.ts`(新) ·
