@@ -2,8 +2,8 @@ import type { SceneDocument } from '@w3/schema'
 import type { DBSchema, IDBPDatabase } from 'idb'
 import { openDB } from 'idb'
 import { hashBytes } from './hash.js'
-import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, FacetName, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt } from './provider.js'
-import { StorageError, mapWriteError } from './provider.js'
+import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, DraftRecord, DraftsFacet, FacetName, LeaseAcquisition, LeaseRequest, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt, SessionLease } from './provider.js'
+import { StorageError, classifyLease, mapWriteError } from './provider.js'
 
 /**
  * T-023 · the v0 storage backend.
@@ -55,10 +55,10 @@ interface W3DB extends DBSchema {
   documents: { key: string; value: SceneDocument }
   blobs: { key: string; value: Uint8Array }
   snapshots: { key: string; value: Snapshot; indexes: { byProject: string } }
-  /** v1.0 · crash-recovery draft slots, one per project (T-286). */
-  drafts: { key: string; value: unknown }
+  /** v1.0 · crash-recovery draft slots, one per project (T-287). */
+  drafts: { key: string; value: DraftRecord }
   /** v1.0 · cross-tab edit leases with a heartbeat (T-287). */
-  leases: { key: string; value: unknown }
+  leases: { key: string; value: SessionLease }
   /** v1.5 · one document per scene inside a project (T-427). */
   scenes: { key: string; value: unknown; indexes: { byProject: string } }
   /** v1.5 · document revisions, for the conflict dialog's three-way choice (T-406). */
@@ -85,16 +85,20 @@ export class IndexedDbProvider implements StorageProvider {
   readonly kind = 'indexeddb'
 
   /**
-   * T-286 · 本地实现一个 facet 都不声明。理由与 `MemoryProvider` 相同：单机没有并发
+   * T-286 · 五个远端 facet 一个都不声明。理由与 `MemoryProvider` 相同：单机没有并发
    * 编辑、没有成员、没有审计、没有历史修订、没有直传。
    *
-   * ⚠ `drafts` 与 `leases` 两个 objectStore 已经在 DB_VERSION 2 里建好了（T-202），
-   * 但**它们不是 facet**——草稿与会话租约是 T-287 要加进接口本体的东西，因为每一个
-   * provider 都做得到。
+   * T-287 加了 `drafts`。它用的 `drafts` 与 `leases` 两个 objectStore **在 T-202 就
+   * 已经建好了**，所以这张卡一个字都没动 `DB_VERSION`——ADR-0027 的规矩是往既有 upgrade
+   * 里加内容，不是再 bump 一次。
    */
-  readonly facets: readonly FacetName[] = []
+  readonly facets: readonly FacetName[] = ['drafts']
 
-  readonly ext: ProviderFacets = {}
+  /**
+   * 挂着的是同一个对象，而不是每次 get 新建一个：`ext.drafts !== ext.drafts` 会让
+   * 「同一个 provider 的两次调用看到同一份租约」这件事变得依赖实现细节。
+   */
+  readonly ext: ProviderFacets
 
   private db: IDBPDatabase<W3DB> | null = null
   private opening: Promise<IDBPDatabase<W3DB>> | null = null
@@ -102,6 +106,7 @@ export class IndexedDbProvider implements StorageProvider {
 
   constructor(options: IndexedDbProviderOptions = {}) {
     this.databaseName = options.databaseName ?? DB_NAME
+    this.ext = { drafts: new IdbDrafts(() => this.open()) }
   }
 
   /** True when this environment can host the provider at all (browser, or a shim). */
@@ -293,4 +298,84 @@ export class IndexedDbProvider implements StorageProvider {
  */
 function revOf(document: SceneDocument): string {
   return `${document.meta.updatedAt}#${JSON.stringify(document).length}`
+}
+
+/**
+ * T-287 · `drafts` facet 的 IndexedDB 实现。
+ *
+ * 不导出，理由与 `MemoryDrafts` 相同：它是 provider 的一部分，调用方经
+ * `provider.ext.drafts` 拿到它。
+ *
+ * 拿库的方式是构造时注入的一个 thunk 而不是一个 `IDBPDatabase`：provider 的库是
+ * **懒开**的，构造函数里还没有库可传。
+ */
+class IdbDrafts implements DraftsFacet {
+  constructor(private readonly db: () => Promise<IDBPDatabase<W3DB>>) {}
+
+  async saveDraft(draft: DraftRecord): Promise<void> {
+    const db = await this.db()
+    await mapWriteError('保存草稿', async () => {
+      await db.put('drafts', draft, draft.projectId)
+    })
+  }
+
+  /** 读回草稿。**没有就是 `null`**——IndexedDB 的 miss 是 `undefined`，理由见 `MemoryDrafts`。 */
+  async loadDraft(projectId: string): Promise<DraftRecord | null> {
+    const db = await this.db()
+    return (await db.get('drafts', projectId)) ?? null
+  }
+
+  async clearDraft(projectId: string): Promise<void> {
+    const db = await this.db()
+    await db.delete('drafts', projectId)
+  }
+
+  /**
+   * 申请占用。**读判写在同一个 readwrite 事务里。**
+   *
+   * 分成两个事务的话，两个标签页在同一毫秒开机会双双读到「没人占」，然后双双写进去，
+   * 于是两边都以为自己拿到了——而这正是这套机制唯一要防的那件事。
+   */
+  async acquireLease(projectId: string, request: LeaseRequest): Promise<LeaseAcquisition> {
+    const db = await this.db()
+    const tx = db.transaction('leases', 'readwrite')
+    const existing = (await tx.store.get(projectId)) ?? null
+    const previous = classifyLease(existing, request)
+    if (existing && previous === 'live-elsewhere') {
+      await tx.done
+      return { ok: false, heldBy: existing }
+    }
+    const lease: SessionLease = {
+      projectId,
+      sessionId: request.sessionId,
+      heartbeatAt: request.nowMs,
+      closedCleanly: false,
+    }
+    await tx.store.put(lease, projectId)
+    await tx.done
+    return { ok: true, lease, previous }
+  }
+
+  async heartbeatLease(projectId: string, request: LeaseRequest): Promise<boolean> {
+    const db = await this.db()
+    const tx = db.transaction('leases', 'readwrite')
+    const existing = await tx.store.get(projectId)
+    if (!existing || existing.sessionId !== request.sessionId) {
+      await tx.done
+      return false
+    }
+    await tx.store.put({ ...existing, heartbeatAt: request.nowMs, closedCleanly: false }, projectId)
+    await tx.done
+    return true
+  }
+
+  async releaseLease(projectId: string, sessionId: string): Promise<void> {
+    const db = await this.db()
+    const tx = db.transaction('leases', 'readwrite')
+    const existing = await tx.store.get(projectId)
+    if (existing && existing.sessionId === sessionId) {
+      await tx.store.put({ ...existing, closedCleanly: true }, projectId)
+    }
+    await tx.done
+  }
 }

@@ -45,8 +45,9 @@ export interface Snapshot {
  * 既有实现补方法——加起来那条论据就不成立了。这里统一成一条纪律：接口本体只放**每一个
  * provider 都做得到**的东西；做不到的进 facet，而 facet 是**可选的**。
  *
- * 五个 facet 在 v1.0 **全是类型，没有任何实现**。它们现在就写下来，是因为 v1.5 的 HTTP
- * provider 要按它们分工，而等到那时再定形状，编辑器已经绕着今天的接口写了两个版本。
+ * 六个 facet 里，五个在 v1.0 **全是类型，没有任何实现**（T-287 的 `drafts` 是唯一一个
+ * 有实现的）。它们现在就写下来，是因为 v1.5 的 HTTP provider 要按它们分工，而等到那时
+ * 再定形状，编辑器已经绕着今天的接口写了两个版本。
  */
 
 /** 一份文档的修订号。**不透明**——比较用 `===`，不许拿它做算术。 */
@@ -120,7 +121,7 @@ export interface AuditEntry {
   readonly projectId: string
 }
 
-/* --- 五个 facet：全是类型，v1.0 零实现 --------------------------------------- */
+/* --- 另外五个 facet：全是类型，v1.0 零实现 ----------------------------------- */
 
 /** `locks` · 谁在编这份工程。单机没有并发编辑，所以本地实现不声明它。 */
 export interface LocksFacet {
@@ -165,12 +166,153 @@ export interface AssetsFacet {
   presignDownload(hash: BlobHash): Promise<string>
 }
 
+/* -------------------------------------------------------------------------- */
+/* v1.0 · T-287 · drafts facet（崩溃恢复的存储侧）                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 一份还没成功落盘的文档。
+ *
+ * 草稿**不是**自动保存的替代品，它是自动保存**失败或来不及**时的那一份。写入顺序是
+ * `saveDraft → save → clearDraft`（T-288）：草稿先落地，正式保存成功之后才清掉。
+ * 中间任何一步崩了，草稿都还在。
+ */
+export interface DraftRecord {
+  readonly projectId: string
+  readonly document: SceneDocument
+  /**
+   * 从上一次成功保存到现在累计了多少次编辑。
+   *
+   * 崩溃横幅上那句「有 N 处修改没保存」用的就是它。**它必须是真数字**——写死一个
+   * 「若干」，用户就没法判断该恢复还是该丢弃。
+   */
+  readonly edits: number
+  /** 草稿写下来的时刻（ISO）。 */
+  readonly savedAt: string
+  /** 哪个会话写的。恢复时要跟当前会话比。 */
+  readonly sessionId: string
+}
+
+/**
+ * 一个会话对某份工程的占用。
+ *
+ * **不是 `Lease`**（那是 v1.5 的服务端编辑锁，由后端裁决）。这一个是本地的、靠心跳
+ * 存活的、用来回答两个问题的：「另一个标签页正在编吗」「上一次是崩的还是关的」。
+ */
+export interface SessionLease {
+  readonly projectId: string
+  readonly sessionId: string
+  /**
+   * 最后一次心跳的时刻，**毫秒时间戳**。
+   *
+   * 存毫秒数而不是 ISO 串：判定是一次减法，而 ISO 串每次比较都要先 parse，
+   * 而且给了「用字符串比大小」这种一看就对、跨时区就错的写法一个机会。
+   */
+  readonly heartbeatAt: number
+  /** 上一个会话是不是干净退出的。`pagehide` 里置 true（T-288）。 */
+  readonly closedCleanly: boolean
+}
+
+/**
+ * 一份租约相对于**当前会话**是什么状态。
+ *
+ * - `self` — 就是我自己的，继续用。
+ * - `live-elsewhere` — 另一个标签页正活着，我不该动这份工程。
+ * - `crashed` — 上一个会话没打招呼就没了，草稿要拿出来问用户。
+ * - `closed` — 上一个会话干净地退了（或者根本没有过），什么都不用问。
+ */
+export type LeaseVerdict = 'self' | 'live-elsewhere' | 'crashed' | 'closed'
+
+/** 心跳间隔。 */
+export const HEARTBEAT_MS = 5_000
+
+/**
+ * 多久没心跳算崩了。
+ *
+ * 三个心跳周期。一跳就判死会把一次 GC 停顿误判成崩溃，而误判的代价是**给一个好端端的
+ * 标签页弹恢复横幅**，比晚 15 秒发现崩溃难受得多。
+ */
+export const LEASE_STALE_MS = 3 * HEARTBEAT_MS
+
+/** `acquireLease` 的结果。**拿不到不是异常**，见 `DraftsFacet.acquireLease`。 */
+export type LeaseAcquisition =
+  | { readonly ok: true; readonly lease: SessionLease; readonly previous: LeaseVerdict }
+  | { readonly ok: false; readonly heldBy: SessionLease }
+
+/** 谁在什么时刻申请。注入时钟——存储层里不许有 `Date.now()`，理由同 ECA 的铁律 6。 */
+export interface LeaseRequest {
+  readonly sessionId: string
+  readonly nowMs: number
+  /**
+   * 多久没心跳算崩。省略 = `LEASE_STALE_MS`。
+   *
+   * 挂在 request 上而不是做 `classifyLease` 的第三个参数：第三个参数意味着
+   * `DraftsFacet` 的每个方法都要多带一个透传参数，而透传参数是最容易在某一层被漏掉的
+   * 东西——漏掉的那一层会**静悄悄地用回默认值**，于是 E2E 里调小的 15 秒又变回 15 秒，
+   * 而测试只是慢，不是红。
+   */
+  readonly staleMs?: number
+}
+
+/**
+ * `drafts` · 崩溃恢复。草稿三方法 + 租约三方法。
+ *
+ * 为什么是 facet 而不是接口本体：**一个声明机制如果没有任何声明者，只测了一半。**
+ * T-286 落地时五个 facet 全是零实现，「声明了 X 却没挂 X」这一侧有用例守着，
+ * 「挂了 X 也声明了 X」那一侧一次都没走过。drafts 让两侧都有真实实现走过。
+ */
+export interface DraftsFacet {
+  /** 写下（或覆盖）这份工程的草稿。 */
+  saveDraft(draft: DraftRecord): Promise<void>
+  /** 读回草稿。**没有就是 `null`**，不是 `undefined`——见契约套件里那条注释。 */
+  loadDraft(projectId: string): Promise<DraftRecord | null>
+  /** 丢掉草稿。正式保存成功之后才调。 */
+  clearDraft(projectId: string): Promise<void>
+
+  /**
+   * 申请占用这份工程。
+   *
+   * **拿不到时返回 `{ok:false, heldBy}`，不抛异常。** 「另一个标签页开着」是一条正常
+   * 分支，不是错误：抛异常会逼调用方用 `try/catch` 表达一个 if。
+   *
+   * 拿到时 `previous` 告诉调用方上一个会话是怎么结束的——崩溃横幅弹不弹全看它。
+   */
+  acquireLease(projectId: string, request: LeaseRequest): Promise<LeaseAcquisition>
+  /** 续一次租约。**返回 false 表示租约已经不是你的了**（被别人接管了）。 */
+  heartbeatLease(projectId: string, request: LeaseRequest): Promise<boolean>
+  /** 干净地退出。把 `closedCleanly` 置 true——下次开机据此判定「不是崩溃」。 */
+  releaseLease(projectId: string, sessionId: string): Promise<void>
+}
+
+/**
+ * 一份租约相对于当前会话的判定。**纯函数**，Node 可测，四种判定穷举。
+ *
+ * 顺序是有意的：
+ * 1. 没有租约 → `closed`。「从来没人开过」和「上一个人干净地关了」对调用方是同一件事。
+ * 2. 是我自己 → `self`。同一个 sessionId 就是同一个标签页，哪怕它上次写了 closedCleanly。
+ * 3. 干净退出 → `closed`。**这一条必须在 stale 判定之前**：干净退出的租约心跳一定是旧的，
+ *    先判 stale 就会把每一次正常关机都报成崩溃。
+ * 4. 心跳过期 → `crashed`。边界 `nowMs − heartbeatAt === staleMs` 算**过期**。
+ * 5. 其余 → `live-elsewhere`。
+ *
+ * @param existing 库里那份租约，没有就是 `null`。
+ * @param request 当前会话是谁、现在几点、多久算崩（`staleMs` 省略即 `LEASE_STALE_MS`）。
+ */
+export function classifyLease(existing: SessionLease | null, request: LeaseRequest): LeaseVerdict {
+  if (!existing) return 'closed'
+  if (existing.sessionId === request.sessionId) return 'self'
+  if (existing.closedCleanly) return 'closed'
+  if (request.nowMs - existing.heartbeatAt >= (request.staleMs ?? LEASE_STALE_MS)) return 'crashed'
+  return 'live-elsewhere'
+}
+
 /** facet 的名字。**闭集**——声明一个不在这里的名字，契约套件会报。 */
-export const FACET_NAMES = ['locks', 'members', 'audit', 'revisions', 'assets'] as const
+export const FACET_NAMES = ['drafts', 'locks', 'members', 'audit', 'revisions', 'assets'] as const
 export type FacetName = (typeof FACET_NAMES)[number]
 
 /** 一个 provider 可能挂着的 facet。全部可选。 */
 export interface ProviderFacets {
+  readonly drafts?: DraftsFacet
   readonly locks?: LocksFacet
   readonly members?: MembersFacet
   readonly audit?: AuditFacet

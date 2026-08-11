@@ -2019,6 +2019,78 @@ export interface StorageErrorV2Additions {
 `RevisionSummary` / `PresignedUpload` 的消费者排在 **v1.5**（M25 起的后端线）。
 到期未接线，`check-dead-exports` 会照 NORTH_STAR §8 转红——**到期检查一字不改**。
 
+### 4.7 `drafts` facet 的冻结接口（T-287 · 消费者在 T-288）
+
+> 与 §4.6 同一条裁决（ADR-0043）：provider v2 的类型写进这一节，走冻结接口表。
+> **区别只在到期**——§4.6 那批等 v1.5 的后端线，这一批的消费者是**下一张卡**（T-288 的
+> 编辑器侧），所以到期是 `v1.0`。写进来不是为了多躺一段，是因为 T-287 与 T-288 之间
+> 隔着一次提交，而每一次提交都要过守卫。
+
+#### 4.7.1 为什么是 facet 而不是接口本体
+
+§4.6 定的纪律是「不是所有 provider 都做得到的进 facet」。草稿与租约两件事本地实现都做得到，
+照字面它该进接口本体——但还有第二条理由压过它：**一个声明机制如果没有任何声明者，只测了
+一半**。T-286 落地时五个 facet 全是零实现，「声明了 X 却没挂 X」这一侧有契约用例守着，
+「挂了 X 也声明了 X」那一侧**一次都没走过**。`drafts` 让两侧都有真实实现走过。
+
+代价写清楚：调用方多一次 `provider.ext.drafts` 的存在性判断。撤销条件是——如果 v1.5 的
+`HttpApiProvider` 也无条件实现它，就把它并回接口本体，那时它已经有两个实现可比。
+
+#### 4.7.2 逐字清单
+
+```ts
+export interface DraftRecord {
+  readonly projectId: string
+  readonly document: SceneDocument
+  readonly edits: number
+  readonly savedAt: string
+  readonly sessionId: string
+}
+export interface SessionLease {
+  readonly projectId: string
+  readonly sessionId: string
+  readonly heartbeatAt: number
+  readonly closedCleanly: boolean
+}
+export type LeaseVerdict = 'self' | 'live-elsewhere' | 'crashed' | 'closed'
+export const HEARTBEAT_MS = 5_000
+export const LEASE_STALE_MS = 3 * HEARTBEAT_MS
+export type LeaseAcquisition =
+  | { readonly ok: true; readonly lease: SessionLease; readonly previous: LeaseVerdict }
+  | { readonly ok: false; readonly heldBy: SessionLease }
+export interface LeaseRequest { readonly sessionId: string; readonly nowMs: number; readonly staleMs?: number }
+
+export interface DraftsFacet {
+  saveDraft(draft: DraftRecord): Promise<void>
+  loadDraft(projectId: string): Promise<DraftRecord | null>
+  clearDraft(projectId: string): Promise<void>
+  acquireLease(projectId: string, request: LeaseRequest): Promise<LeaseAcquisition>
+  heartbeatLease(projectId: string, request: LeaseRequest): Promise<boolean>
+  releaseLease(projectId: string, sessionId: string): Promise<void>
+}
+
+export function classifyLease(existing: SessionLease | null, request: LeaseRequest): LeaseVerdict
+
+// FACET_NAMES 从五个变六个，drafts 排在最前
+export const FACET_NAMES = ['drafts', 'locks', 'members', 'audit', 'revisions', 'assets'] as const
+```
+
+#### 4.7.3 四条约束，逐字
+
+1. **`loadDraft` 没有草稿时返回 `null`，不是 `undefined`。** 两个实现的底层 miss 都是
+   `undefined`（`Map.get` 与 IndexedDB 的 `get`），直接透出去会让一条写成
+   `expect(draft).not.toBeNull()` 的前置断言绿，于是红灯出现在「清除」上，坏掉的却是「读取」。
+2. **`acquireLease` 拿不到时返回 `{ok:false, heldBy}`，不抛异常。**「另一个标签页开着」是一条
+   正常分支；抛异常会逼调用方用 `try/catch` 表达一个 if。
+3. **`classifyLease` 先判 `closedCleanly` 再判心跳过期。** 干净退出的租约心跳必然是旧的，
+   顺序反过来会把每一次正常关机都报成崩溃。边界 `nowMs − heartbeatAt === staleMs` 归 `crashed`。
+4. **时间从 `LeaseRequest` 注入，存储层里不出现 `Date.now()`。** 理由与 ECA 的铁律 6 相同：
+   否则这套判定的每一条测试都要靠 sleep。
+
+#### 4.7.4 到期
+
+到期 **`v1.0`**。T-288 接线之后，这一批的冻结接口表行**全部删掉**——留着就成了下一个垃圾桶。
+
 
 ## 5. 关键设计决策（D21 – D40，续 v0 的 D1–D10 与 v0.5 的 D11–D20）
 

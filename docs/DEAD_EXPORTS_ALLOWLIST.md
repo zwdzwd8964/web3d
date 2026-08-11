@@ -84,6 +84,14 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 按**代码跨度**逐字找这个符号名，找不到就红。**这把门锁是这张表可以不受条数限制的全部理由**，
 不要绕过它：一个「随手加的、没人用的」导出写不进冻结规范，也就进不来这张表。
 
+**T-287 起，这张表（且只有这张表）的 `expires` 还可以写一个卡号**，例如 `T-288`。到期条件
+不是「版本到了」，是**那张卡在台账里被标成 `[x]`**——收工了还留着这一行，说明那张卡没接上它。
+
+加这一档是因为版本阶梯的最小刻度是一整个版本，而「消费者是下一张卡」在原来的写法里
+表达不出来：写 `v1.0` 当场就算过期（当前就是 v1.0），写 `v1.2` 是**谎报**，把隔一张卡的债
+说成隔一个版本的债。**它是收紧不是开口子**：卡号到期的行在下一张卡收工时立刻转红，
+版本到期的行能一直躺到那个版本。
+
 | symbol | reason | owner | expires | spec |
 |---|---|---|---|---|
 | core:SceneRuntime.flyToView | T-337 的相机路径巡游按采样函数逐帧驱动相机 | T-337 | v1.5 | 规划§4 |
@@ -94,10 +102,8 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 | 规划§4 |
 | core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 | 规划§4 |
 | storage:IndexedDbProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
-| storage:IndexedDbProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
 | storage:IndexedDbProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
 | storage:MemoryProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
-| storage:MemoryProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
 | storage:MemoryProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
 | storage:Identity.userId | v1.5 的后端把当前登录者填进来，成员列表与审计日志两处都按它区分人 | T-286 | v1.5 | 规划§4 |
 | storage:Identity.displayName | v1.5 的成员面板与审计日志显示这个名字，用户看不懂用户标识本身 | T-286 | v1.5 | 规划§4 |
@@ -124,7 +130,14 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | storage:ProviderFacets.revisions | v1.5 的历史面板问它有没有修订能力，没有就不显示那个入口 | T-286 | v1.5 | 规划§4 |
 | storage:StorageProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
 | storage:StorageProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
-| storage:StorageProvider.ext | v1.5 的后端 provider 把锁、成员、审计三个 facet 的实现挂在这里给上层取用 | T-286 | v1.5 | 规划§4 |
+| storage:DraftRecord.edits | T-288 的崩溃横幅按它显示「有 N 处修改没保存」，写死一个「若干」用户就没法判断该恢复还是该丢弃 | T-288 | T-288 | 规划§4 |
+| storage:DraftRecord.savedAt | T-288 的横幅显示草稿是什么时候留下的，只说「有草稿」不足以让人决定要不要它 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.saveDraft | T-288 的 AutoSaver 草稿通道，一次 flush 的第一步 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.loadDraft | T-288 开机判定为 crashed 之后读它，横幅上那个数字来自这里 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.clearDraft | T-288 的 flush 第三步，正式保存成功之后才调 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.acquireLease | T-288 的开机租约判定，拿不到就是另一个标签页正开着 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.heartbeatLease | T-288 每 HEARTBEAT_MS 续一次租约，另一个标签页据此知道这一个还活着 | T-288 | T-288 | 规划§4 |
+| storage:DraftsFacet.releaseLease | T-288 的 pagehide 监听，干净退出记一笔 | T-288 | T-288 | 规划§4 |
 
 ## v0 / v0.5 遗留基线
 

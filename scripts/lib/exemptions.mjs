@@ -16,6 +16,9 @@ import { existsSync, readFileSync } from 'node:fs'
 /** Version ladder, oldest first. NORTH_STAR §3. `expires` must name one of these. */
 export const VERSION_LADDER = ['v0', 'v0.5', 'v1.0', 'v1.2', 'v1.5', 'v2', 'v3']
 
+/** 一个卡号。`owner` 一直是这个形状；T-287 起 `expires` 也可以是。 */
+const CARD_RE = /^T-\d{3}$/
+
 /**
  * True when `expires` is at or before `current` — i.e. the exemption is due.
  *
@@ -45,6 +48,19 @@ export function isExpired(expires, current) {
  *  - `expires` is what makes it an exemption rather than a new default. NORTH_STAR §8:
  *    "没有到期日的例外，一年后就是新的默认行为."
  *
+ * ## T-287 · 卡号也可以做到期日
+ *
+ * 版本阶梯的最小刻度是**一整个版本**，所以「这个导出的消费者是下一张卡」在这张表里
+ * 表达不出来：写 `v1.0` 当场就算过期（当前就是 v1.0），写 `v1.2` 是**谎报**——把一个
+ * 隔一张卡的债说成隔一个版本的债，而下一个读到它的人没有任何线索知道真相。
+ *
+ * 所以 `expires` 多认一种写法：**一个卡号**。它到期的条件不是「版本到了」，而是
+ * **那张卡在台账里被标成 `[x]` 了**——那张卡本该顺手接上它，收工了还留着这一行，
+ * 说明它没接。
+ *
+ * 这是**收紧**，不是开口子：卡号到期的行会在下一张卡收工时立刻转红，而版本到期的行
+ * 能一直躺到那个版本。**只有传了 `cardClosed` 的调用方**认这种写法，其余三张表不变。
+ *
  * `columns` selects WHICH table in the file to read: the header row has to name exactly these
  * columns, in this order, and every data row has to have exactly this many cells. That is what
  * lets one file hold two tables with different shapes without either reader picking up the
@@ -56,7 +72,15 @@ export function isExpired(expires, current) {
  */
 export function readExemptions(
   file,
-  { current = 'v1.0', cardExists = () => true, columns = ['symbol', 'reason', 'owner', 'expires'] } = {},
+  {
+    current = 'v1.0',
+    cardExists = () => true,
+    /**
+     * 「这张卡收工了吗」。**传了它，`expires` 才认卡号**；不传就只认版本阶梯（原行为）。
+     */
+    cardClosed = null,
+    columns = ['symbol', 'reason', 'owner', 'expires'],
+  } = {},
 ) {
   const rows = []
   const problems = []
@@ -109,15 +133,28 @@ export function readExemptions(
         message: `${symbol}：reason 少于 10 个汉字（「${reason}」）。写清楚谁会用到它、什么时候——「以后要用」不是理由`,
       })
     }
-    if (!/^T-\d{3}$/.test(owner)) {
+    if (!CARD_RE.test(owner)) {
       problems.push({ line, message: `${symbol}：owner 必须是一个卡号（形如 T-317），实际是「${owner}」` })
     } else if (!cardExists(owner)) {
       problems.push({ line, message: `${symbol}：owner「${owner}」在任务台账里不存在` })
     }
-    if (!VERSION_LADDER.includes(expires)) {
+    if (cardClosed && CARD_RE.test(expires)) {
+      // T-287 · 卡号到期。见下面 `cardClosed` 的注释：这是比版本到期**更紧**的一档，
+      // 不是新开的口子。
+      if (!cardExists(expires)) {
+        problems.push({ line, message: `${symbol}：expires 写的卡号「${expires}」在任务台账里不存在` })
+      } else if (cardClosed(expires)) {
+        problems.push({
+          line,
+          message: `${symbol}：${expires} 已经收工了，但这一行还在——那张卡本该接上它。接上它或删掉它`,
+        })
+      }
+    } else if (!VERSION_LADDER.includes(expires)) {
       problems.push({
         line,
-        message: `${symbol}：expires 必须是版本阶梯上的一级（${VERSION_LADDER.join(' / ')}），实际是「${expires}」`,
+        message: `${symbol}：expires 必须是版本阶梯上的一级（${VERSION_LADDER.join(' / ')}）${
+          cardClosed ? '，或者一个卡号（形如 T-288）' : ''
+        }，实际是「${expires}」`,
       })
     } else if (isExpired(expires, current)) {
       problems.push({ line, message: `${symbol}：豁免已于 ${expires} 到期（当前 ${current}），请接上它或删掉它` })

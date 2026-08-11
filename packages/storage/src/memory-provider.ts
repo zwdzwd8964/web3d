@@ -1,7 +1,81 @@
 import type { SceneDocument } from '@w3/schema'
 import { hashBytes } from './hash.js'
-import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, DocumentRev, FacetName, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt } from './provider.js'
-import { StorageError } from './provider.js'
+import type { BlobHash, ProjectSummary, Snapshot, SnapshotSummary, StorageProvider, DocumentRecord, DocumentRev, DraftRecord, DraftsFacet, FacetName, LeaseAcquisition, LeaseRequest, ProviderFacets, PutBlobOptions, SaveOptions, SaveReceipt, SessionLease } from './provider.js'
+import { StorageError, classifyLease } from './provider.js'
+
+/**
+ * Everything in and out is cloned: callers must never share mutable state with the store.
+ *
+ * T-287 · 从 `MemoryProvider` 的私有静态方法提到模块级——`MemoryDrafts` 也要克隆，
+ * 而它拿不到那个 private。行为一个字没变。
+ */
+function clone<T>(value: T): T {
+  return structuredClone(value)
+}
+
+/**
+ * T-287 · `drafts` facet 的内存实现。
+ *
+ * 不导出：它是 `MemoryProvider` 的一部分，调用方只该通过 `provider.ext.drafts` 拿到它。
+ */
+class MemoryDrafts implements DraftsFacet {
+  private readonly drafts = new Map<string, DraftRecord>()
+  private readonly leases = new Map<string, SessionLease>()
+
+  async saveDraft(draft: DraftRecord): Promise<void> {
+    this.drafts.set(draft.projectId, { ...draft, document: clone(draft.document) })
+  }
+
+  /**
+   * 读回草稿。**没有就是 `null`。**
+   *
+   * `Map.get` 的 miss 是 `undefined`，直接返回它会让一条写成 `not.toBeNull()` 的断言
+   * 也绿——而那正是卡面点名的假绿写法。这里把它收成 `null`，契约套件那边断 `toBeNull()`。
+   */
+  async loadDraft(projectId: string): Promise<DraftRecord | null> {
+    const draft = this.drafts.get(projectId)
+    if (!draft) return null
+    return { ...draft, document: clone(draft.document) }
+  }
+
+  async clearDraft(projectId: string): Promise<void> {
+    this.drafts.delete(projectId)
+  }
+
+  async acquireLease(projectId: string, request: LeaseRequest): Promise<LeaseAcquisition> {
+    const existing = this.leases.get(projectId) ?? null
+    const previous = classifyLease(existing, request)
+    if (existing && previous === 'live-elsewhere') return { ok: false, heldBy: existing }
+    const lease: SessionLease = {
+      projectId,
+      sessionId: request.sessionId,
+      heartbeatAt: request.nowMs,
+      closedCleanly: false,
+    }
+    this.leases.set(projectId, lease)
+    return { ok: true, lease, previous }
+  }
+
+  async heartbeatLease(projectId: string, request: LeaseRequest): Promise<boolean> {
+    const existing = this.leases.get(projectId)
+    // 不是我的就**不要续**：续了等于把别人的租约按在我名下，而那个别人还活着。
+    if (!existing || existing.sessionId !== request.sessionId) return false
+    this.leases.set(projectId, { ...existing, heartbeatAt: request.nowMs, closedCleanly: false })
+    return true
+  }
+
+  /**
+   * 干净退出。**记一笔 `closedCleanly`，不是删掉。**
+   *
+   * 删掉也能让下一次开机判成 `closed`（`classifyLease(null)` 就是 `closed`），但那样
+   * 「干净退出」与「从来没开过」在库里长得一模一样，出问题时没法区分是关的还是丢的。
+   */
+  async releaseLease(projectId: string, sessionId: string): Promise<void> {
+    const existing = this.leases.get(projectId)
+    if (!existing || existing.sessionId !== sessionId) return
+    this.leases.set(projectId, { ...existing, closedCleanly: true })
+  }
+}
 
 /**
  * T-202 · options, existing so far only to make the quota path testable.
@@ -29,16 +103,18 @@ export class MemoryProvider implements StorageProvider {
   readonly kind = 'memory'
 
   /**
-   * T-286 · **一个 facet 都不声明。**
+   * T-286 · **只声明做得到的那些。**
    *
-   * 单机内存实现没有并发编辑、没有成员、没有审计、没有历史修订、没有直传——五个 facet
-   * 一个都不适用。声明成空数组而不是「让契约套件自己探测」：探测式的套件在有人给这个
+   * 单机内存实现没有并发编辑、没有成员、没有审计、没有历史修订、没有直传——那五个 facet
+   * 一个都不适用。声明成显式数组而不是「让契约套件自己探测」：探测式的套件在有人给这个
    * 类挂一个空的 `locks` 时会当场开始跑 locks 子套件，而那些用例会以某种方式绿。
+   *
+   * T-287 加了 `drafts`：草稿与会话租约一个 Map 就能做。
    */
-  readonly facets: readonly FacetName[] = []
+  readonly facets: readonly FacetName[] = ['drafts']
 
-  /** 没有挂任何 facet。与上面那行**必须一致**，契约套件核对它们。 */
-  readonly ext: ProviderFacets = {}
+  /** 挂着的东西与上面那行**必须一致**，契约套件核对它们。 */
+  readonly ext: ProviderFacets = { drafts: new MemoryDrafts() }
 
   private documents = new Map<string, SceneDocument>()
   private blobs = new Map<BlobHash, Uint8Array>()
@@ -73,11 +149,6 @@ export class MemoryProvider implements StorageProvider {
     if (this.closed) throw new Error('MemoryProvider has been closed')
   }
 
-  /** Everything in and out is cloned: callers must never share mutable state with the store. */
-  private static clone<T>(value: T): T {
-    return structuredClone(value)
-  }
-
   async listProjects(): Promise<ProjectSummary[]> {
     this.assertOpen()
     return [...this.documents.values()]
@@ -88,7 +159,7 @@ export class MemoryProvider implements StorageProvider {
   async loadDocument(projectId: string): Promise<SceneDocument | null> {
     this.assertOpen()
     const doc = this.documents.get(projectId)
-    return doc ? MemoryProvider.clone(doc) : null
+    return doc ? clone(doc) : null
   }
 
   /**
@@ -112,7 +183,7 @@ export class MemoryProvider implements StorageProvider {
     }
     const bytes = JSON.stringify(document).length
     this.reserve(bytes, '保存工程')
-    this.documents.set(document.projectId, MemoryProvider.clone(document))
+    this.documents.set(document.projectId, clone(document))
     const rev = `r${(this.revCounter += 1)}`
     this.revs.set(document.projectId, rev)
     return { rev, updatedAt: document.meta.updatedAt }
@@ -129,7 +200,7 @@ export class MemoryProvider implements StorageProvider {
     const document = this.documents.get(projectId)
     if (!document) return null
     return {
-      document: MemoryProvider.clone(document),
+      document: clone(document),
       rev: this.revs.get(projectId) ?? 'r0',
       updatedAt: document.meta.updatedAt,
     }
@@ -176,19 +247,19 @@ export class MemoryProvider implements StorageProvider {
     this.assertOpen()
     return [...this.snapshots.values()]
       .filter((s) => s.meta.projectId === projectId)
-      .map((s) => MemoryProvider.clone(s.meta))
+      .map((s) => clone(s.meta))
       .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.snapshotId.localeCompare(b.snapshotId))
   }
 
   async saveSnapshot(snapshot: Snapshot): Promise<void> {
     this.assertOpen()
-    this.snapshots.set(snapshot.meta.snapshotId, MemoryProvider.clone(snapshot))
+    this.snapshots.set(snapshot.meta.snapshotId, clone(snapshot))
   }
 
   async loadSnapshot(snapshotId: string): Promise<Snapshot | null> {
     this.assertOpen()
     const snapshot = this.snapshots.get(snapshotId)
-    return snapshot ? MemoryProvider.clone(snapshot) : null
+    return snapshot ? clone(snapshot) : null
   }
 
   async close(): Promise<void> {

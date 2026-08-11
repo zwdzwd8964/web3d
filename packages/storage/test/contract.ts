@@ -2,7 +2,7 @@ import { createGoldenPathDocument } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { expect, it } from 'vitest'
 import { hashBytes } from '../src/hash.js'
-import { FACET_NAMES, StorageError } from '../src/provider.js'
+import { FACET_NAMES, LEASE_STALE_MS, StorageError } from '../src/provider.js'
 import type { Snapshot, StorageProvider } from '../src/provider.js'
 
 /**
@@ -342,6 +342,145 @@ export function describeProviderContract(
       const hash = await hashBytes(bytes)
       expect(await provider.putBlob(bytes, { hash })).toBe(hash)
       expect(await provider.hasBlob(hash)).toBe(true)
+    })
+  })
+
+  /* --- T-287 · drafts facet ----------------------------------------------- */
+
+  /**
+   * 两个实现都必须真的声明并挂上 `drafts`。
+   *
+   * 这条看着像重复了「声明与实际一致」那条，其实不是：那条只保证两边**互相**对得上，
+   * 一个两边都是空的实现照样绿。T-287 之后 drafts 有真实实现了，**这里断的是它在**。
+   */
+  it(`${label} · 声明并挂上了 drafts facet`, async () => {
+    await withProvider(async (provider) => {
+      expect(provider.facets).toContain('drafts')
+      expect(provider.ext.drafts).toBeDefined()
+    })
+  })
+
+  /**
+   * 草稿三方法。
+   *
+   * ⚠ **前置断言断的是形状，不是「不是 null」。** 一个 `loadDraft` 返回 `undefined` 的
+   * 实现，会让 `expect(draft).not.toBeNull()` 绿——而清除之后那条 `toBeNull()` 会红，
+   * 于是红灯出现在**清除**上，真正坏掉的却是**读取**。卡面点名了这个假绿。
+   */
+  it(`${label} · 草稿：写 → 读回同一份 → 清掉之后是 null`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      expect(drafts).toBeDefined()
+      if (!drafts) return
+
+      expect(await drafts.loadDraft('prj_dft00001')).toBeNull()
+
+      const document = docNamed('草稿里的名字', 'prj_dft00001', '2026-08-11T00:00:00.000Z')
+      await drafts.saveDraft({
+        projectId: 'prj_dft00001',
+        document,
+        edits: 7,
+        savedAt: '2026-08-11T00:00:03.000Z',
+        sessionId: 'ses_a',
+      })
+
+      const loaded = await drafts.loadDraft('prj_dft00001')
+      expect(loaded).toMatchObject({ projectId: 'prj_dft00001', edits: 7, sessionId: 'ses_a' })
+      expect(loaded?.document.name).toBe('草稿里的名字')
+
+      await drafts.clearDraft('prj_dft00001')
+      expect(await drafts.loadDraft('prj_dft00001')).toBeNull()
+    })
+  })
+
+  it(`${label} · 草稿：再写一次是覆盖，不是并存`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      const base = {
+        projectId: 'prj_dft00002',
+        document: docNamed('第一版', 'prj_dft00002', '2026-08-11T00:00:00.000Z'),
+        savedAt: '2026-08-11T00:00:01.000Z',
+        sessionId: 'ses_a',
+      }
+      await drafts.saveDraft({ ...base, edits: 1 })
+      await drafts.saveDraft({ ...base, edits: 4, document: docNamed('第二版', 'prj_dft00002', '2026-08-11T00:00:02.000Z') })
+      const loaded = await drafts.loadDraft('prj_dft00002')
+      expect(loaded?.edits).toBe(4)
+      expect(loaded?.document.name).toBe('第二版')
+    })
+  })
+
+  it(`${label} · 草稿是按工程分槽的，清一个不影响另一个`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      for (const id of ['prj_dft00003', 'prj_dft00004']) {
+        await drafts.saveDraft({
+          projectId: id,
+          document: docNamed(id, id, '2026-08-11T00:00:00.000Z'),
+          edits: 2,
+          savedAt: '2026-08-11T00:00:01.000Z',
+          sessionId: 'ses_a',
+        })
+      }
+      await drafts.clearDraft('prj_dft00003')
+      expect(await drafts.loadDraft('prj_dft00003')).toBeNull()
+      expect(await drafts.loadDraft('prj_dft00004')).toMatchObject({ projectId: 'prj_dft00004' })
+    })
+  })
+
+  /**
+   * 租约四条，一条一个判定。
+   *
+   * 时间全部注入（`nowMs`）——存储层里出现 `Date.now()` 会让这四条变成靠 sleep 的测试。
+   */
+  it(`${label} · 租约：没人占时拿得到，previous 是 closed`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      const got = await drafts.acquireLease('prj_lse00001', { sessionId: 'ses_a', nowMs: 1_000 })
+      expect(got).toMatchObject({ ok: true, previous: 'closed' })
+      expect(got.ok && got.lease).toMatchObject({ sessionId: 'ses_a', heartbeatAt: 1_000, closedCleanly: false })
+    })
+  })
+
+  it(`${label} · 租约：另一个会话还活着时拿不到，而且不是抛异常`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      await drafts.acquireLease('prj_lse00002', { sessionId: 'ses_a', nowMs: 1_000 })
+      // 心跳还新鲜（差 1 秒 < LEASE_STALE_MS）。
+      const denied = await drafts.acquireLease('prj_lse00002', { sessionId: 'ses_b', nowMs: 2_000 })
+      expect(denied.ok).toBe(false)
+      expect(!denied.ok && denied.heldBy.sessionId).toBe('ses_a')
+
+      // 而且 ses_a 的租约**没被改**：拿不到的那一方不该留下任何痕迹。
+      expect(await drafts.heartbeatLease('prj_lse00002', { sessionId: 'ses_a', nowMs: 3_000 })).toBe(true)
+    })
+  })
+
+  it(`${label} · 租约：上一个会话崩了（心跳过期）时接管，previous 是 crashed`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      await drafts.acquireLease('prj_lse00003', { sessionId: 'ses_a', nowMs: 1_000 })
+      const taken = await drafts.acquireLease('prj_lse00003', { sessionId: 'ses_b', nowMs: 1_000 + LEASE_STALE_MS })
+      expect(taken).toMatchObject({ ok: true, previous: 'crashed' })
+      // 接管之后 ses_a 续不上了——它已经不是持有者。
+      expect(await drafts.heartbeatLease('prj_lse00003', { sessionId: 'ses_a', nowMs: 99_000 })).toBe(false)
+    })
+  })
+
+  it(`${label} · 租约：上一个会话干净退出时 previous 是 closed，不是 crashed`, async () => {
+    await withProvider(async (provider) => {
+      const drafts = provider.ext.drafts
+      if (!drafts) throw new Error('drafts facet 缺失')
+      await drafts.acquireLease('prj_lse00004', { sessionId: 'ses_a', nowMs: 1_000 })
+      await drafts.releaseLease('prj_lse00004', 'ses_a')
+      // 心跳一定是旧的（干净退出之后没人再续），所以只看 stale 的实现会报 crashed。
+      const taken = await drafts.acquireLease('prj_lse00004', { sessionId: 'ses_b', nowMs: 1_000 + LEASE_STALE_MS * 10 })
+      expect(taken).toMatchObject({ ok: true, previous: 'closed' })
     })
   })
 

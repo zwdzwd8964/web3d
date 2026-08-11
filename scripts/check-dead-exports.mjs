@@ -351,6 +351,9 @@ const { rows, problems } = readExemptions(ALLOWLIST, { current, cardExists: (car
 const frozen = readExemptions(ALLOWLIST, {
   current,
   cardExists: (card) => backlogText.includes(card),
+  // T-287 · 这张表（且只有这张表）的 expires 允许写一个卡号，到期条件是那张卡被标成 [x]。
+  // 比版本到期紧一档，理由见 lib/exemptions.mjs 的注释。
+  cardClosed: (card) => new RegExp(`### \\[x\\] ${card}\\b`).test(backlogText),
   columns: FROZEN_COLUMNS,
 })
 

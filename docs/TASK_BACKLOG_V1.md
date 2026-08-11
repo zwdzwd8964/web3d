@@ -2729,8 +2729,24 @@
 - ⚠ **新纪律 8**：改 `StorageProvider` 形状 = 接口 + 两实现 + 契约测试（三件套）。
   铁律 4 完全覆盖不到这类变更（它不在 `SceneDocument` 里，不 bump `schemaVersion`）。
 
-### [ ] T-287 · 崩溃恢复 · 存储侧（草稿槽 + 会话租约）
-- **依赖** T-202 · T-286（同一批文件，列 S 串行）· **预估** 1.2d · **实际** —
+### [x] T-287 · 崩溃恢复 · 存储侧（草稿槽 + 会话租约）
+- **依赖** T-202 · T-286（同一批文件，列 S 串行）· **预估** 1.2d · **实际** 1.1d
+- 契约用例 **109 → 138**（drafts 8 条 × 两个实现 + `lease.test.ts` 13 条纯函数）。`DB_VERSION`
+  **一个字没动**——两个 store 在 T-202 就建好了，照 ADR-0027 往既有 upgrade 里加内容。
+- **口径判断一处**：卡面写「草稿三方法与租约四方法」，但「做」那一栏写的是**六个方法**。
+  按六个交付（草稿 3 + 租约 3），把「租约四方法」读成**四条租约用例**（四种判定各一条）——
+  第七个「读租约」方法没有任何消费者：`acquireLease` 已经把上一个会话怎么结束的（`previous`）
+  和谁在占着（`heldBy`）都返回了，T-288 的两条横幅要的就是这两样。
+- **撞墙并自行拍板一处**：8 个零调用者的成员，消费者是**下一张卡**。四列豁免表在 19/19 的
+  棘轮上，五列冻结接口表写 `v1.0` 当场就算过期——**版本阶梯的最小刻度是一整个版本，
+  「消费者是下一张卡」在原来的写法里表达不出来**。给 `expires` 加了一档卡号
+  （`scripts/lib/exemptions.mjs`，只有冻结接口表认），到期条件是那张卡被标 `[x]`。
+  这是收紧不是开口子，变异 ⑤ 实测：把 T-288 标成 `[x]`，八行立刻转红。
+- **交付偏差** 四处：① `drafts` 按卡面做成 facet，于是 `FACET_NAMES` 五个变六个，并按 ADR-0043
+  同一条裁决把类型写进规划 **§4.7**；② 动了 `scripts/lib/exemptions.mjs` 与
+  `check-dead-exports.mjs`（卡面独占里没有它们，理由见上一条）；③ 删掉 `.ext` 的三条冻结行
+  ——它现在真有生产写入了；④ `MemoryProvider.clone` 从私有静态提到模块级，`MemoryDrafts`
+  也要克隆而拿不到那个 private，行为一个字没变。
 - **独占** `packages/storage/src/provider.ts` · `idb-provider.ts` · `memory-provider.ts` ·
   `packages/storage/test/contract.ts` · `packages/storage/test/lease.test.ts`(新)
 - **做** 六个方法 + `DraftRecord` / `SessionLease` / `HEARTBEAT_MS` / `LEASE_STALE_MS` /
