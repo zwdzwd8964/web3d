@@ -1,7 +1,6 @@
 import type { SceneDocument } from '@w3/schema'
-import { createGoldenPathDocument } from '@w3/schema'
 import type { AssetResolver } from '@w3/storage'
-import { AssetLoader, auditGlb, buildSamplePumpGlb } from '@w3/core'
+import { AssetLoader, auditGlb } from '@w3/core'
 import type { StorageProvider } from '@w3/storage'
 import { IndexedDbProvider, MemoryProvider, extensionOf, hashBytes, hashToPath, pathToHash } from '@w3/storage'
 
@@ -84,14 +83,20 @@ export class ProjectSession {
    * `createGoldenPathDocument` itself is untouched: this is the editor materialising a
    * placeholder, exactly as it would for any other asset, not an edit to a spec artifact.
    *
-   * Gated on the project id rather than on "we could not resolve it". An imported asset
-   * whose blob has gone missing must fail loudly; quietly substituting a pump for it would
-   * turn data loss into a wrong picture, which is strictly worse.
+   * ## T-283 · 判据不在这里，字节生成器也不在这里
    *
-   * @returns the document to open — unchanged unless it is the sample.
+   * 原来这个方法自带一个 `doc.projectId !== SAMPLE_PROJECT_ID` 的硬编码闸门，并写死调用
+   * `buildSamplePumpGlb`。第二份内置文档（泵组样板，另一个 GLB 生成器）一来，那两处都得
+   * 再挂一条 `||`。
+   *
+   * 现在**判据在 `BUILTIN_DOCUMENTS` 表里**（T-282 ①），生成器由调用方传进来。闸门本身
+   * 一条都没松：调用方只对内置文档调这个方法。**一个 blob 丢了的导入资产必须响亮地失败**
+   * ——悄悄给它塞一台泵，是把数据丢失变成一张错的画面，那严格地更坏。
+   *
+   * @param build 这份内置文档的字节从哪来。
+   * @returns 物化之后的文档；没有模型资产、或者字节已经在库里时原样返回。
    */
-  async materialiseSample(doc: SceneDocument): Promise<SceneDocument> {
-    if (doc.projectId !== SAMPLE_PROJECT_ID) return doc
+  async materialise(doc: SceneDocument, build: () => Promise<ArrayBuffer>): Promise<SceneDocument> {
     const index = doc.assets.findIndex((a) => a.type === 'model')
     const sample = doc.assets[index]
     if (!sample) return doc
@@ -100,7 +105,7 @@ export class ProjectSession {
     // second-boot path and there is nothing to do.
     if (await this.storage.hasBlob(sample.hash)) return doc
 
-    const bytes = await buildSamplePumpGlb()
+    const bytes = await build()
     const view = new Uint8Array(bytes)
     const hash = await hashBytes(view)
     await this.storage.putBlob(view)
@@ -132,8 +137,6 @@ export class ProjectSession {
   }
 }
 
-/** SCHEMA_SPEC §12's sample. Read once rather than rebuilt on every boot. */
-const SAMPLE_PROJECT_ID = createGoldenPathDocument().projectId
 
 function defaultStorage(): StorageProvider {
   // The feature detection lives inside @w3/storage, and the C7 guard is right to insist:

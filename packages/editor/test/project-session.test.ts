@@ -57,7 +57,7 @@ describe('ProjectSession · one owner of asset bytes', () => {
   })
 
   it('materialises the sample so a cold start is never an empty viewport', async () => {
-    const doc = await session.materialiseSample(createGoldenPathDocument())
+    const doc = await session.materialise(createGoldenPathDocument(), buildSamplePumpGlb)
     const loaded = await session.loader.load(doc.assets[0]!)
     expect(loaded.objects.size).toBeGreaterThan(0)
   })
@@ -68,7 +68,7 @@ describe('ProjectSession · one owner of asset bytes', () => {
     // the publish gate refused the default project on every fresh install.
     expect(await storage.hasBlob(original.assets[0]!.hash)).toBe(false)
 
-    const doc = await session.materialiseSample(original)
+    const doc = await session.materialise(original, buildSamplePumpGlb)
     expect(await storage.hasBlob(doc.assets[0]!.hash), '样例资产的字节必须真的在存储里').toBe(true)
     expect(doc.assets[0]!.hash).not.toBe(original.assets[0]!.hash)
     expect(doc.assets[0]!.url).toContain(doc.assets[0]!.hash.slice('sha256:'.length, 'sha256:'.length + 4))
@@ -76,7 +76,7 @@ describe('ProjectSession · one owner of asset bytes', () => {
 
   it('replaces the fabricated statistics with measured ones', async () => {
     const original = createGoldenPathDocument()
-    const doc = await session.materialiseSample(original)
+    const doc = await session.materialise(original, buildSamplePumpGlb)
     // 8.4 MB / 128,400 triangles for a file of a few KB was misinformation in the asset
     // panel either way; measuring it is both honest and free.
     expect(doc.assets[0]!.stats.bytes).toBeLessThan(original.assets[0]!.stats.bytes)
@@ -84,14 +84,23 @@ describe('ProjectSession · one owner of asset bytes', () => {
   })
 
   it('is idempotent — a second boot does not re-store or re-hash', async () => {
-    const once = await session.materialiseSample(createGoldenPathDocument())
-    const twice = await session.materialiseSample(once)
+    const once = await session.materialise(createGoldenPathDocument(), buildSamplePumpGlb)
+    const twice = await session.materialise(once, buildSamplePumpGlb)
     expect(twice).toEqual(once)
   })
 
-  it('leaves a non-sample project alone', async () => {
+  it('**判据不在这一层了** —— 谁该被物化由 BUILTIN_DOCUMENTS 决定（T-283）', async () => {
+    // 这个方法原本自带一个 `projectId !== SAMPLE_PROJECT_ID` 的硬编码闸门。第二份内置
+    // 文档（泵组样板，另一个 GLB 生成器）一来，那条闸门与写死的 `buildSamplePumpGlb`
+    // 都得再挂一条 `||`。判据因此搬进了 `BUILTIN_DOCUMENTS` 表，生成器由调用方传进来。
+    //
+    // **闸门本身一条都没松**：调用方只对内置文档调它——这一条现在由
+    // `project-lifecycle.test.ts` 的「用户工程不物化」看着。这里只钉住这一层的新契约：
+    // 传什么生成器就用什么，不再自己判断。
     const other = { ...createGoldenPathDocument(), projectId: 'prj_zzzzzzzz' }
-    expect(await session.materialiseSample(other)).toBe(other)
+    const out = await session.materialise(other, buildSamplePumpGlb)
+    expect(out).not.toBe(other)
+    expect(await storage.hasBlob(out.assets[0]!.hash)).toBe(true)
   })
 
   it('round-trips a document through storage', async () => {

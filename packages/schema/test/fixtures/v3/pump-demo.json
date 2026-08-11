@@ -1,0 +1,1136 @@
+{
+  "schemaVersion": 3,
+  "projectId": "prj_pump0001",
+  "sceneId": "scn_pump0001",
+  "name": "泵组拆装样板",
+  "meta": {
+    "unit": "m",
+    "upAxis": "Y",
+    "createdAt": "2026-08-11T00:00:00.000Z",
+    "updatedAt": "2026-08-11T00:00:00.000Z",
+    "background": {
+      "type": "color",
+      "color": "#15191c"
+    },
+    "environment": {
+      "hdriAssetId": null,
+      "intensity": 1,
+      "exposure": 1
+    },
+    "fog": {
+      "enabled": false,
+      "type": "linear",
+      "color": "#15191c",
+      "near": 10,
+      "far": 100,
+      "density": 0.02
+    },
+    "effects": {
+      "outline": {
+        "enabled": true,
+        "color": "#ffb020",
+        "widthPx": 3,
+        "strength": 3,
+        "hiddenEdge": "dim"
+      }
+    }
+  },
+  "assets": [
+    {
+      "id": "ast_pumpdemo",
+      "type": "model",
+      "name": "pump-demo.glb",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "url": "assets/00/00/0000000000000000000000000000000000000000000000000000000000000000.glb",
+      "version": 1,
+      "lineageId": "ast_pumpdemo",
+      "stats": {
+        "tris": 0,
+        "materials": 4,
+        "textures": 0,
+        "bytes": 0,
+        "textureBytes": 0,
+        "nodes": 16,
+        "animations": [
+          "拆装"
+        ],
+        "clipDurations": {}
+      },
+      "audit": {
+        "checkedAt": "2026-08-11T00:00:00.000Z",
+        "policyId": "default-v1",
+        "findings": []
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_root0000",
+      "name": "泵组总成",
+      "parent": null,
+      "order": 1000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root",
+        "objectName": "Root",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_pump0000",
+      "name": "离心泵",
+      "parent": "nd_root0000",
+      "order": 2000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump",
+        "objectName": "Pump",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_base0000",
+      "name": "底座",
+      "parent": "nd_pump0000",
+      "order": 3000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Base",
+        "objectName": "Base",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_pumppnt1"
+      }
+    },
+    {
+      "id": "nd_casing00",
+      "name": "泵壳组",
+      "parent": "nd_pump0000",
+      "order": 4000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing",
+        "objectName": "Casing",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_volute00",
+      "name": "蜗壳",
+      "parent": "nd_casing00",
+      "order": 5000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing/Volute",
+        "objectName": "Volute",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_onflange",
+      "name": "进水法兰",
+      "parent": "nd_casing00",
+      "order": 6000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing/SuctionFlange",
+        "objectName": "SuctionFlange",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_geflange",
+      "name": "出水法兰",
+      "parent": "nd_casing00",
+      "order": 7000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing/DischargeFlange",
+        "objectName": "DischargeFlange",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_impeller",
+      "name": "叶轮",
+      "parent": "nd_casing00",
+      "order": 8000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing/Impeller",
+        "objectName": "Impeller",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_pumpbrs1"
+      }
+    },
+    {
+      "id": "nd_wearring",
+      "name": "口环",
+      "parent": "nd_casing00",
+      "order": 9000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Casing/WearRing",
+        "objectName": "WearRing",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {
+        "materialId": "mat_pumprub1"
+      }
+    },
+    {
+      "id": "nd_lvecover",
+      "name": "阀盖",
+      "parent": "nd_pump0000",
+      "order": 10000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/ValveCover",
+        "objectName": "ValveCover",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": {
+        "mode": "radial",
+        "gain": 1.6,
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "spacing": 0.5,
+        "easing": "easeInOutCubic"
+      },
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_verbolt1",
+      "name": "盖螺栓 1",
+      "parent": "nd_lvecover",
+      "order": 11000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/ValveCover/CoverBolt1",
+        "objectName": "CoverBolt1",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": [
+        0.34,
+        0.25,
+        0.34
+      ],
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_verbolt2",
+      "name": "盖螺栓 2",
+      "parent": "nd_lvecover",
+      "order": 12000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/ValveCover/CoverBolt2",
+        "objectName": "CoverBolt2",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": [
+        -0.34,
+        0.25,
+        0.34
+      ],
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_verbolt3",
+      "name": "盖螺栓 3",
+      "parent": "nd_lvecover",
+      "order": 13000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/ValveCover/CoverBolt3",
+        "objectName": "CoverBolt3",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": [
+        -0.34,
+        0.25,
+        -0.34
+      ],
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_verbolt4",
+      "name": "盖螺栓 4",
+      "parent": "nd_lvecover",
+      "order": 14000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/ValveCover/CoverBolt4",
+        "objectName": "CoverBolt4",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": [
+        0.34,
+        0.25,
+        -0.34
+      ],
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_shaft000",
+      "name": "泵轴",
+      "parent": "nd_pump0000",
+      "order": 15000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Shaft",
+        "objectName": "Shaft",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_motor000",
+      "name": "电机",
+      "parent": "nd_pump0000",
+      "order": 16000,
+      "assetRef": {
+        "assetId": "ast_pumpdemo",
+        "objectPath": "Root/Pump/Motor",
+        "objectName": "Motor",
+        "missing": false
+      },
+      "primitive": null,
+      "light": null,
+      "section": null,
+      "transform": {
+        "p": [
+          0,
+          0,
+          0
+        ],
+        "r": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    },
+    {
+      "id": "nd_sect0001",
+      "name": "水平剖切面",
+      "parent": null,
+      "order": 90000,
+      "assetRef": null,
+      "primitive": null,
+      "light": null,
+      "section": {
+        "scope": "scene",
+        "size": [
+          2.4,
+          2.4
+        ]
+      },
+      "transform": {
+        "p": [
+          0,
+          0.62,
+          0
+        ],
+        "r": [
+          -0.7071067811865476,
+          0,
+          0,
+          0.7071067811865476
+        ],
+        "s": [
+          1,
+          1,
+          1
+        ]
+      },
+      "visible": true,
+      "locked": false,
+      "explode": null,
+      "explodeOffset": null,
+      "prefabRef": null,
+      "overrides": {}
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_pumpstl1",
+      "name": "拉丝不锈钢",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.35,
+        "metalness": 0.85,
+        "maps": {}
+      }
+    },
+    {
+      "id": "mat_pumpbrs1",
+      "name": "黄铜",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.28,
+        "metalness": 0.9,
+        "maps": {}
+      }
+    },
+    {
+      "id": "mat_pumprub1",
+      "name": "丁腈橡胶",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.85,
+        "metalness": 0,
+        "maps": {}
+      }
+    },
+    {
+      "id": "mat_pumppnt1",
+      "name": "机身漆",
+      "base": "standard",
+      "preset": "custom",
+      "params": {
+        "roughness": 0.6,
+        "metalness": 0.1,
+        "maps": {}
+      }
+    }
+  ],
+  "animations": [
+    {
+      "kind": "imported",
+      "id": "anm_pumpdis1",
+      "name": "拆装",
+      "assetId": "ast_pumpdemo",
+      "clipName": "拆装",
+      "speed": 1,
+      "loop": false,
+      "clampWhenFinished": true,
+      "startS": 0,
+      "endS": null
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hs_pump0001",
+      "name": "第一步 · 拆盖螺栓",
+      "anchor": {
+        "nodeId": "nd_lvecover",
+        "offset": [
+          0,
+          0.18,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第一步",
+        "text": "对角松开四颗盖螺栓，每颗分两次卸力，避免阀盖翘曲。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "1"
+      }
+    },
+    {
+      "id": "hs_pump0002",
+      "name": "第二步 · 取下阀盖",
+      "anchor": {
+        "nodeId": "nd_verbolt1",
+        "offset": [
+          0,
+          0.1,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "第二步",
+        "text": "垂直抬起阀盖。卡住时用铜棒轻敲盖沿，不要撬密封面。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "2"
+      }
+    },
+    {
+      "id": "hs_pump0003",
+      "name": "叶轮",
+      "anchor": {
+        "nodeId": "nd_impeller",
+        "offset": [
+          0,
+          0.2,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "叶轮",
+        "text": "检查叶片有无汽蚀麻点。口环间隙超过 0.8 mm 时应一并更换。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "3"
+      }
+    },
+    {
+      "id": "hs_pump0004",
+      "name": "口环",
+      "anchor": {
+        "nodeId": "nd_wearring",
+        "offset": [
+          0,
+          0.12,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "口环",
+        "text": "易损件。丁腈橡胶材质，随每次大修更换。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "4"
+      }
+    },
+    {
+      "id": "hs_pump0005",
+      "name": "电机",
+      "anchor": {
+        "nodeId": "nd_motor000",
+        "offset": [
+          0,
+          0.35,
+          0
+        ]
+      },
+      "occlude": true,
+      "visible": true,
+      "fadeWithDistance": false,
+      "content": {
+        "type": "panel",
+        "title": "电机",
+        "text": "拆泵前先断电挂牌。联轴器对中偏差应小于 0.05 mm。"
+      },
+      "style": {
+        "marker": "number",
+        "color": "#ffb020",
+        "label": "5"
+      }
+    }
+  ],
+  "viewpoints": [
+    {
+      "id": "vp_pump0001",
+      "name": "整机全览",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          2.6,
+          1.9,
+          3
+        ],
+        "target": [
+          0,
+          0.5,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 50,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      }
+    },
+    {
+      "id": "vp_pump0002",
+      "name": "阀盖特写",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          0.9,
+          1.5,
+          1.1
+        ],
+        "target": [
+          0,
+          0.95,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 40,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      }
+    },
+    {
+      "id": "vp_pump0003",
+      "name": "剖面视角",
+      "camera": {
+        "kind": "perspective",
+        "position": [
+          0,
+          1.2,
+          2.4
+        ],
+        "target": [
+          0,
+          0.5,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "fov": 45,
+        "zoom": 1,
+        "near": 0.1,
+        "far": 1000
+      }
+    }
+  ],
+  "variables": [
+    {
+      "id": "step",
+      "name": "当前步骤",
+      "type": "number",
+      "default": 1,
+      "persist": false,
+      "scope": "scene"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rl_pump0001",
+      "name": "点阀盖 → 播拆装动画并高亮",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_lvecover"
+        }
+      },
+      "if": [
+        {
+          "op": "eq",
+          "left": {
+            "var": "step"
+          },
+          "right": {
+            "const": 1
+          }
+        }
+      ],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "restart",
+      "onError": "abort",
+      "then": [
+        {
+          "action": "playAnimation",
+          "params": {
+            "animationId": "anm_pumpdis1",
+            "await": true
+          }
+        },
+        {
+          "action": "highlight",
+          "params": {
+            "nodeId": "nd_lvecover",
+            "preset": "outline_amber"
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_pump0001"
+          }
+        },
+        {
+          "action": "setVariable",
+          "params": {
+            "variableId": "step",
+            "value": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "rl_pump0002",
+      "name": "点叶轮 → 跳到剖面视角",
+      "enabled": true,
+      "when": {
+        "event": "click",
+        "target": {
+          "nodeId": "nd_impeller"
+        }
+      },
+      "if": [],
+      "ifAny": [],
+      "mode": "sequence",
+      "reentry": "ignore",
+      "onError": "continue",
+      "then": [
+        {
+          "action": "setViewpoint",
+          "params": {
+            "viewpointId": "vp_pump0003",
+            "durationS": 0.8
+          }
+        },
+        {
+          "action": "openPanel",
+          "params": {
+            "hotspotId": "hs_pump0003"
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [],
+  "flows": [],
+  "media": [],
+  "dataSources": [],
+  "prefabs": []
+}

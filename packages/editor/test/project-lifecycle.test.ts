@@ -1,7 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { buildSamplePumpGlb } from '@w3/core'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createGoldenPathDocument } from '@w3/schema'
+import { PUMP_DEMO_IDS, createGoldenPathDocument } from '@w3/schema'
 import { MemoryProvider } from '@w3/storage'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -109,7 +110,7 @@ describe('T-282 · 内置文档表取代硬编码的 id 比较', () => {
   it('黄金路径样例在表里，且判据认得它', () => {
     const sample = createGoldenPathDocument()
     expect(builtinOf(sample.projectId)).not.toBeNull()
-    expect(builtinOf(sample.projectId)!.materialise).toBe(true)
+    expect(typeof builtinOf(sample.projectId)!.materialise, '内置文档要带一个字节生成器').toBe('function')
   })
 
   it('用户建的工程不在表里', () => {
@@ -257,7 +258,7 @@ describe('T-282 · 打开另一份工程', () => {
     // 卡面点名：删掉 `loader.dispose()` 时必须有一条断言红，而它不能是断言文档。
     // 不丢的话，切到新工程后视口里画的可能仍然是旧工程的几何——而文档、层级树、
     // 属性面板全都已经是新的了。**每个信号都说切换成功，只有画面不同意。**
-    const sample = await session.materialiseSample(createGoldenPathDocument())
+    const sample = await session.materialise(createGoldenPathDocument(), buildSamplePumpGlb)
     await session.save(sample)
     const asset = sample.assets[0]!
     await session.loader.load(asset)
@@ -327,5 +328,40 @@ describe('T-282 · 重命名的两条路径', () => {
     const mine = await createProject(session, '原名')
     await expect(renameStoredProject(session, mine.projectId, '   ')).rejects.toThrow(/不能为空/)
     expect((await listProjects(session)).find((p) => p.projectId === mine.projectId)!.name).toBe('原名')
+  })
+})
+
+describe('T-283 · 泵组样板进了内置文档表', () => {
+  it('表里第一份就是泵组样板 —— 新建对话框里它排最前', () => {
+    // 冷启动的兜底也取表的第一份（BOOT_STEPS 的 fallback-builtin），所以顺序有语义：
+    // 一个新用户第一眼看到的应该是那台泵，不是三个节点的规范副本。
+    expect(BUILTIN_DOCUMENTS[0]!.projectId).toBe(PUMP_DEMO_IDS.project)
+    expect(BUILTIN_DOCUMENTS[0]!.label).toContain('泵组')
+  })
+
+  it('两份内置文档各带各的字节生成器，不是共用一个', () => {
+    // 原来 `materialiseSample` 写死调 `buildSamplePumpGlb`。共用一个的话，泵组样板会
+    // 拿到黄金路径那两个盒子的字节——而它声明的 hash 是自己的，发布闸门当场拒绝。
+    const builders = BUILTIN_DOCUMENTS.map((b) => b.materialise)
+    expect(builders.every((b) => typeof b === 'function')).toBe(true)
+    expect(new Set(builders).size, '两份不该共用同一个生成器').toBe(BUILTIN_DOCUMENTS.length)
+  })
+
+  it('**从样板新建 → 资产被物化、hasBlob 为真**（发布闸门能过）', async () => {
+    const doc = await createFromBuiltin(session, BUILTIN_DOCUMENTS[0]!)
+    const asset = doc.assets.find((a) => a.type === 'model')!
+    expect(await storage.hasBlob(asset.hash), 'storage 里要真的有这份字节').toBe(true)
+    // 占位统计被**实测值**覆盖：一个报着 0 面数的资产面板是误导。
+    expect(asset.stats.tris).toBeGreaterThan(0)
+    expect(asset.stats.bytes).toBeGreaterThan(0)
+  })
+
+  it('**用户工程不物化** —— 闸门搬了家，没有松', async () => {
+    // 一个 blob 丢了的导入资产必须响亮地失败；悄悄给它塞一台泵，是把数据丢失变成
+    // 一张错的画面。判据现在是「在不在 BUILTIN_DOCUMENTS 里」。
+    const mine = await createProject(session, '我的工程')
+    const target = await openProject(session, mine.projectId)
+    expect(target.doc.assets).toHaveLength(0)
+    expect(builtinOf(mine.projectId)).toBeNull()
   })
 })

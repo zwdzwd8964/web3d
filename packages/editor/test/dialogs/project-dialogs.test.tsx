@@ -91,7 +91,6 @@ describe('T-282 · 新建对话框', () => {
         label: '假样板',
         description: '只在测试里存在',
         create: () => ({}) as never,
-        materialise: false,
       },
     ]
     act(() => {

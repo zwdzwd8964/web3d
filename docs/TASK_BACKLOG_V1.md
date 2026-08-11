@@ -2612,8 +2612,20 @@
   的注释已把坑写清楚：`keepHistory` 保留上一份文档的撤销栈，Ctrl+Z 重放属于已不存在文档的逆补丁
   会**静默损坏当前文档**。「换文档」在这个仓库里已被踩过一次，那次的结论是绕开它。
 
-### [ ] T-283 · 泵组样板工程文档与冷启动物化
-- **依赖** T-222 · T-282 · T-246 · **预估** 1.2d · **实际** —
+### [x] T-283 · 泵组样板工程文档与冷启动物化
+- **依赖** T-222 · T-282 · T-246 · **预估** 1.2d · **实际** 1.2d
+- `validate` OK · `checkIntegrity` **零 error**（唯一一条 warn 是 I70「同时开启剖切与描边」，
+  而这份样板确实两样都有，是如实的告知不是缺陷）。棘轮第三次下调：`MAX_EXEMPTIONS` 21 → 20
+  （`buildPumpDemoGlb` 从 T-222 起躺在豁免表上、owner 写着本卡，两周零调用者）。
+- **交付偏差** 三处：① `packages/editor/src/project/session.ts` 的改动超出「仅内置文档表」——
+  `materialiseSample` 的硬编码闸门与写死的 `buildSamplePumpGlb` 在第二份内置文档面前都要再挂
+  一条 `||`，故改名 `materialise(doc, build)`、判据搬进表；② 随之改了三份既有测试的调用点
+  （`project-session` / `preview-mode` / `project-lifecycle`）；③ **卡面的「内置纹理」没做**——
+  `buildPumpDemoGlb` 不产纹理，core 也没有 PNG 生成器，硬加一个纹理资产等于给发布闸门再塞
+  一个占位 hash，正是本卡要避免的那个坑。登记为待办。
+- **爆炸分组**：四颗盖螺栓各钉一个 `explodeOffset`——不钉的话 I22 会红，而它是对的
+  （`assetRef` 节点的 transform 是相对源资产的增量，真实位置在 GLB 里）。`explodeOffset`
+  因此第一次有了真文档使用者。
 - **独占** `packages/schema/src/pump-demo.ts`(新) · `packages/schema/test/fixtures/v3/pump-demo.json`(新) ·
   `packages/editor/src/project/session.ts`（仅内置文档表）
 - **做** 16 个零件 + 4 条材质 + 内置纹理 + 3 个视点 + 5 个热点 + 一条 imported「拆装」动画 +

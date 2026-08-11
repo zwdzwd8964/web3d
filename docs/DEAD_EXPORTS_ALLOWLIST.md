@@ -66,7 +66,6 @@
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
 | core:renderTestCasesMarkdown | 验收用例生成器由 T-317 在 v1.2 接上，v1.0 明确不接 | T-317 | v1.2 |
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
-| core:buildPumpDemoGlb | T-283 把泵组样板物化成一份可打开的项目，它是那条链上唯一的字节来源 | T-283 | v1.2 |
 | core:SAMPLE_OBJECT_PATHS | T-222 的泵组样板给它补断言，这是同一形状第三次零调用者 | T-222 | v1.2 |
 | core:ClipPlayer.activeCount | **本行的原理由被 T-237 实测证伪**：它数的是在播的条数，每次 play 前的 stop 让它恒为 1，量不到堆积——量得到的是同批新增的 mixerCount。它今天的价值在「重播不叠加」那几条单测上；生产读者只可能是 bench 页那排运行时计数（T-279） | T-279 | v1.2 |
 | core:ClipPlayer.mixerCount | T-237 的验收按它断言「连做 5 次排练峰值不涨」，这是 mixer 堆积唯一量得到的地方；与 activeCount 同一形状，生产读者同归 bench 页 | T-279 | v1.2 |

@@ -1,5 +1,5 @@
 import { createGoldenPathDocument } from '@w3/schema'
-import { SceneRuntime, registerBuiltinActions } from '@w3/core'
+import { SceneRuntime, registerBuiltinActions, buildSamplePumpGlb } from '@w3/core'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PreviewController } from '../src/preview/controller.js'
 import { createPreviewStore } from '../src/preview/preview-store.js'
@@ -26,7 +26,7 @@ beforeAll(() => registerBuiltinActions())
 beforeEach(async () => {
   clock = 0
   session = new ProjectSession()
-  const doc = await session.materialiseSample(createGoldenPathDocument())
+  const doc = await session.materialise(createGoldenPathDocument(), buildSamplePumpGlb)
 
   runtime = new SceneRuntime(doc, {
     resolver: session.resolver,

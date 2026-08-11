@@ -1,5 +1,6 @@
 import type { SceneDocument } from '@w3/schema'
-import { createEmptyDocument, createGoldenPathDocument, migrate } from '@w3/schema'
+import { PUMP_DEMO_IDS, createEmptyDocument, createGoldenPathDocument, createPumpDemoDocument, migrate } from '@w3/schema'
+import { buildPumpDemoGlb, buildSamplePumpGlb } from '@w3/core'
 import type { ProjectSummary } from '@w3/storage'
 import type { ProjectSession } from './session.js'
 
@@ -46,13 +47,13 @@ export interface BuiltinDocument {
   /** 造一份新的。每次调用返回一份独立的文档。 */
   readonly create: () => SceneDocument
   /**
-   * 需要物化吗。
+   * 这份内置文档的字节从哪来。**给了它就要物化**，没给就是纯文档。
    *
    * `true` 表示这份文档里声明的资产是**占位**：hash 是编的、字节从不存在。打开它之前
    * 必须走一遍「生成字节 → 哈希 → 存进 storage → 把记录改成实际的」，否则发布闸门会
    * 正确地报告「storage 里没有这个 hash」，而用户看到的是一个画得出来却发布不了的工程。
    */
-  readonly materialise: boolean
+  readonly materialise?: () => Promise<ArrayBuffer>
 }
 
 /** SCHEMA_SPEC §12 的样例。**读一次**，不是每次 boot 重建。 */
@@ -65,11 +66,18 @@ const GOLDEN_PATH_PROJECT_ID = createGoldenPathDocument().projectId
  */
 export const BUILTIN_DOCUMENTS: readonly BuiltinDocument[] = [
   {
+    projectId: PUMP_DEMO_IDS.project,
+    label: '泵组拆装样板',
+    description: '16 个零件、4 条材质、一条从 GLB 导入的「拆装」动画、一个爆炸分组、一条剖切平面。演示与验收都用它。',
+    create: createPumpDemoDocument,
+    materialise: buildPumpDemoGlb,
+  },
+  {
     projectId: GOLDEN_PATH_PROJECT_ID,
-    label: '泵组样例（黄金路径）',
-    description: 'SCHEMA_SPEC §12 的样例场景。冷启动时打开的就是它。',
+    label: '黄金路径样例（最小）',
+    description: 'SCHEMA_SPEC §12 的样例场景，三个节点。规范的可执行副本，不是拿来演示的。',
     create: createGoldenPathDocument,
-    materialise: true,
+    materialise: buildSamplePumpGlb,
   },
 ]
 
@@ -149,7 +157,7 @@ export async function createProject(session: ProjectSession, name: string): Prom
  */
 export async function createFromBuiltin(session: ProjectSession, builtin: BuiltinDocument): Promise<SceneDocument> {
   const source = builtin.create()
-  const materialised = builtin.materialise ? await session.materialiseSample(source) : source
+  const materialised = builtin.materialise ? await session.materialise(source, builtin.materialise) : source
   // 只借它铸一对新 id，其余字段一个不要——`createEmptyDocument` 是这个仓库里唯一的
   // projectId / sceneId 工厂，而 sceneId 是从 projectId 确定性派生的，手搓一个会分家。
   const fresh = createEmptyDocument({ name: materialised.name })
@@ -182,7 +190,7 @@ export async function openProject(session: ProjectSession, projectId: string): P
   if (!stored && !builtin) throw new Error('找不到这个工程，它可能已经被删除。')
 
   const source = stored ?? builtin!.create()
-  const doc = builtin?.materialise ? await session.materialiseSample(source) : source
+  const doc = builtin?.materialise ? await session.materialise(source, builtin.materialise) : source
 
   // 换文档 = 换资产字节的所有者。先丢旧的。
   session.loader.dispose()
@@ -300,7 +308,7 @@ export const BOOT_STEPS: readonly BootStep[] = [
       // 判据走内置文档表，不是硬编码的 id 比较。
       const builtin = builtinOf(ctx.doc.projectId)
       if (!builtin?.materialise) return
-      ctx.doc = await ctx.session.materialiseSample(ctx.doc)
+      ctx.doc = await ctx.session.materialise(ctx.doc, builtin.materialise)
       ctx.notes.push('内置文档的占位资产已物化，发布闸门可通过')
     },
   },
