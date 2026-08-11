@@ -425,7 +425,13 @@ function measureSection(
     for (let i = 0; i < 3; i++) frame()
     const programsBefore = runtime.renderStats.programs
 
-    runtime.setSectionsEnabled(true)
+    // ADR-0042 未决项裁决为**乙**：`setSectionsEnabled` 没有「强制开」这一档。
+    // 原来这里写 `true`，而 `true` 与 `null` 在实现里逐字等价——两者都只是「不强制关」。
+    // 写成 `null` 之后，这一行说的是它真正在做的事：**交还给文档**。
+    //
+    // 这一档因此量的是「按文档态该切的时候，切与不切差多少」——而那正是用户点那一下
+    // 会遇到的事。文档里那把刀是关着的时候，下面的 `clipPlanes === 0` 会如实说没量到。
+    runtime.setSectionsEnabled(null)
     const onFirstFrameMs = frame()
     const { programs: programsAfterOn, clipPlanes } = runtime.renderStats
 

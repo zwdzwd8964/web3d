@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createGoldenPathDocument } from '@w3/schema'
 import type { Node, SceneDocument } from '@w3/schema'
 import { Plane, Vector3 } from 'three'
@@ -402,3 +405,30 @@ function applyAt(node: Node, path: readonly (string | number)[], value: unknown)
   const current = (node as unknown as Record<string, unknown>)[head] as Record<string, unknown> | null
   return { ...node, [head]: { ...(current ?? {}), [rest[0]!]: value } } as unknown as Node
 }
+
+/* -------------------------------------------------------------------------- */
+/* ADR-0042 未决项裁决为乙 · 「强制开」这一档不存在，而且不许再长出来              */
+/* -------------------------------------------------------------------------- */
+
+describe('ADR-0042 · setSectionsEnabled 没有「强制开」', () => {
+  /**
+   * ADR-0040 的决策段原本写着「`true` / `false` 强制开 / 关」，而实现里只有 `false` 走
+   * `withoutSections`——`true` 与 `null` 逐字等价。**「强制开」从来没有存在过**，而这个
+   * 缺口活了两个版本，因为编辑器只用 `false`/`null`，`true` 的唯一消费者是 v1.0 才出现
+   * 的 bench，恰好也是唯一指望它强制开的调用方。
+   *
+   * 裁决是改 ADR、收窄签名。这一条钉住裁决本身：**签名里不许再出现 `true`**。
+   * 一个看起来有意义的死值，比没有这个值更坏——它让调用方以为自己拿到了一个开关。
+   */
+  it('签名是 `false | null`，`true` 不在 API 面上', () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'runtime', 'scene-runtime.ts'),
+      'utf8',
+    )
+    const match = /setSectionsEnabled\(enabled: ([^)]+)\)/.exec(source)
+    expect(match, 'scene-runtime.ts 里应当有 setSectionsEnabled').not.toBeNull()
+    expect(match![1]!.trim()).toBe('false | null')
+    // 读源码文本而不是靠类型：类型在编译后就没了，而这条纪律要在运行时也能被检出来。
+    expect(source).not.toContain('setSectionsEnabled(enabled: boolean | null)')
+  })
+})

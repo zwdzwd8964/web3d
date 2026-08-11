@@ -176,7 +176,8 @@ export class SceneRuntime implements RuntimeContext {
    * `null` = 跟文档走。形状逐字抄 `setPostFxEnabled`——同一个问题在这个仓库里已经出现过
    * 一次，答案就该长得一样。
    */
-  private sectionsForced: boolean | null = null
+  /** ADR-0042 未决项裁决为乙：没有「强制开」这一档，所以只有两态。 */
+  private sectionsForced: false | null = null
   /** T-241 · 编辑期辅助物此刻可见吗。选中态描边跟着它走。 */
   private chromeVisible = true
   /** T-241 · 当前选中集。策略换成描边、或 chrome 重新可见时按它重推。 */
@@ -619,12 +620,32 @@ export class SceneRuntime implements RuntimeContext {
    * 的断言对一个「算对了但没写给渲染器」的实现同样为真（v0.5 M11 的第四次同形）。
    */
   /**
-   * T-251 · 强制开 / 关全部剖切，`null` 交还给文档。**编辑期专用的会话开关**。
+   * T-251 · **暂时关掉**全部剖切，`null` 交还给文档。编辑期专用的会话开关。
    *
    * 它与「在层级树里隐藏一把刀」是两件事：后者进撤销栈、发布出去也是关的；这一个
-   * 不进文档、不进撤销栈、刷新即丢。理由与代价见 ADR-0040。
+   * 不进文档、不进撤销栈、刷新即丢。理由与代价见 [ADR-0040](../../../../docs/adr/0040-暂时关闭剖切是渲染开关不是文档编辑.md)。
+   *
+   * ## 为什么参数是 `false | null` 而不是 `boolean | null`（ADR-0042 未决项，裁决为乙）
+   *
+   * ADR-0040 的决策段原本写着「`true` / `false` 强制开 / 关」，而实现里**只有 `false`
+   * 走 `withoutSections`**——`true` 与 `null` 逐字等价，走同一条分支。也就是说
+   * 「强制开」从来没有存在过。
+   *
+   * 这个缺口活了下来，是因为它的**唯一**生产消费者是 bench，而编辑器侧只用 `false`
+   * 与 `null`。ADR-0042 的对抗式复核把它翻出来之后，裁决是**乙 · 改 ADR 而不是改实现**：
+   *
+   * - 「强制开」要绕过 ADR-0039 的世界可见性判据（刀的开关就是 `node.visible`，
+   *   而那一条正是 T-243「零新增动作」成本论证的全部依据）；
+   * - 它会让「此刻哪些平面是活的」有两个所有者，而这个仓库被两所有者结构烧过不止一次
+   *   （ADR-0040 自己的代价 2 就在说这件事）；
+   * - **没有人需要它**：bench 要的是「装上平面没有」，装不上就如实说装不上（ADR-0042
+   *   决策 3），恰好不需要强制开。
+   *
+   * 所以 `true` 从签名里去掉。**一个看起来有意义的死值，比没有这个值更坏**——它让
+   * 调用方以为自己拿到了一个开关。将来真需要「强制开」时，那是一次带 ADR 的新增，
+   * 不是往这里悄悄塞回一个 `true`。
    */
-  setSectionsEnabled(enabled: boolean | null): void {
+  setSectionsEnabled(enabled: false | null): void {
     this.sectionsForced = enabled
     this.syncSections(this.document)
   }
