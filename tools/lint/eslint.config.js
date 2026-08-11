@@ -74,6 +74,18 @@ export default tseslint.config(
         URL: 'readonly',
         // T-218 · `gen-draco-fixture.mjs` decodes the GLB's JSON chunk to print what it wrote.
         TextDecoder: 'readonly',
+        // T-293 · `tools/deploy-test/serve.test.mjs` 起一台真服务器再打它，
+        // 而 `deploy/serve.mjs` 的停机逻辑要一个兜底定时器。
+        //
+        // ⚠ 这几个是 Node 18 起的**内置全局**，不是浏览器 API 泄漏进来的。
+        // 声明它们不等于放松 C6：那条宪法管的是**运行时对外发请求**，由
+        // `check-no-external.mjs` 与 `check-provider-swap.mjs` 的 NETWORK_SITES 集合相等
+        // 看着——那两把锁扫的是 packages/，与这里的 .mjs 工具脚本是两件事。
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
       },
     },
   },

@@ -246,3 +246,38 @@ jobs:
             exit 1
           fi
           echo "确认：部署镜像里零个 .w3p"
+
+      # ── T-293 · 纯进程部署与离线安装包 ────────────────────────────────────
+      #
+      # 挂在 offline job 里而不是 verify：这两件事的前提都是「断网机器」，而这个 job
+      # 已经把那个前提造好了（--network none 的构建、出网必败的反向证据）。
+      - name: 静态服务器契约（node --test，无浏览器无 Docker）
+        run: node --test tools/deploy-test/serve.test.mjs
+
+      # ⚠ SIGTERM 那条断言只在 POSIX 上有意义，本地 Windows 会跳过它。
+      #   **CI 是它唯一真正跑到的地方**，所以这一步不许被 continue-on-error 包住。
+      - name: 打离线安装包并跑九步自检
+        run: |
+          pnpm build
+          node scripts/pack-offline.mjs --verify
+
+      # C6 在部署产物上的最后一道复检，必须真的会响。往 editor 的 index.html 里临时插
+      # 一条外链，第 7 步应当当场红；不红就说明那一步是空转。
+      - name: 反向证据 · 产物里混进一条外链时第 7 步必须红
+        run: |
+          cp packages/editor/dist/index.html /tmp/index.html.bak
+          sed -i 's#</head>#<link href="https://fonts.googleapis.com/css2?family=X" rel="stylesheet"></head>#' packages/editor/dist/index.html
+          if node scripts/pack-offline.mjs --out=dist-offline-probe --verify > /tmp/probe.log 2>&1; then
+            echo "::error::往产物里插了一条 Google Fonts 外链，离线包自检竟然还是绿的 —— 第 7 步是空转"
+            cp /tmp/index.html.bak packages/editor/dist/index.html
+            exit 1
+          fi
+          grep -q "产物里有外链" /tmp/probe.log || {
+            echo "::error::自检确实红了，但红的不是第 7 步。红灯来源不对，等于没测到"
+            cat /tmp/probe.log
+            cp /tmp/index.html.bak packages/editor/dist/index.html
+            exit 1
+          }
+          cp /tmp/index.html.bak packages/editor/dist/index.html
+          rm -rf dist-offline-probe
+          echo "确认：产物里混进外链时，离线包自检第 7 步会响"

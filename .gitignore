@@ -1,5 +1,9 @@
 node_modules/
 dist/
+
+# T-293 · 离线安装包的产物。里面有一个 30 MB 级的 image.tar，
+# 而它每次构建都不同（时间戳进了镜像层）——提交它等于每次改动都往仓库里塞一份新的 30 MB。
+dist-offline/
 coverage/
 *.tsbuildinfo
 

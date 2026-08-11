@@ -118,6 +118,110 @@ docker run --rm -p 8080:8080 web3d:local
 ⚠ **这条路今天没有任何测试指向它**，ADR-0037 把这一点写成了它最弱的一环，
 并给两个常量配了到期版本号 `v1.2`：到那时仍然没有测试，就删掉整块。
 
+## 5.5 · 纯进程部署（只有 Node，没有 Docker、没有 nginx）
+
+**这一档是给断网内网机器准备的**：装不了 Docker、不想配 nginx、也拷不进 node_modules。
+
+```bash
+pnpm build
+node deploy/serve.mjs --root=packages/editor/dist --port=8080
+```
+
+⚠ 上面那条只服务编辑器。**完整站点要三样东西凑在一个目录里**，结构与容器镜像逐字相同：
+
+```
+<站点根>/            ← packages/editor/dist 的内容
+<站点根>/player/     ← packages/player/dist 的内容
+<站点根>/vendor/     ← 仓库根的 vendor/
+```
+
+`node scripts/pack-offline.mjs` 会把这个目录直接拼好（在 `dist-offline/site/`）。
+
+### 它保证什么
+
+这些不是「大概会这样」，每一条都有断言看着（`tools/deploy-test/serve.test.mjs`）：
+
+| 行为 | 保证 |
+|---|---|
+| `/healthz` | 200 `ok` |
+| `/player/任意深链接` | 200，且返回**播放器**那份 index.html |
+| `/任意深链接` | 200，且返回**编辑器**那份 index.html |
+| `.glb` | `model/gltf-binary` |
+| `/assets/*` | `immutable` 长缓存 |
+| `*.html` | `no-cache` |
+| 路径穿越（四种写法） | **403**，不是 404、不是 200 |
+| `SIGTERM` | 2 秒内还回端口（会主动断掉 keep-alive 连接） |
+
+**MIME 表只有一份真源**：`deploy/nginx.conf.template` 的 `types` 块。`deploy/serve.mjs` 的表
+与它**键集合逐个相等**，两个方向都断言——否则同一个 `.glb` 会在容器部署下是
+`model/gltf-binary`、在纯进程部署下是 `application/octet-stream`，而这种缺陷只在其中
+一种形态上出现。
+
+### 开机自启
+
+- **Linux**：`deploy/w3-web.service`，改三个 `<>` 占位后 `systemctl enable --now w3-web`
+- **Windows**：管理员 PowerShell 跑 `deploy/install-windows-task.ps1 -SiteRoot <站点根>`
+
+两份模板里都写了为什么这么配（专用低权限账号、`KillSignal=SIGTERM` 加 5 秒宽限、
+不限执行时长），以及 Windows 那份**多出来的代价**：它跑在 SYSTEM 下，权限比它需要的大。
+
+### 自测
+
+```bash
+node --test tools/deploy-test/serve.test.mjs
+```
+
+无浏览器、无 Docker、无 `pnpm install` 也能跑——它只 import `node:` 内置。
+
+---
+
+## 5.6 · 离线安装包
+
+把一整套东西打成一个 tar，拷到断网机器上。**两条路都在里面**：有 Docker 走镜像，
+只有 Node 走 `deploy/serve.mjs`。
+
+```bash
+pnpm build
+node scripts/pack-offline.mjs --verify
+```
+
+产出在 `dist-offline/`（已进 `.gitignore`——里面有一个 30 MB 级的 `image.tar`）：
+
+| 文件 | 给谁 |
+|---|---|
+| `image.tar` | 装了 Docker / podman 的机器 |
+| `site/` | 只装了 Node 的机器 |
+| **serve.mjs** · **w3-web.service** · **install-windows-task.ps1**（包里那三份） | 纯进程部署三件套 |
+| **manifest.json** · **SHA256SUMS** | 版本、清单、逐文件校验和 |
+| `载入与启动.md` · `load.sh` · `load.ps1` | **给现场那个人** |
+
+### `--verify` 的九步
+
+| # | 查什么 |
+|---|---|
+| 1 | `SHA256SUMS` 逐文件校验 |
+| 2 | **manifest.json** 的清单与实际文件一致（多一个少一个都报） |
+| 3 | **真的起  并 curl 它**：健康检查 + 两条 SPA 回退 + 一条穿越 |
+| 4 | 两份 `index.html` 都在，**而且内容可区分** |
+| 5 | `site/vendor/` 里的三方解码器在包里（缺了断网机器会白屏） |
+| 6 | `image.tar` 结构对（`docker save` 出来的，含 manifest） |
+| 7 | **产物里零外链**——C6 在部署产物上的最后一道复检 |
+| 8 | 镜像里不含 `*.w3p`（那是用户的作品，不是产品的一部分） |
+| 9 | 三份现场文档都在包里 |
+
+第 3 步是这张卡为什么把「纯进程部署」和「离线包」合成一张的原因：**它跑的就是纯进程
+部署那一份服务器**。分成两张卡，两边会各写一份 MIME 表。
+
+第 7 步在 CI 里有**反向证据**：往 `editor/dist/index.html` 里临时插一条 Google Fonts
+外链，自检必须当场红，而且红的必须是第 7 步。不红就说明那一步是空转
+（`.github/workflows/ci.yml` 的 offline job）。
+
+### podman
+
+`载入与启动.md` 里给了等价命令：把 `docker` 换成 `podman`，其余一个字不用改。
+`load.sh` 会自己探测用哪一个。
+
+---
 ## 6 · 验证
 
 部署完之后逐条跑，`<host>` 换成实际地址：

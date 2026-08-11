@@ -1,0 +1,56 @@
+# T-293 · systemd unit 模板 · Web3D 纯进程部署
+#
+# 给「机器上只有 Node，没有 Docker、没有 nginx」的那一档用。装法：
+#
+#   sudo cp deploy/w3-web.service /etc/systemd/system/
+#   sudo $EDITOR /etc/systemd/system/w3-web.service    # 改下面三个 <> 占位
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now w3-web
+#   curl -fsS http://127.0.0.1:8080/healthz            # 应当输出 ok
+#
+# ⚠ 三个占位必须改，改不全服务起不来（这是有意的：一个用默认路径起来的服务，
+#   会在半年后没人记得它服务的是哪个目录）：
+#     <NODE>      node 可执行文件的绝对路径（`command -v node`）
+#     <APP_DIR>   仓库或产物所在目录，里面要有 deploy/serve.mjs
+#     <SITE_ROOT> 站点根目录，里面要有 index.html 与 player/index.html
+
+[Unit]
+Description=Web3D 工具引擎（静态站点）
+Documentation=file://<APP_DIR>/docs/DEPLOY.md
+After=network.target
+
+[Service]
+Type=simple
+
+# 专用低权限账号。用 root 跑一个静态服务器，是把「读文件」这件事的权限放大到整台机器——
+# 而这个进程唯一需要读的就是 SITE_ROOT。
+User=w3
+Group=w3
+
+WorkingDirectory=<APP_DIR>
+ExecStart=<NODE> <APP_DIR>/deploy/serve.mjs --root=<SITE_ROOT> --port=8080
+
+# **KillSignal 是 SIGTERM 且给足 5 秒。** serve.mjs 收到 SIGTERM 会主动断掉 keep-alive
+# 连接再退出（不断的话端口会被一个还开着标签页的浏览器占着，下一次 restart 撞
+# 「地址已被占用」）。5 秒是那段兜底逻辑的上限，给少了会变成 SIGKILL。
+KillSignal=SIGTERM
+TimeoutStopSec=5
+
+Restart=on-failure
+RestartSec=2
+
+# 断网机器上没有 DNS、没有 NTP、没有出网。这个服务也不需要它们——
+# 任何一条外部请求都是缺陷（宪法 C6），不是配置问题。
+Environment=NODE_ENV=production
+
+# 加固。这个进程只读一个目录、只监听一个端口，下面每一条都是它用不到的能力。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=<SITE_ROOT>
+# 监听 1024 以下端口才需要这一条；用 8080 的话保持注释掉。
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

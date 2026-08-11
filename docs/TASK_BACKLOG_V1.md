@@ -2932,8 +2932,25 @@
 - ✅ **随 P-2 一起归 v1.0 收尾**：本卡的人工实测部分与 T-291 同属出口人工验收项 H1，
   **不是 v1 的入口前置**。
 
-### [ ] T-293 · 纯进程部署 + 离线安装包
-- **依赖** T-221 · T-210 · **预估** 1.8d · **实际** —
+### [x] T-293 · 纯进程部署 + 离线安装包
+- **依赖** T-221 · T-210 · **预估** 1.8d · **实际** 2.0d
+- **九步自检本机全过**（含真的 `docker build` + `docker save` + `docker run`，image.tar 31.3 MB）。
+  `node --test tools/deploy-test/serve.test.mjs` 20 条 / 19 过 / 1 跳过。
+- **自检抓到了两个真缺陷**，都不是变异造出来的，是它自己响的：
+  ① `serve.mjs` 的入口判定用 `new URL(import.meta.url).pathname`——它返回**百分号编码**路径，
+  而这个仓库目录名里有空格，于是判定恒 false，`node deploy/serve.mjs` **静默什么都不做就退出**。
+  ⚠ **单测抓不到它**：单测 import 这个模块，走的正是判定为 false 的那一支。
+  ② 响应没有 `Content-Length`，Node 回落到分块传输编码。补上之后浏览器才有下载进度总量，
+  而且一部分内网代理不会再把整个响应缓冲下来。
+- **`SIGTERM` 那条断言在本机跳过**（Windows 没有真 SIGTERM，跳过并说明原因，不假装通过）。
+  **CI 是它唯一真正跑到的地方**，所以 ci.yml 里那一步不许被 `continue-on-error` 包住。
+- **变异 ① 有意外收获**：`includes('..')` 不只是漏掉百分号编码，它还会把
+  `/assets/index..hash.js` 这种合法产物名一起拒掉——一个既漏又误伤的判据，红了两条。
+- **MIME 表只有一份真源**（nginx 模板的 `types` 块），断言**两个方向都查**。
+  这正是 C12 把两张卡合并的理由：分开做，两边会各写一份表。
+- **交付偏差** 两处：① `.gitignore` 加 `dist-offline/`（卡面独占里没有它，但里面有一个 30 MB 级的
+  `image.tar`，每次构建都不同）；② `docs/DEPLOY.md` 顺手清了一处已到期的文字——
+  「offline job 由 T-210 交付；本文写作时该 job 尚未存在」，而 T-210 早已 `[x]`。
 - **独占** `deploy/serve.mjs`(新) · `deploy/w3-web.service`(新) · `deploy/install-windows-task.ps1`(新) ·
   `tools/deploy-test/serve.test.mjs`(新) · `scripts/pack-offline.mjs`(新) ·
   `deploy/offline/{载入与启动.md,load.sh,load.ps1}`(新) · `.github/workflows/ci.yml`（offline job 追加）·
