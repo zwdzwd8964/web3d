@@ -197,10 +197,14 @@ export function createPumpDemoDocument(): SceneDocument {
       createdAt: '2026-08-11T00:00:00.000Z',
       updatedAt: '2026-08-11T00:00:00.000Z',
       background: { type: 'color', color: '#15191c' },
-      environment: { hdriAssetId: null, intensity: 1, exposure: 1 },
-      fog: { enabled: false, type: 'linear', color: '#15191c', near: 10, far: 100, density: 0.02 },
+      // T-285 查出来的：这份样板一度**只动过 3 个可编辑字段**，其余全是默认值——
+      // 一份「一堆几何」的样板，在能力覆盖体检的前两条（动作 / 事件）下照样全绿。
+      // 下面这些不是为了凑数：车间照明偏冷偏亮、远处有轻微空气感、描边要在深色背景上
+      // 看得清，都是这台泵在演示现场该有的样子。
+      environment: { hdriAssetId: null, intensity: 1.15, exposure: 1.05 },
+      fog: { enabled: true, type: 'linear', color: '#15191c', near: 4, far: 18, density: 0.02 },
       // 描边开着，而下面的规则里真的有 highlight 动作——I20 查的正是这一对。
-      effects: { outline: { enabled: true, color: '#ffb020', widthPx: 3, strength: 3, hiddenEdge: 'dim' } },
+      effects: { outline: { enabled: true, color: '#ffc24d', widthPx: 4, strength: 2.5, hiddenEdge: 'hide' } },
     },
 
     assets: [

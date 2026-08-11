@@ -2673,8 +2673,13 @@
   「显示对象「剖切面 A」」。**这一句必须在 T-212 的合同措辞里被产品负责人确认过**，
   否则剖切要多花一张卡（`setSection` 动作 + RefKind 扩容 + 规则编辑器改动）。
 
-### [ ] T-285 · 样板工程能力覆盖体检
-- **依赖** T-283 · **预估** 0.6d · **实际** —
+### [x] T-285 · 样板工程能力覆盖体检
+- **依赖** T-283 · **预估** 0.6d · **实际** 0.6d
+- **交付偏差** 两处：① 测试落在 `packages/editor/test/pump-demo-coverage.test.ts` 而不是 core——
+  第三条要遍历 T-205 的「可编辑字段」清单，而那份清单在 `packages/editor/test/capability-entries.ts`，
+  core 够不着它；放 editor 同时也绕开了卡面 ⚠ 点名的 core 内同名冲突。② 顺带改了 `pump-demo.ts`
+  的 `meta`（第三条测试当场查出样板只动过 3 个可编辑字段）。
+- **卡面变异 ① 在 v1.0 不成立**：没有动作嵌套，如实登记为绿（c 类）。
 - **独占** `packages/core/test/pump-demo-coverage.test.ts`(新)
   ⚠ **文件名不许写成 `pump-demo.test.ts`**：T-222 已在 `packages/core/test/assets/pump-demo.test.ts`
   建了同名文件，两份同包同名会让 G1.0-19 的过滤器 `pump-demo` 同时命中两份，证据面模糊。
