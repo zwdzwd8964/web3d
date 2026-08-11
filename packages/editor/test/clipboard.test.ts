@@ -292,9 +292,13 @@ describe('the shortcuts themselves', () => {
     // A zustand store: the actions live on the state, which is also what the real hook reads.
     const batches: number[] = []
     const store = createDocumentStore(doc, { onPatch: (patches) => void batches.push(patches.length) })
+    const saves: number[] = []
+    const focuses: number[] = []
     return {
       store,
       batches,
+      saves,
+      focuses,
       deps: {
         undo: () => void store.getState().undo(),
         redo: () => void store.getState().redo(),
@@ -302,6 +306,9 @@ describe('the shortcuts themselves', () => {
           void store.getState().commit(label, recipe),
         select: (ids: readonly string[]) => store.getState().select(ids),
         getState: () => ({ doc: store.getState().doc, selection: store.getState().selection }),
+        // T-290 · 两条新依赖。这份夹具只测剪贴板，所以它们记账、不做事。
+        saveNow: () => saves.push(1),
+        focusSearch: () => focuses.push(1),
       },
     }
   }

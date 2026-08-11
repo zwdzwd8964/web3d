@@ -2817,8 +2817,27 @@
   ③ 删 `pagehide` 监听 → 第 2 条红。**⚠ 最容易假绿的是第 2 条**：如果它只断言「没有横幅」，
   那么把整个横幅组件删掉也会绿——所以它必须**同时**断言编辑内容还在（正向）**和**横幅不存在（反向）。
 
-### [ ] T-290 · 编辑器交互收口：删除 / 重命名纯函数 + 快捷键表化 + 速查面板
-- **依赖** T-224 · T-257（`removal.ts` 同文件）· **预估** 1.9d · **实际** —
+### [x] T-290 · 编辑器交互收口：删除 / 重命名纯函数 + 快捷键表化 + 速查面板
+- **依赖** T-224 · T-257（`removal.ts` 同文件）· **预估** 1.9d · **实际** 2.1d
+- 三道机械检查全部落成断言：键位查重（报错点名两个 id）· 写法与修饰键顺序 · 九个浏览器保留键。
+  另加两条同形的：`addEventListener('keydown'` 全仓只剩一处、`describeRemoval` 只有一处定义。
+- **`Ctrl+S` 的那个 bug 是真的**：它原来住在 `useAutoSave.ts` 的第二个 keydown 监听里，
+  因此不经过 `isTypingInto` 守卫——在重命名输入框里按 `Ctrl+S` 会触发一次保存，而
+  `shortcuts.ts` 的注释自称是「唯一定义」。变异 ④ 就是这条行为的回归证据。
+- **卡面变异 ③ 的判断不成立，如实记**：`golden-path.spec.ts` 的「Ctrl+S 后状态栏变已保存」
+  **不是**现成的红灯来源——自动保存的防抖 1.2 秒就自己写完了，按不按 Ctrl+S 都会变成「已保存」。
+  补了 ③′（同样的变异跑单测 → 红 3 条）。
+- ⚠ **一次自己制造的假绿**：③ 第一次跑出来是绿的，而那次变异**根本没落地**——锚点串里带
+  `\n`、文件是 CRLF，`String.replace` 静默什么都没做。加了「改完必须与原文不同」的断言之后重跑，
+  才拿到可信的结果。**变异检验本身也会假绿**，这是这一批里最值得记的一条。
+- **交付偏差** 三处：① 动了 `e2e/tests/golden-path.spec.ts`（卡面独占里没有它）——⑧ 的两处
+  采样是固定等待，本卡加两个空渲染组件之后它开始红；实测同一份代码连跑三遍，期望值一次 17、
+  两次 12，**两边都出现过**，说明它一直在掷硬币。改成「连续两次相同」+ 终值 `expect.poll`；
+  ② `clipboard.test.ts` 的夹具补两条新依赖（`saveNow` / `focusSearch`）；
+  ③ 新建 `docs/验收材料/用户手册.md`（卡面写的是「快捷键节占位」，所以其余章节是占位）。
+- ⚠ **`pnpm test:e2e golden-path` 有 6 条红，且它们不是本卡造成的**：在本卡改动之前的 HEAD 上
+  实测同样是 6 红 5 绿（②③⑥⑨ 与 golden-path-2 / golden-path-full）。其中 ⑥ 红在
+  `全量重建 = 1`（铁律 11）。**这需要单独一批去查**，不在本卡范围内。
 - **独占** `packages/editor/src/panels/removal.ts` · `packages/editor/src/panels/HierarchyTree.tsx` ·
   `packages/editor/src/App.tsx`（对话框上提，列 A）· `packages/editor/src/shortcuts/**`(新目录) ·
   `packages/editor/src/shortcuts.ts`（改为 re-export + 查表）· `packages/editor/src/project/useAutoSave.ts` ·

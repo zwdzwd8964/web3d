@@ -1,5 +1,4 @@
 import type { SceneDocument } from '@w3/schema'
-import { buildIndex, describeReferences, getSubtreeIds } from '@w3/schema'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDocumentActions, useDocumentSelector } from '../store/StoreContext.js'
 import { setUi, useUi } from '../store/ui-store.js'
@@ -35,7 +34,7 @@ export function HierarchyTree() {
   const selection = useDocumentSelector((s) => s.selection)
   const { commit, select, toggleSelection } = useDocumentActions()
 
-  const { search, renaming, pendingDelete } = useUi()
+  const { search, renaming } = useUi()
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [dragging, setDragging] = useState<string | null>(null)
@@ -51,7 +50,6 @@ export function HierarchyTree() {
   const filter = useMemo(() => filterNodes(doc, search), [doc, search])
   const rows = useMemo(() => flattenTree(doc, collapsed, filter), [doc, collapsed, filter])
   const draggable = canDragRows(filter)
-  const confirming = useMemo(() => (pendingDelete ? describeRemoval(doc, pendingDelete) : null), [doc, pendingDelete])
 
   // T-224 · the list gets shorter as you type, and the browser does NOT pull the offset
   // back on its own — you land on a blank panel with the rows scrolled off above. Written
@@ -109,19 +107,6 @@ export function HierarchyTree() {
     })
   }
 
-  const doRemove = (request: RemoveRequest) => {
-    setUi({ pendingDelete: null })
-    commit(`删除 ${request.name}`, (draft) => {
-      // Spliced in place rather than `draft.nodes = filter(...)`. Immer describes a
-      // reassignment as one patch replacing the WHOLE array, which the renderer then has
-      // to diff — D1's `fullRebuildCount` used to go up by one on every delete because of
-      // this line. Removing by index emits one `remove` patch per node, which the patch
-      // applier maps straight onto `graph.removeNode`.
-      for (let i = draft.nodes.length - 1; i >= 0; i--) {
-        if (request.subtree.includes(draft.nodes[i]!.id)) draft.nodes.splice(i, 1)
-      }
-    })
-  }
 
   return (
     <aside className="panel panel--left">
@@ -326,80 +311,10 @@ export function HierarchyTree() {
         <div className="panel__note panel__note--warn">{describeRejection(doc, dragging, dropTarget)}</div>
       )}
 
-      {confirming && (
-        <ConfirmDialog
-          question={confirming.question}
-          onCancel={() => setUi({ pendingDelete: null })}
-          onConfirm={() => doRemove(confirming)}
-        />
-      )}
     </aside>
   )
 }
 
-/**
- * The sentence shown before a delete, and the subtree the delete will take with it.
- *
- * A function of `(doc, nodeId)` rather than a snapshot taken when the ✕ was clicked: the
- * pending id now lives in `ui-store` while the document lives in the document store, and
- * re-deriving is what keeps the question honest if the document changes underneath the
- * open dialog. T-290 lifts this out as `describeRemoval` for the Delete shortcut to share.
- */
-function describeRemoval(doc: SceneDocument, nodeId: string): RemoveRequest | null {
-  const name = doc.nodes.find((n) => n.id === nodeId)?.name
-  if (name === undefined) return null
-  const affected = describeReferences(buildIndex(doc), nodeId)
-  const subtree = getSubtreeIds(doc, nodeId)
-  // T-092 · the reverse index answers "what breaks if I delete this" BEFORE the delete,
-  // not as a broken rule discovered at acceptance.
-  const question = affected
-    ? `「${name}」被 ${affected} 引用，删除后这些引用会失效。确认删除？`
-    : subtree.length > 1
-      ? `将同时删除「${name}」及其 ${subtree.length - 1} 个子对象。确认？`
-      : `确认删除「${name}」？`
-  return { nodeId, name, question, subtree }
-}
-
-interface RemoveRequest {
-  readonly nodeId: string
-  readonly name: string
-  readonly question: string
-  readonly subtree: readonly string[]
-}
-
-/**
- * The in-app replacement for `confirm()`.
- *
- * The sentence it shows — 「阀盖」被 1 个动画、1 个热点、1 条规则 引用，删除后这些引用会
- * 失效 — is the most useful thing the editor says, and it deserves better than a native
- * dialog that blocks the main thread, cannot be styled to match, and needs special
- * handling to drive from an E2E run.
- */
-function ConfirmDialog({
-  question,
-  onConfirm,
-  onCancel,
-}: {
-  question: string
-  onConfirm: () => void
-  onCancel: () => void
-}) {
-  return (
-    <div className="modal" role="dialog" aria-modal="true" onClick={onCancel}>
-      <div className="modal__body" onClick={(event) => event.stopPropagation()}>
-        <p>{question}</p>
-        <div className="modal__actions">
-          <button type="button" className="tbtn" onClick={onCancel} autoFocus>
-            取消
-          </button>
-          <button type="button" className="tbtn tbtn--danger" onClick={onConfirm}>
-            删除
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function describeRejection(doc: SceneDocument, dragging: string | null, target: DropTarget): string {
   if (!dragging) return ''

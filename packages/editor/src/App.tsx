@@ -43,6 +43,9 @@ import { setUi, useUi } from './store/ui-store.js'
 import { Viewport } from './viewport/Viewport.js'
 import { exportImage, exportSettings, fullRebuildCount } from './viewport/runtime-registry.js'
 import { useShortcuts } from './shortcuts.js'
+import { ShortcutHelp } from './shortcuts/ShortcutHelp.jsx'
+import { describeRemoval } from './panels/removal.js'
+import type { RemoveRequest } from './panels/removal.js'
 
 /**
  * T-060 · the editor shell.
@@ -69,11 +72,17 @@ type BottomTab =
   | 'snapshots'
 
 export function App({ recovery }: { recovery?: RecoveryBanner }) {
-  useShortcuts()
+  // T-290 · **自动保存挂在这一层，不在 `SaveControl` 里。**
+  //
+  // `useAutoSave` 每调一次就 `useMemo` 出一台 `AutoSaver`。Ctrl+S 迁进快捷键表之后，
+  // 快捷键层也要 `saveNow`——两处各调一次的话会有两台 saver 各自防抖、各自写库，
+  // 而「保存了两次」在界面上与「保存了一次」完全一样。
+  const autosave = useAutoSave()
+  useShortcuts({ saveNow: autosave.saveNow })
   return (
     <div className="shell">
       <RecoveryBar recovery={recovery ?? { kind: 'none' }} />
-      <TopBar />
+      <TopBar autosave={autosave} />
       <div className="shell__body">
         <HierarchyTree />
         <Splitter variable="--left-w" orientation="vertical" min={180} max={520} label="调整层级树宽度" />
@@ -86,11 +95,66 @@ export function App({ recovery }: { recovery?: RecoveryBanner }) {
         <PropertiesPanel />
       </div>
       <StatusBar />
+      {/*
+        T-290 · 删除确认框上提到这里，只渲染一次。
+        原来它长在 `HierarchyTree` 里，于是「树上的 ✕」是唯一的入口——Delete 快捷键
+        要想复用它，只能在树外再写一份对话框。两份并存的那一天不会有任何东西红。
+      */}
+      <RemovalDialog />
+      <ShortcutHelp />
     </div>
   )
 }
 
-function TopBar() {
+/**
+ * T-290 · 待删确认，全编辑器一份。
+ *
+ * 待删 id 在 `ui-store`，问句由 `describeRemoval` 从**当前文档**推出来——不是点 ✕
+ * 那一刻拍的快照。对话框开着的时候文档变了（比如撤销把那个节点拿回去了），问句跟着变，
+ * 目标没了就自己关掉。
+ */
+function RemovalDialog() {
+  const doc = useDocumentSelector((s) => s.doc)
+  const { commit } = useDocumentActions()
+  const { pendingDelete } = useUi()
+  const request = useMemo(
+    () => (pendingDelete ? describeRemoval(doc, 'node', pendingDelete) : null),
+    [doc, pendingDelete],
+  )
+  if (!request) return null
+
+  const remove = (target: RemoveRequest) => {
+    setUi({ pendingDelete: null })
+    commit(`删除 ${target.name}`, (draft) => {
+      // Spliced in place rather than `draft.nodes = filter(...)`. Immer describes a
+      // reassignment as one patch replacing the WHOLE array, which the renderer then has
+      // to diff — D1's `fullRebuildCount` used to go up by one on every delete because of
+      // this line. Removing by index emits one `remove` patch per node, which the patch
+      // applier maps straight onto `graph.removeNode`.
+      for (let i = draft.nodes.length - 1; i >= 0; i--) {
+        if (target.subtree.includes(draft.nodes[i]!.id)) draft.nodes.splice(i, 1)
+      }
+    })
+  }
+
+  return (
+    <div className="modal" role="dialog" aria-modal="true" onClick={() => setUi({ pendingDelete: null })}>
+      <div className="modal__body" onClick={(event) => event.stopPropagation()}>
+        <p>{request.question}</p>
+        <div className="modal__actions">
+          <button type="button" className="tbtn" onClick={() => setUi({ pendingDelete: null })} autoFocus>
+            取消
+          </button>
+          <button type="button" className="tbtn tbtn--danger" disabled={request.blocked !== null} onClick={() => remove(request)}>
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TopBar({ autosave }: { autosave: ReturnType<typeof useAutoSave> }) {
   const canUndo = useDocumentSelector((s) => s.canUndo)
   const canRedo = useDocumentSelector((s) => s.canRedo)
   const name = useDocumentSelector((s) => s.doc.name)
@@ -110,7 +174,7 @@ function TopBar() {
       <button type="button" className="tbtn" onClick={redo} disabled={!canRedo} title="Ctrl+Y">
         重做
       </button>
-      <SaveControl />
+      <SaveControl autosave={autosave} />
       <ExportImageButton />
       <PublishButton />
       <div className="topbar__spacer" />
@@ -290,8 +354,8 @@ function RecoveryBar({ recovery }: { recovery: RecoveryBanner }) {
  * indistinguishable from no autosave — the user refreshes, finds their work gone, and has
  * no way to know whether it was ever written.
  */
-function SaveControl() {
-  const { state, error, errorCode, saveNow } = useAutoSave()
+function SaveControl({ autosave }: { autosave: ReturnType<typeof useAutoSave> }) {
+  const { state, error, errorCode, saveNow } = autosave
   return (
     <>
       <button

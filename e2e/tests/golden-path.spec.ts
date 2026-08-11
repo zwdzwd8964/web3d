@@ -57,6 +57,27 @@ async function sampleColours(page: Page): Promise<string[]> {
 
 const countDistinctColours = async (page: Page) => (await sampleColours(page)).length
 
+/**
+ * T-290 · 等画面**稳下来**再数颜色。
+ *
+ * 原来两处采样都是「固定等一会儿再数」，而那个数在模型加载完之前是 12、之后是 17。于是
+ * ⑧ 的断言实际上是「两次固定等待恰好落在同一侧」。**实测**：同一份代码连跑三遍，期望值
+ * 一次是 17、两次是 12——两边都出现过，也就是说它一直是掷硬币，只是以前更常掷中。
+ *
+ * 判据改成**连续两次采样相同**：加载中的那几帧数值一直在变，稳定两次就说明画完了。
+ */
+async function settledColours(page: Page, tries = 20): Promise<number> {
+  let previous = -1
+  let stable = 0
+  for (let i = 0; i < tries; i += 1) {
+    const current = await countDistinctColours(page)
+    if (current === previous) { stable += 1; if (stable >= 2) return current } else stable = 0
+    previous = current
+    await page.waitForTimeout(150)
+  }
+  return previous
+}
+
 /** True when some sampled pixel is dominated by red — the imported fixture's colour. */
 const hasRedObject = (buckets: string[]) =>
   buckets.some((b) => {
@@ -239,7 +260,7 @@ test('⑧ 预览模式下点击触发规则，退出后编辑态完全还原', a
   await page.goto('/')
   await page.waitForTimeout(SETTLE * 3)
 
-  const pixelsWhileEditing = await countDistinctColours(page)
+  const pixelsWhileEditing = await settledColours(page)
 
   await page.getByRole('button', { name: '预览' }).click()
   await page.waitForTimeout(SETTLE)
@@ -258,7 +279,9 @@ test('⑧ 预览模式下点击触发规则，退出后编辑态完全还原', a
   await page.waitForTimeout(SETTLE * 2)
 
   // T-093 acceptance: leaving preview restores the edit state completely.
-  expect(await countDistinctColours(page)).toBe(pixelsWhileEditing)
+  // 退出预览会重建一次画面。用 poll 而不是采一次样：重建中间的某两帧完全可能相同，
+  // 而那两帧上模型还没回来——「稳定」不等于「稳定在终值上」。
+  await expect.poll(() => countDistinctColours(page), { timeout: 15_000 }).toBe(pixelsWhileEditing)
   await expect(statusNumber(page, '全量重建')).toHaveText('0')
 })
 

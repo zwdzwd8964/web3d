@@ -81,17 +81,13 @@ export function useAutoSave(): {
     }
   }, [store, saver])
 
-  // Ctrl+S. The browser's own save dialog on a canvas app is never what anyone wanted.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
-      event.preventDefault()
-      saverRef.current?.schedule(store.getState().doc)
-      void saverRef.current?.flush()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [store])
+  // T-290 · Ctrl+S 曾经住在这里，是**第二个** keydown 监听器。
+  //
+  // 它因此不经过 `shortcuts.ts` 的 `isTypingInto` 守卫：在重命名输入框里按 Ctrl+S
+  // 会触发一次保存。而 `shortcuts.ts` 的注释恰恰自称是「唯一定义」。
+  //
+  // 现在它是表里的一条，宿主把 `saveNow` 交给快捷键层。全编辑器只剩一个 keydown
+  // 监听，而「只剩一个」是一条 grep 得出来的断言。
 
   // A tab closed during the quiet period would otherwise lose the last edit. `pagehide`
   // rather than `beforeunload`: it also fires when a mobile browser backgrounds the page
