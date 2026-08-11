@@ -279,7 +279,23 @@ export class PatchApplier {
         const gone = graph.removeNode(removed.id)
         // 删掉的可能正是一把刀 —— 不重算的话它删了还在切
         this.targets.applySections?.(next)
-        return gone
+        if (gone) return true
+
+        // D-02 · **`removeNode` 返回 false 有两个完全不同的意思**，而这里以前把它们
+        // 当成了同一件事，代价是一次全量重建（铁律 11 的报警器被一个正常操作触发）。
+        //
+        // (a) 它刚刚**随祖先一起**被删掉了。删一个有子节点的节点时，immer 发的补丁是
+        //     「若干条位移 replace + 尾部 k 条 remove」，而尾部那几条里有一部分指向的
+        //     正是被删子树里的节点——它们的 three 对象在更早那条 replace 触发的
+        //     `reconcileNodes` 里已经没了。同一件事在一批补丁里被算了两次，不是失败。
+        //     `reconcileNodes` 自己对这件事一直是知情且宽容的（见它下面那句注释），
+        //     只有逐 index 这条路把它当成了错误。
+        //
+        // (b) 图与文档**本来就不同步**。这一种必须继续回落——那正是
+        //     `fullRebuildCount` 存在的全部理由，把它一起吞掉等于把报警器拆了。
+        //
+        // 判据走 `prev` 里的父链：只要有一个祖先也从 `next` 里消失了，就是 (a)。
+        return removedWithAncestor(removed, prev, next)
       }
       const added = next.nodes[index]
       if (!added) return false
@@ -546,4 +562,31 @@ export class PatchApplier {
       graph.setParent(nodeId, node.parent)
     )
   }
+}
+
+/**
+ * D-02 · 这个节点是不是**随某个祖先一起**从文档里消失的。
+ *
+ * 用 `prev` 的父链，因为 `next` 里这些节点已经不在了。只要链上任意一个祖先也不在
+ * `next` 里，`graph.removeNode(那个祖先)` 就已经把整棵子树一起抹掉了——于是针对
+ * 子节点的那条 remove 找不到对象是**预期之内**的。
+ *
+ * 祖先全都还活着却已经不在图里，是另一回事：那说明图与文档不同步，必须回落。
+ *
+ * @param node 被删的那个节点（来自 `prev`）。
+ * @param prev 改动前的文档，父链从这里走。
+ * @param next 改动后的文档，「还在不在」按它判断。
+ */
+function removedWithAncestor(node: Node, prev: SceneDocument, next: SceneDocument): boolean {
+  const alive = new Set(next.nodes.map((n) => n.id))
+  const byId = new Map(prev.nodes.map((n) => [n.id, n]))
+  let cursor = node.parent
+  // 上界是节点总数：一份 parent 成环的文档不该让这里转不出来。`checkIntegrity` 会
+  // 单独报那种文档，但一个死循环会先把页面卡住，而卡住比报错难查得多。
+  let guard = prev.nodes.length
+  while (cursor !== null && guard-- > 0) {
+    if (!alive.has(cursor)) return true
+    cursor = byId.get(cursor)?.parent ?? null
+  }
+  return false
 }

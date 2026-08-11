@@ -1,5 +1,5 @@
 import type { SceneDocument } from '@w3/schema'
-import { createGoldenPathDocument } from '@w3/schema'
+import { createGoldenPathDocument, createPumpDemoDocument, getSubtreeIds } from '@w3/schema'
 import type { Mesh, MeshStandardMaterial } from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DocumentPatch } from '../../src/runtime/apply-patch.js'
@@ -44,6 +44,125 @@ function edit(mutate: (d: SceneDocument) => SceneDocument): [SceneDocument, Scen
   const prev = createGoldenPathDocument()
   return [mutate(createGoldenPathDocument()), prev]
 }
+
+/**
+ * D-02 · 删一个**有子节点**的节点，不许回落到全量重建（铁律 11）。
+ *
+ * ## 这条为什么以前测不到
+ *
+ * 冷启动文档在 T-283 之前是 3 个节点的黄金路径样例，而那里的「阀盖」是**最后一个且是
+ * 叶子**——`splice(2,1)` 只发一条 `remove /nodes/2`，`prev.nodes[2]` 就是阀盖本人、
+ * 对象还在图里，`removeNode` 返回 true。这条路径上什么都不会错。
+ *
+ * 泵组样板换上来之后，「阀盖」在 index 9 且**有 4 颗盖螺栓**。immer 对这次 splice 发的
+ * 补丁形状是（实测抓的，不是推的）：
+ *
+ * ```
+ * replace /nodes/9  → 泵轴        （位移）
+ * replace /nodes/10 → 电机
+ * replace /nodes/11 → 水平剖切面
+ * remove  /nodes/16 · 15 · 14 · 13 · 12        （尾部五条）
+ * ```
+ *
+ * 而 prev 的 12 / 13 正是**盖螺栓 3 / 4**——它们的 three 对象在更早的
+ * `replace /nodes/9` 触发的 `reconcileNodes` 里，已经随阀盖一起被抹掉了。于是这两条
+ * `remove` 走到逐 index 那条路时 `removeNode` 找不到对象、返回 false，被记成 unhandled，
+ * `fullRebuildCount++`。
+ *
+ * **最刺眼的是 `reconcileNodes` 对这件事是知情且宽容的**（它的注释逐字写着「a child
+ * removed alongside its parent is already gone by the time we reach it — not an error」
+ * 并丢弃返回值），逐 index 那条路却把同一件事当成失败。两条路径对同一个事实给出了
+ * 两种判断。
+ */
+describe('D-02 · 删带子节点的节点不许全量重建', () => {
+  /** 实测抓的那八条补丁。**顺序与 immer 发的一致**，改顺序等于测另一件事。 */
+  const PATCHES: DocumentPatch[] = [
+    { op: 'replace', path: ['nodes', 9], value: null },
+    { op: 'replace', path: ['nodes', 10], value: null },
+    { op: 'replace', path: ['nodes', 11], value: null },
+    { op: 'remove', path: ['nodes', 16] },
+    { op: 'remove', path: ['nodes', 15] },
+    { op: 'remove', path: ['nodes', 14] },
+    { op: 'remove', path: ['nodes', 13] },
+    { op: 'remove', path: ['nodes', 12] },
+  ]
+
+  it('删掉阀盖及其 4 颗螺栓，fullRebuildCount 仍是 0', () => {
+    const prev = createPumpDemoDocument()
+    const cover = prev.nodes.find((n) => n.name === '阀盖')!
+    const doomed = new Set(getSubtreeIds(prev, cover.id))
+    expect(doomed.size, '前提变了：阀盖不再有 4 个子节点，这条测试测的已经不是同一件事').toBe(5)
+
+    const next: SceneDocument = { ...prev, nodes: prev.nodes.filter((n) => !doomed.has(n.id)) }
+
+    graph.build(prev)
+    const result = applier.apply(PATCHES, next, prev)
+
+    // 三条断言缺一不可：没回落 · 计数没涨 · **东西真的删掉了**。
+    // 少了第三条，一个「什么都不做就返回 true」的实现也能让前两条绿。
+    expect(applier.fullRebuildCount, warnings.join(' / ')).toBe(0)
+    expect(result.rebuilt).toBe(false)
+    for (const id of doomed) {
+      expect(graph.objectFor(id), `${id} 还在图里`).toBeUndefined()
+    }
+    expect(graph.objectFor(prev.nodes[14]!.id), '泵轴被误删了').toBeDefined()
+  })
+
+  /**
+   * **报警器本身不许被吞掉。**
+   *
+   * 上一条的修法是「已经随祖先一起消失了就算处理过」。这一条盯的是它没有顺手把
+   * 「图与文档本来就不同步」也一起放行——那正是 `fullRebuildCount` 存在的全部理由。
+   */
+  it('删一个祖先还活着、却已经不在图里的节点 → 仍然回落，报警器还响', () => {
+    const prev = createPumpDemoDocument()
+    const shaft = prev.nodes[14]!
+    expect(shaft.name).toBe('泵轴')
+
+    graph.build(prev)
+    // 制造「图与文档不同步」：把泵轴从图里偷偷抹掉，而它的父节点一个都没动。
+    graph.removeNode(shaft.id)
+
+    const next: SceneDocument = { ...prev, nodes: prev.nodes.filter((n) => n.id !== shaft.id) }
+    const result = applier.apply([{ op: 'remove', path: ['nodes', 14] }], next, prev)
+
+    expect(result.rebuilt, '祖先都活着却已经不在图里，这是真的不同步，必须回落').toBe(true)
+    expect(applier.fullRebuildCount).toBe(1)
+  })
+
+  /**
+   * `parent` 成环的文档不许把这里转死。
+   *
+   * ⚠ **超时设成 2 秒是这条断言的一部分，不是排版。** 少了它，父链上界那道防线被拆掉时
+   * 这条测试**不是转红，是挂住**——而一个挂住的测试与一个慢的测试在 CI 上分辨不出来，
+   * 通常要等到有人去看为什么这一轮跑了二十分钟。
+   *
+   * 成环的文档本身是非法的（`checkIntegrity` 会单独报它），但**报错比卡死好查得多**，
+   * 所以运行时这一层要能走出来。
+   */
+  it('parent 成环时走得出来，不会转死', { timeout: 2000 }, () => {
+    const base = createPumpDemoDocument()
+    const [a, b, victim] = [base.nodes[10]!, base.nodes[11]!, base.nodes[14]!]
+
+    // A→B→A 的环，**而且 A 与 B 都还活着**——这一点是关键：环上任何一个祖先只要
+    // 从 next 里消失了，父链第一步就短路返回了，根本走不进环里。
+    const prev: SceneDocument = {
+      ...base,
+      nodes: base.nodes.map((n) =>
+        n.id === a.id ? { ...n, parent: b.id } : n.id === b.id ? { ...n, parent: a.id } : n.id === victim.id ? { ...n, parent: a.id } : n,
+      ),
+    }
+    // 只删 victim，它的父链是 victim → A → B → A → …，全程活着。
+    const next: SceneDocument = { ...prev, nodes: prev.nodes.filter((n) => n.id !== victim.id) }
+
+    graph.build(prev)
+    // 让它已经不在图里，这样才会走到父链那一段（而不是 removeNode 直接成功）。
+    graph.removeNode(victim.id)
+
+    // 只要它返回了就算过——返回 true 还是 false 都是合理答案，**转不出来才是缺陷**。
+    expect(() => applier.apply([{ op: 'remove', path: ['nodes', 14] }], next, prev)).not.toThrow()
+  })
+})
 
 describe('incremental paths (D1)', () => {
   it('/nodes/i/transform/p updates only that Object3D', () => {
