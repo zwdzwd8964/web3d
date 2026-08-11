@@ -106,6 +106,82 @@ E2E 上线第一天又抓到三个同类缺陷（材质注册表在图重建后�
 **第三个数值得单独记**：每加一条裁剪平面就是一次全量着色器重编译（2 → 9 → 16 条程序）。
 所以「拖着剖切面滑块连续改平面数」会很卡，而拖动同一把刀的位置不会——后者不改数量。
 
+## 2.4 挂账 · `pnpm test:e2e golden-path` 的 6 条红（2026-08-11 登记）
+
+> **状态：已归因，未修。** 产品拍板「继续推卡、把红挂账」。这一节的用途是让修它的那个人
+> 不必重新查一遍——下面每一条都带文件:行号。
+
+实测：`golden-path.spec.ts` ②③⑥⑨ + `golden-path-2.spec.ts` + `golden-path-full.spec.ts` 六条红，
+`①④⑤⑦⑧` 五条绿。**在 T-290 改动之前的 HEAD 上跑，同样是 6 红 5 绿**——不是这一批造成的。
+
+### D-01 · 五条红是同一个根因：`.report` 这个 class 被两个组件共用
+
+**归因**：T-259（提交 `c5e5f1a`）给导入流程加了一步「声明源单位 / 上方向」的对话框，
+`packages/editor/src/panels/ImportDialog.tsx:39` 用的根 class 也是 `.report`——与体检报告
+`packages/editor/src/panels/AuditReport.tsx:63` 撞名。
+
+而 `packages/editor/src/panels/AssetPanel.tsx:66-79` 的 `chooseFile`：只要
+`readGlbHeader(bytes)` 非 null（任何合法 GLB2 都是），就**只 `setDeclaring(...)` 然后 return**，
+根本不调 `runImport`。于是选完 `.glb` 之后 DOM 里第一个出现的 `.report` 是 ImportDialog，
+`pending` 还是 null，`.report__summary` 与 `.report__table` 一个都不存在。
+
+五条 E2E 的 helper 都在等 `.report`，被 ImportDialog 提前满足，随后各自死在下一步：
+
+| 用例 | 死在哪 | 症状 |
+|---|---|---|
+| ② | `golden-path.spec.ts:128` `.report__summary` | element(s) not found |
+| ③ | `golden-path.spec.ts:153` 点 `/确认导入｜仍然导入/` | click 超时（页面上只有「继续导入」） |
+| ⑨ | `golden-path.spec.ts:300` 同上 | click 超时。**与「零外链」这条断言本身无关** |
+| golden-path-2 | `golden-path-2.spec.ts:147` 同上 | click 超时 |
+| golden-path-full | `golden-path-full.spec.ts:113` `.report__table tbody tr` 恒 0 | 「体检报告应当逐项列出」 |
+
+**这五条不是产品坏了，是 E2E 落后于流程**：导入多了一步声明，测试从没点过「继续导入」。
+
+⚠ **最容易的假修法**：把 helper 里的 `.report` 换成 `[data-testid="audit-report"]`。那样 helper 不再
+提前放行，但 `.report__summary` 依然不会出现——错误只是从 not found 变成 timeout。
+**必须补上点击 `[data-testid="import-declare-confirm"]` 那一步。**
+
+⚠ `e2e/tests/decoders.spec.ts` 是同一形状（GLB 导入 + 确认），修的时候要一并改，
+否则下一次跑全量 E2E 会再冒一条红。
+
+### D-02 · ⑥ 是另一个根因，而且它是**铁律 11 的真实违反**
+
+症状：删掉「阀盖」之后状态栏 `全量重建` 从 0 变 **1**。
+
+**成因链**（读码推得，未跑；验证成本极低，见下）：
+
+1. T-283（提交 `472e42d`）把冷启动文档换成了 17 节点的泵组样板
+   （`packages/editor/src/project/project-lifecycle.ts:68-83`，它是 `BUILTIN_DOCUMENTS[0]`）。
+   旧的黄金路径样例只有 3 个节点，且「阀盖」是**最后一个且是叶子**。
+2. 泵组里「阀盖」**有 4 个子节点**（`packages/schema/src/pump-demo.ts` 的 `PUMP_DEMO_PATHS`
+   index 9 是阀盖，10-13 是四颗螺栓），删它会一次删掉 5 个。
+3. immer 对「数组缩短」发的补丁形状是：先若干条 `replace /nodes/i`，再对**尾部** k 个下标发
+   `remove`。k=5、原长 17 → 尾部 remove 命中 prev 索引 16,15,14,13,12，其中 **12/13 正是两颗
+   螺栓**，而它们的 three 对象在更早的 `reconcileNodes` 里已经随阀盖一起被抹掉。
+4. `packages/core/src/runtime/apply-patch.ts:279-282`：`graph.removeNode()` 找不到对象返回 false
+   → `applyOne` 返回 false → 进 `unhandled` → `apply-patch.ts:136` `fullRebuildCount++`。
+
+**最刺眼的一点**：同一个文件的 `reconcileNodes`（`apply-patch.ts:468-472`）对这件事是**知情且
+宽容**的，注释逐字写着「removeNode drops the whole subtree, so a child removed alongside its
+parent is already gone by the time we reach it — not an error」并丢弃返回值。
+**逐 index 的那条路却把同一件事当成失败。** 两条路径对同一个事实给出了两种判断。
+
+**潜伏期**：缺陷本身来自 `b764367`（2026-08-05），T-283 只是第一次让「删一个有子节点的节点」
+在冷启动文档上可达。
+
+**修之前先定在哪一侧修**：让「已随父节点消失」的 remove 返回 true 是最小改动，但**不许把
+「真的不认识这个 id」也一起吞掉**——那正是 `fullRebuildCount` 这个报警器存在的理由。
+⚠ **只把测试期望从 0 改成 1 是假绿**：那是把一条宪法级报警器调低。
+
+**验证方式（先写这条，再动实现）**：给 `apply-patch` 单测加一例「17 个节点，删 index 9 起的
+5 节点子树」，断言 `fullRebuildCount === 0`。**今天它应当是红的。**
+
+### D-03 · 修完这批之后要单独扫一遍
+
+T-283 把冷启动文档从 3 节点换成 17 节点，影响面不止 ⑥。任何按「3 个节点 / 阀盖是叶子 /
+2 份资产」写死的常量断言都可能悄悄变味（例如 `golden-path-full.spec.ts:122` 的
+`.asset-list > li` 期望 2）。**这类断言不会红，它们会安静地测另一件事。**
+
 ## 2.5 遗留决议 S3 · 阴影出厂默认档（T-292）
 
 **结论：维持 `medium`，并且明确写下来它是拍的不是测的。**

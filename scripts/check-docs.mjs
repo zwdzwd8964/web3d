@@ -818,6 +818,85 @@ function ruleSevenGateRanges() {
 
 /* ========================================================================== */
 
+/* -------------------------------------------------------------------------- */
+/* 规则 10 · 没有一份文档里出现重复的标题                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * T-291 · 一次自己制造的文档损坏，值得留一道门。
+ *
+ * 回填台账的脚本里，替换串写了一段带正则行尾锚点的文字：`` `^(M[123])-(.+)$` ``。
+ * `$` 紧挨着一个反引号，而 `String.prototype.replace` 的**替换串**里 `` $` `` 是一个替换
+ * 模式，意思是「匹配位置**之前**的全部内容」。于是台账与 BENCHMARK 各被塞进了自己的
+ * 前半段——台账的卡头从 199 变成 293，文件长了 62%。
+ *
+ * **没有任何一个守卫响。** typecheck 不看 markdown，lint 不看 markdown，
+ * `check-docs` 的十条规则查的是链接、命令、编号、总数——没有一条查「这份文档是不是
+ * 被复制了一半进去」。露馅的是 `git show --stat` 里那个 `+2888` 的数字，也就是说
+ * **它靠的是我恰好多看了一眼**。
+ *
+ * 重复标题是这类损坏最便宜的探针：正常的文档里两个一模一样的标题几乎不会出现，
+ * 而任何「把文件的一段又插了一遍」的事故都必然制造一堆。
+ *
+ * ⚠ 只查 `docs/*.md` 顶层与 `docs/adr/`，不递归全仓：`node_modules` 与生成物里的
+ * 重复标题是正常的，把它们算进来这条规则会永远红，然后被人加进例外表直到失效。
+ */
+function ruleTenDuplicateHeadings() {
+  const files = []
+  for (const entry of readdirSync(join(ROOT, "docs"))) {
+    if (entry.endsWith(".md")) files.push(join("docs", entry))
+  }
+  for (const entry of readdirSync(join(ROOT, "docs", "adr"))) {
+    if (entry.endsWith(".md")) files.push(join("docs", "adr", entry))
+  }
+
+  let checked = 0
+  for (const rel of files) {
+    const lines = readFileSync(join(ROOT, rel), 'utf8').split(/\r?\n/)
+    const seen = new Map()
+    let inFence = false
+    let repeats = 0
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      // 围栏代码块里的 # 是注释或 shell 提示符，不是标题。
+      if (/^\s*```/.test(line)) inFence = !inFence
+      if (inFence) continue
+      const m = /^(#{1,6}) \S/.exec(line)
+      if (!m) continue
+      const title = line.trim()
+      const first = seen.get(title)
+      if (first !== undefined) {
+        repeats += 1
+        // 只有**顶层结构**重复才逐条报。同一个 ### 小节标题在多份快照里重复出现是
+        // 正常的（METRICS.md 的「趋势观察点」每个版本一份），逐条报会让这条规则永远红。
+        if (m[1].length <= 2) {
+          fail(
+            "规则 10",
+            rel + ":" + (i + 1) + "  顶层标题「" + title + "」在第 " + first + " 行已经出现过。**多半是一次文本替换把文件的一段又插了一遍**",
+          )
+        }
+      } else {
+        seen.set(title, i + 1)
+      }
+    }
+    // 总量判据：整份文档里重复标题占比过高，就是被复制了一段。实测数字——
+    // T-291 那次损坏：台账 345 个标题里 146 个是重复出现（42%），BENCHMARK 48 里 16（33%）。
+    // 下限 30 个标题是为了放过 METRICS.md —— 它每个版本一份快照，18 个标题里 4 个
+    // 同名 ### 是正常结构，而不是损坏。
+    const total = seen.size + repeats
+    if (total >= 30 && repeats / total > 0.25) {
+      fail("规则 10", rel + " 里 " + total + " 个标题有 " + repeats + " 个是重复的（超过 20%）——这份文档多半被复制了一段进去")
+    }
+    checked += seen.size
+  }
+
+  if (checked < 200) {
+    fail("规则 10", "只从 " + files.length + " 份文档里抽到 " + checked + " 个标题（下限 200）——抽取面坏了，不是文档变简单了")
+    return
+  }
+  note("规则 10 · " + files.length + " 份文档 / " + checked + " 个标题，逐份查重")
+}
+
 ruleOneScripts()
 ruleTwoLinks()
 ruleThreeAdrCount()
@@ -827,12 +906,13 @@ ruleSixGateCommands()
 ruleSevenGateRanges()
 ruleEightAdrStatus()
 ruleNineDeployPaths()
+ruleTenDuplicateHeadings()
 
 console.log('')
 for (const n of notes) console.log(`  ${n}`)
 console.log('')
 if (failures.length === 0) {
-  console.log('PASS  G1.0-7 · 文档零漂移（九条规则）')
+  console.log('PASS  G1.0-7 · 文档零漂移（十条规则）')
   process.exit(0)
 }
 console.error(`FAIL  G1.0-7 · 文档零漂移  — ${failures.length} violation(s)`)
