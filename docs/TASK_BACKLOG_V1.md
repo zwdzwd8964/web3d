@@ -2567,8 +2567,12 @@
 > （A1 的版本切分决定了这一点，不是遗漏）。黄金路径 III 同理：v1.0 12 步不含 flows/pages，
 > v1.2 的黄金路径 IV 才补齐。
 
-### [ ] T-282 ★ · 项目生命周期：新建 / 列表 / 打开 / 重命名 / 删除
-- **依赖** T-202 · **预估** 1.7d · **实际** —
+### [x] T-282 ★ · 项目生命周期：新建 / 列表 / 打开 / 重命名 / 删除
+- **依赖** T-202 · **预估** 1.7d · **实际** 1.7d
+- **两道棘轮同时下调**：`MAX_EXEMPTIONS` 24 → 21（`deleteProject` 三行）、`MAX_LEGACY` 83 → 82
+  （`createEmptyDocument`），孤儿 114 → 110。这是本卡「那组 API 终于有了生产调用者」的机械证据。
+- **交付偏差** 三处：① `scripts/check-migrate-on-read.mjs` 的 READERS 表改一行（`restoreLastDocument` 随 `BOOT_STEPS` 挪到 `project-lifecycle.ts`，守卫按文件名认路，当场红了）；② `scripts/check-dead-exports.mjs` + `docs/DEAD_EXPORTS_ALLOWLIST.md`（棘轮下调）；③ `packages/editor/test/restore-migrates.test.ts` 改 import 一行、`packages/editor/test/dialogs/project-dialogs.test.tsx`（新，jsdom，8 条）——卡面的「撤销按钮 disabled」「删除当前打开的工程 → 落到新建对话框不崩」两条纯逻辑测不到。
+- 单测 31 条（`project-lifecycle`）+ 8 条（`project-dialogs`）。
 - **独占** `packages/editor/src/project/project-lifecycle.ts`(新) · `NewProjectDialog.tsx`(新) ·
   `ProjectListDialog.tsx`(新) · `packages/editor/src/project/session.ts` · `packages/editor/src/main.tsx` ·
   `packages/editor/src/App.tsx`（列 A）· `packages/editor/test/project-lifecycle.test.ts`(新)

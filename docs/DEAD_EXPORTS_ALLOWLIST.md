@@ -64,9 +64,6 @@
 | core:SceneSummary.viewpointCount | 同上，宿主用它决定要不要显示视点切换器 | T-274 | v1.2 |
 | schema:touch | T-282 的项目层要让 meta.updatedAt 在保存时真的往前走 | T-282 | v1.2 |
 | storage:OBJECT_STORES | T-286 的草稿槽与 T-287 的租约按这份清单读写各自的 store | T-286 | v1.2 |
-| storage:IndexedDbProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |
-| storage:MemoryProvider.deleteProject | T-282 的项目层调用它，两个实现同批接上 | T-282 | v1.2 |
-| storage:StorageProvider.deleteProject | T-282 的项目列表交付删除入口，接口这一侧先留着 | T-282 | v1.2 |
 | core:renderTestCasesMarkdown | 验收用例生成器由 T-317 在 v1.2 接上，v1.0 明确不接 | T-317 | v1.2 |
 | core:describePolicy | T-261 重写附件A 的机械校验时按策略表生成人读说明 | T-261 | v1.2 |
 | core:buildPumpDemoGlb | T-283 把泵组样板物化成一份可打开的项目，它是那条链上唯一的字节来源 | T-283 | v1.2 |
@@ -112,7 +109,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 
 - `schema:CollectionSpec.idPrefix`
 - `schema:CollectionSpec.patchPath`
-- `schema:createEmptyDocument`
 - `schema:createVariable`
 - `schema:createRule`
 - `schema:isId`

@@ -1,11 +1,11 @@
 import { registerBuiltinActions } from '@w3/core'
-import { createGoldenPathDocument, migrate } from '@w3/schema'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
 import { PreviewProvider } from './preview/PreviewContext.jsx'
 import { createPreviewStore } from './preview/preview-store.js'
 import { ProjectProvider } from './project/ProjectContext.jsx'
+import { runBoot } from './project/project-lifecycle.js'
 import { ProjectSession } from './project/session.js'
 import { StoreProvider } from './store/StoreContext.js'
 import { createDocumentStore } from './store/document-store.js'
@@ -36,13 +36,14 @@ async function boot() {
 
   const session = new ProjectSession()
 
-  // Whatever was open last time. A refresh that silently discards the user's work is the
-  // worst thing an editor can do, and it is exactly what this used to do.
-  const restored = await restoreLastDocument(session)
-  // The sample's asset is a placeholder until it is materialised: bytes generated, hashed,
-  // stored, and the record rewritten to match. Without it the default project renders but
-  // cannot be published, because the publish gate looks for a hash storage has never seen.
-  const doc = await session.materialiseSample(restored ?? createGoldenPathDocument())
+  // T-282 · 冷启动写成一张显式的步骤表（`BOOT_STEPS`，在 project-lifecycle.ts）。
+  //
+  // 这 20 行在 v1 有四个所有者（本卡 · T-288 崩溃恢复横幅 · v1.5 provider 探测 ·
+  // v1.5 多场景入口场景），而**顺序在这里是有语义的**：物化必须先于 store 建好，
+  // 否则视口一挂载就向 resolver 要字节，得到的是「资产加载失败：pump.glb」。
+  // 后续三张卡只允许往表里加步骤、不许重排，由一条断言看着。
+  const { doc, notes } = await runBoot(session)
+  for (const note of notes) console.info('[boot]', note)
 
   // D1 · patches reach the renderer incrementally. `load(doc)` on every edit would drop
   // the frame rate to unusable while a gizmo is being dragged.
@@ -63,52 +64,6 @@ async function boot() {
       </ProjectProvider>
     </StrictMode>,
   )
-}
-
-/**
- * Loads the most recently updated project, migrating it forward if it is older.
- *
- * `migrate`, not `validate` — and the difference is the whole of constitution C4. Because
- * `schemaVersion` is `z.literal(CURRENT_VERSION)`, a document saved by an older build
- * fails validation outright. This path used to call `validate` and fall back to the
- * sample, which was invisible while v1 was the only version in existence and became
- * "every existing project disappeared on upgrade" the moment v2 shipped — the user's work
- * is still on disk, but what they SEE is the sample scene, which is indistinguishable
- * from data loss.
- *
- * The migrated document is not written back here. It reaches storage on the first
- * autosave, so an upgrade that the user then abandons leaves the original record intact.
- *
- * A stored document that cannot be migrated at all is reported and skipped rather than
- * thrown: being unable to open the editor because of one bad record is far worse than
- * starting from the sample, and the record is left in place so it can still be recovered.
- *
- * T-229 · **导出只是为了让 `restore-migrates.test.ts` 调到生产路径本身，不是新 API。**
- * 另一条路是在测试里重写一遍恢复逻辑，而那样一来「把这里的 `migrate` 改回 `validate`」
- * 这条变异就不会红——测试自造一份实现，正是 T-176 那条存活 blocker 的形状。
- */
-export async function restoreLastDocument(session: ProjectSession) {
-  try {
-    const projects = await session.storage.listProjects()
-    const latest = [...projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-    if (!latest) return null
-
-    const stored = await session.load(latest.projectId)
-    if (!stored) return null
-
-    const result = migrate(stored)
-    if (!result.ok) {
-      console.warn('[project] 上次保存的文档无法打开，已改为打开样例场景。原文档未删除。', result.error)
-      return null
-    }
-    if (result.value.applied.length > 0) {
-      console.info(`[project] 文档已从 v${result.value.fromVersion} 升级到 v${result.value.toVersion}`, result.value.applied)
-    }
-    return result.value.document
-  } catch (error) {
-    console.warn('[project] 读取上次的文档失败，已改为打开样例场景。', error)
-    return null
-  }
 }
 
 // T-229 · 只有真的有挂载点时才启动。

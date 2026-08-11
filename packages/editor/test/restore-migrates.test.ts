@@ -4,7 +4,7 @@ import { CURRENT_VERSION } from '@w3/schema'
 import type { SceneDocument } from '@w3/schema'
 import { MemoryProvider } from '@w3/storage'
 import { describe, expect, it, vi } from 'vitest'
-import { restoreLastDocument } from '../src/main.js'
+import { restoreLastDocument } from '../src/project/project-lifecycle.js'
 import { ProjectSession } from '../src/project/session.js'
 
 /**

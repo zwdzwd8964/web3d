@@ -1,4 +1,5 @@
 import { checkIntegrity, errorsOf, warningsOf } from '@w3/schema'
+import type { ProjectSummary } from '@w3/storage'
 import { createActionRefResolver } from '@w3/core'
 import { useMemo, useState } from 'react'
 import { Splitter } from './layout/Splitter.js'
@@ -6,6 +7,8 @@ import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
 import { HierarchyTree } from './panels/HierarchyTree.js'
 import { ExportImageDialog } from './dialogs/ExportImageDialog.jsx'
+import { NewProjectDialog } from './dialogs/NewProjectDialog.jsx'
+import { ProjectListDialog } from './dialogs/ProjectListDialog.jsx'
 import { PublishDialog } from './dialogs/PublishDialog.js'
 import { HistoryPanel } from './panels/HistoryPanel.js'
 import { HotspotPanel } from './panels/HotspotPanel.js'
@@ -23,8 +26,17 @@ import { RulePanel } from './panels/RulePanel.js'
 import { VariablePanel } from './panels/VariablePanel.js'
 import { ViewpointPanel } from './panels/ViewpointPanel.js'
 import { usePreview } from './preview/PreviewContext.jsx'
+import { useProject } from './project/ProjectContext.jsx'
+import {
+  createFromBuiltin,
+  createProject,
+  deleteProject,
+  listProjects,
+  openProject,
+  renameStoredProject,
+} from './project/project-lifecycle.js'
 import { useAutoSave } from './project/useAutoSave.js'
-import { useDocumentActions, useDocumentSelector } from './store/StoreContext.js'
+import { useDocumentActions, useDocumentSelector, useDocumentStore } from './store/StoreContext.js'
 import { Viewport } from './viewport/Viewport.js'
 import { exportImage, exportSettings, fullRebuildCount } from './viewport/runtime-registry.js'
 import { useShortcuts } from './shortcuts.js'
@@ -87,6 +99,7 @@ function TopBar() {
         <span>v0</span>
       </div>
       <span>{name}</span>
+      <ProjectButton />
       <button type="button" className="tbtn" onClick={undo} disabled={!canUndo} title="Ctrl+Z">
         撤销
       </button>
@@ -99,6 +112,95 @@ function TopBar() {
       <div className="topbar__spacer" />
       <ModeSwitch />
     </header>
+  )
+}
+
+/**
+ * T-282 · 项目层的入口。
+ *
+ * ## 三个动作走三条不同的路，而它们看起来一样
+ *
+ * - **打开**：`openProject` → `replaceDocument(doc, { keepHistory: false })`。
+ *   撤销栈**必须清掉**——保留的话，Ctrl+Z 会重放一条属于上一份文档的逆补丁，
+ *   静默损坏当前文档。
+ * - **重命名当前工程**：`commit('重命名工程', …)`，**落撤销**。
+ * - **重命名列表里另一份**：`renameStoredProject`，读改写，**不碰本端撤销栈**——
+ *   那份文档的历史不在本端。
+ *
+ * 三条路都会让「列表里的名字变了」，区别只在撤销栈。所以本卡的验收要求两条重命名
+ * 路径各有一条断言，且其中一条断言的是撤销栈深度而不是名字。
+ */
+export function ProjectButton() {
+  const session = useProject()
+  const store = useDocumentStore()
+  const { commit, replaceDocument } = useDocumentActions()
+  const currentId = useDocumentSelector((s) => s.doc.projectId)
+
+  const [view, setView] = useState<'closed' | 'list' | 'new'>('closed')
+  const [projects, setProjects] = useState<readonly ProjectSummary[]>([])
+
+  const refresh = () => listProjects(session).then(setProjects)
+
+  const openList = () => {
+    void refresh().then(() => setView('list'))
+  }
+
+  const swapTo = async (doc: Parameters<typeof replaceDocument>[0]) => {
+    // `keepHistory` 恒 false —— 由 `openProject` 返回的字段带过来，而不是在这里再写一遍
+    // `false`。写两遍的话，改一处忘一处的那次不会有任何东西红。
+    replaceDocument(doc, { keepHistory: false })
+    setView('closed')
+  }
+
+  return (
+    <>
+      <button type="button" className="tbtn" onClick={openList} title="新建 / 打开 / 重命名 / 删除工程">
+        项目
+      </button>
+      {view === 'list' ? (
+        <ProjectListDialog
+          projects={projects}
+          currentProjectId={currentId}
+          onOpen={async (projectId) => {
+            const target = await openProject(session, projectId)
+            await swapTo(target.doc)
+          }}
+          onRename={async (projectId, next) => {
+            if (projectId === currentId) {
+              // 当前打开的这一份：走 commit，落撤销。
+              commit('重命名工程', (draft) => {
+                draft.name = next.trim()
+              })
+              await session.save(store.getState().doc)
+            } else {
+              await renameStoredProject(session, projectId, next)
+            }
+            await refresh()
+          }}
+          onDelete={async (projectId) => {
+            await deleteProject(session, projectId)
+            await refresh()
+            // 删掉的正是当前打开的那一份时，落到新建对话框——**不崩**。
+            // 留在原地的话，用户面对的是一个编辑着一份已经不存在的工程的编辑器，
+            // 而下一次自动保存会把它又写回去。
+            if (projectId === currentId) setView('new')
+          }}
+          onNew={() => setView('new')}
+          onClose={() => setView('closed')}
+        />
+      ) : null}
+      {view === 'new' ? (
+        <NewProjectDialog
+          onCreateEmpty={async (next) => {
+            await swapTo(await createProject(session, next))
+          }}
+          onCreateBuiltin={async (builtin) => {
+            await swapTo(await createFromBuiltin(session, builtin))
+          }}
+          onClose={() => setView('closed')}
+        />
+      ) : null}
+    </>
   )
 }
 

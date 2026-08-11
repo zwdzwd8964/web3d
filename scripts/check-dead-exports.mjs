@@ -41,7 +41,7 @@ const BACKLOGS = ['docs/TASK_BACKLOG_V1.md', 'docs/TASK_BACKLOG_V0_5.md', 'docs/
  * no landing point, and「把它加进豁免表」becomes the cheapest way to make this script green.
  * Raising it requires a reason in the commit message and a line in the allowlist's ratchet log.
  */
-const MAX_EXEMPTIONS = 24
+const MAX_EXEMPTIONS = 21
 
 /**
  * ADR-0033 · 第三张表：**接口先落、消费者在后**。
@@ -138,7 +138,7 @@ const MIN_SPEC_IDENTIFIERS = 200
  *
  * 2026-08-03: 121 orphans total — 31 attributable (they go in the four-column table), 90 not.
  */
-const MAX_LEGACY = 83
+const MAX_LEGACY = 82
 
 /**
  * Floor on the size of the scanned export surface.

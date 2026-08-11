@@ -38,7 +38,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  */
 const READERS = [
   {
-    file: 'packages/editor/src/main.tsx',
+    // T-282 · 从 main.tsx 挪到 project-lifecycle.ts —— 它现在是 BOOT_STEPS 的第一步，
+    // 而步骤表要能在纯 Node 里跑。**读外部文档的那一段跟着走了，所以这一行也跟着走。**
+    file: 'packages/editor/src/project/project-lifecycle.ts',
     what: '编辑器启动时读上次保存的文档（IndexedDB）',
     regression: 'packages/editor/test/restore-migrates.test.ts',
   },
