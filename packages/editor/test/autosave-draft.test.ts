@@ -91,6 +91,9 @@ function recordingSaver(overrides: { save?: (doc: SceneDocument) => Promise<void
   return { saver, calls, states, timers, drafts }
 }
 
+/** 让 fire-and-forget 的草稿写入跑完。 */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
 describe('T-288 · 草稿通道的次序', () => {
   /**
    * 卡面的第一条验收。
@@ -101,8 +104,40 @@ describe('T-288 · 草稿通道的次序', () => {
   it('一次 flush 的三个调用次序是 saveDraft → save → clearDraft', async () => {
     const { saver, calls } = recordingSaver()
     saver.schedule(doc)
+    await settle()
+    // `schedule` 自己那次即时草稿不属于「这一次 flush」，先记完再清零。
+    expect(calls, '编辑当场就该有草稿').toEqual(['saveDraft'])
+    calls.length = 0
+
     await saver.flush()
     expect(calls).toEqual(['saveDraft', 'save', 'clearDraft'])
+  })
+
+  /**
+   * T-288 修 · **编辑当场就写草稿，不等防抖。**
+   *
+   * 只在 flush 里写的话，能救回来的窗口只有「一次保存正在进行中」的那十几毫秒，而
+   * 崩溃最常发生在**安静期里**——改完一笔、防抖还没到期的那 1.2 秒。写 T-289 的 E2E
+   * 时才发现：那样的崩溃恢复覆盖的是每 1210 毫秒里的 10 毫秒。
+   */
+  it('编辑之后、防抖到期之前，草稿就已经在了', async () => {
+    const { saver, calls, drafts } = recordingSaver()
+    saver.schedule(doc)
+    await settle()
+    // 一次 flush 都还没发生。
+    expect(calls).toEqual(['saveDraft'])
+    expect(drafts.at(-1)?.edits).toBe(1)
+  })
+
+  /** 连着改很多笔时草稿写入要**合并**，不是排队——只有最后一份的内容是有用的。 */
+  it('连改多笔时草稿写入被合并，不是一笔一次', async () => {
+    const { saver, calls, drafts } = recordingSaver()
+    for (let i = 0; i < 8; i += 1) saver.schedule(doc)
+    await settle()
+    expect(calls.length, `8 笔编辑写了 ${calls.length} 次草稿`).toBeLessThan(8)
+    expect(calls.length).toBeGreaterThan(0)
+    // 合并之后留下的那一份，记的是**全部** 8 笔。
+    expect(drafts.at(-1)?.edits).toBe(8)
   })
 
   /**
@@ -118,6 +153,9 @@ describe('T-288 · 草稿通道的次序', () => {
       },
     })
     saver.schedule(doc)
+    await settle()
+    calls.length = 0
+
     await saver.flush()
     expect(calls).toEqual(['saveDraft'])
     expect(calls).not.toContain('clearDraft')
@@ -160,8 +198,16 @@ describe('T-288 · 草稿通道的次序', () => {
       },
     })
     saver.schedule(doc)
+    await settle()
+    calls.length = 0
+
     await saver.flush()
-    expect(calls).toEqual(['saveDraft', 'save', 'saveDraft', 'save', 'clearDraft'])
+    // 中间那次 `saveDraft` 有两个来源（写入中那次 `schedule` 的即时草稿，以及第二轮
+    // flush 自己的），所以这里断的是**关键位置**：第一次 save 之后没有 clearDraft，
+    // 最后一次 save 之后才有。
+    expect(calls.filter((c) => c !== 'saveDraft')).toEqual(['save', 'save', 'clearDraft'])
+    expect(calls.at(0)).toBe('saveDraft')
+    expect(calls.at(-1)).toBe('clearDraft')
   })
 
   it('编辑次数是编辑次数，不是保存次数', async () => {
@@ -171,18 +217,19 @@ describe('T-288 · 草稿通道的次序', () => {
     saver.schedule(doc)
     await saver.flush()
     // 防抖的存在意义就是把很多次编辑合并成一次保存；用保存次数去数，横幅上那个 N 恒为 1。
-    expect(drafts[0]?.edits).toBe(3)
+    expect(drafts.at(-1)?.edits).toBe(3)
     expect(saver.unsavedEdits).toBe(0)
   })
 
   it('防抖到期时也走同一条通道，不是只有手动 flush 才写草稿', async () => {
     const { saver, calls, timers } = recordingSaver()
     saver.schedule(doc)
-    expect(calls).toEqual([])
+    await settle()
+    calls.length = 0
+
     timers.runAll()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls.slice(0, 2)).toEqual(['saveDraft', 'save'])
+    await settle()
+    expect(calls).toEqual(['saveDraft', 'save', 'clearDraft'])
   })
 })
 

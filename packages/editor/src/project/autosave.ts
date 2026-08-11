@@ -74,6 +74,9 @@ export class AutoSaver {
   private disposed = false
   /** T-288 · 从上一次成功落盘到现在累计了多少次编辑。 */
   private edits = 0
+  /** 正在写的那份草稿，以及写完之后要补写的那一份。见 `writeDraft`。 */
+  private draftInflight: Promise<void> | null = null
+  private draftPending: SceneDocument | null = null
 
   private readonly delayMs: number
   private readonly setTimer: (fn: () => void, ms: number) => unknown
@@ -92,6 +95,14 @@ export class AutoSaver {
     // T-288 · 计的是**编辑次数**，不是保存次数。崩溃横幅要说「有 N 处修改没保存」，
     // 而防抖的存在意义就是把很多次编辑合并成一次保存——用保存次数去数，那个 N 恒为 1。
     this.edits += 1
+    // T-288 修 · **草稿在这里就写，不等防抖。**
+    //
+    // 只在 `flush` 里写草稿的话，能被救回来的窗口只有「一次保存正在进行中」的那十几
+    // 毫秒；而崩溃最常发生的位置是**安静期里**——用户改完一笔、防抖还没到期的那 1.2 秒。
+    // 换句话说，那样的崩溃恢复覆盖的是每 1210 毫秒里的 10 毫秒。写 E2E 时才发现。
+    //
+    // 不 await：草稿是兜底，不是主路径，让它阻塞输入是本末倒置。
+    void this.writeDraft(doc)
     if (this.inflight) {
       this.dirtyDuringSave = true
       return
@@ -164,6 +175,37 @@ export class AutoSaver {
   /** T-288 · 还没落盘的编辑次数。崩溃横幅上那个数字的来源。 */
   get unsavedEdits(): number {
     return this.edits
+  }
+
+  /**
+   * 写一份草稿，**同一时刻只有一次在飞**。
+   *
+   * 合并而不是排队：连着改二十笔，排队会得到二十次库写入，而只有最后一次的内容是
+   * 有用的。在飞时记下最新的那一份，写完再补一次。
+   */
+  private async writeDraft(doc: SceneDocument): Promise<void> {
+    if (!this.options.saveDraft) return
+    if (this.draftInflight) {
+      this.draftPending = doc
+      return
+    }
+    this.draftInflight = (async () => {
+      try {
+        await this.options.saveDraft?.(doc, this.edits)
+      } catch (error) {
+        // 草稿写不进去不该打断编辑。它只影响「崩了之后能不能救回来」，而那件事
+        // 此刻还没发生——把它变成一条保存失败提示，是拿一个假设的坏消息盖住真状态。
+        console.warn('[autosave] 草稿写入失败，这次崩溃将无法恢复。', error)
+      }
+    })()
+    await this.draftInflight
+    this.draftInflight = null
+
+    const pending = this.draftPending
+    if (pending && !this.disposed) {
+      this.draftPending = null
+      await this.writeDraft(pending)
+    }
   }
 
   dispose(): void {

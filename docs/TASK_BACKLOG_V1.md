@@ -2778,6 +2778,9 @@
   ② `ui-store.ts` 加一个 `projectListOpen` 字段——「清理本地数据」需要第二个开启者能
   打开工程列表，否则那个入口只能是一句「请手动打开工程列表」，也就是一个不做事的按钮；
   ③ `tree-search.test.ts` 的两条 ui-store 断言跟着改（字段数变了）。
+- **收工后补了一刀**（见变异 ⑧）：草稿原本只在 flush 里写，于是能救回来的窗口只有
+  「一次保存正在进行中」的那十几毫秒。写 T-289 的 E2E 时才发现——改成 `schedule` 当场写、
+  并按「同一时刻只有一次在飞」合并。
 - **独占** `packages/editor/src/project/autosave.ts` · `useAutoSave.ts` · `packages/editor/src/main.tsx` ·
   `packages/editor/src/App.tsx`（两条横幅，列 A）· `packages/editor/test/autosave-draft.test.ts`(新)
 - **做** AutoSaver 草稿通道（`saveDraft → save → clearDraft`）与编辑计数；开机租约判定与心跳；
