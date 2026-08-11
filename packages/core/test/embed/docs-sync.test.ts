@@ -137,7 +137,16 @@ describe('ADR-0042 决策 5 · 样板页只 mount 一次', () => {
   it('快速开始里那次 mount 的结果被存下来复用', () => {
     // 只数一次调用还不够：把第二次 mount 换成「不存句柄、按钮全绑不上」也是一次调用。
     expect(sample).toMatch(/const\s+ready\s*=\s*W3Player\.mount\(/)
-    expect(sample, '样板页自己的接线要复用那个句柄').toMatch(/\n\s*ready\s*\n?\s*\.then\(/)
+
+    // ⚠ 第一版这条断言是**空跑的**：它对整份文件匹配 `ready.then(`，而快速开始切片自己
+    // 就有一行 `ready.then(async (player) => {`。把样板页自己的接线整段删掉（四个按钮
+    // 一个都绑不上、#log 一个字不写），11 条照样全绿。而快速开始那一行又被同文件的
+    // 「逐字相同」测试钉死在 EMBED_API.md 上——于是这条断言由那条测试蕴含，什么都没多查。
+    //
+    // 改成只看 `doc:quickstart:end` **之后**的那一段：样板页自己的接线必须复用句柄。
+    const wiring = sample.slice(sample.indexOf('// doc:quickstart:end'))
+    expect(wiring, '样板页自己的接线要复用那个句柄').toMatch(/\bready\s*\n?\s*\.then\(/)
+    expect(wiring, '接线段里不许再 mount 一次').not.toContain('W3Player.mount(')
   })
 
   it('快速开始带 `.catch` —— 客户照抄的就是这一段', () => {

@@ -131,6 +131,25 @@ function loadReports() {
       continue
     }
 
+    // ADR-0042 · **没测到的行不许进附件A**，理由与拒绝软渲报告完全相同。
+    //
+    // 这一条是对抗式复核补上的。ADR-0042 第一轮把「未测到」这个形态造了出来，却让
+    // 回填脚本原样 `${row.value}` 取值——于是「未测到（样本 3/8）」被写进「目标值」列，
+    // 盖上 `[实测] M2 · 代号 · 日期` 的章。**比 `0.0 fps` 好，但它照样会被当成一次有效
+    // 实测归档**，而 §7 回填规则 5 说一档只能有一次实测——这一档就被这次没跑成的测量
+    // 占掉了。而判据一直就在手边：那几行的 `verdict` 是 `warn`。
+    const unmeasured = METRICS.map((m) => ({ m, row: findRow(report, m.from) })).filter(
+      ({ row }) => row.verdict === 'warn' || String(row.value).includes('未测到'),
+    )
+    if (unmeasured.length > 0) {
+      problems.push(
+        `${basename(file)} 里这些指标没测到：${unmeasured.map(({ m, row }) => `${m.metric}（${row.value}）`).join('、')}。` +
+          '一份含「未测到」的报告不能用于回填附件A §7——它会盖上「[实测]」的章并占掉这一档唯一的实测名额，' +
+          '而它其实是一次没跑成的测量。请去掉 `?fast=1`、在目标机器上重跑一次。',
+      )
+      continue
+    }
+
     reports.push({ file, tier: named.tier, codename: named.codename, report })
   }
 

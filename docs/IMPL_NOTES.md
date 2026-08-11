@@ -540,7 +540,7 @@ patch 未被识别` 一直在日志里，但没有任何断言看它。**日志�
 
 | 位置 | 读的是什么 | 调的是 | 判定 |
 |---|---|---|---|
-| `editor/src/main.tsx:99` | IndexedDB 里上次保存的文档 | `migrate` | ✅ 外部字节，必须迁移。回归：`editor/test/restore-migrates.test.ts` |
+| `editor/src/project/project-lifecycle.ts` | IndexedDB 里上次保存的文档 | `migrate` | ✅ 外部字节，必须迁移。回归：`editor/test/restore-migrates.test.ts` |
 | `editor/src/publish/snapshots.ts:50` | 一次历史快照 | `migrate` | ✅ 外部字节，必须迁移。**今天没有专门回归**，由 `check-migrate-on-read.mjs` 看守 |
 | `storage/src/package.ts:199` | `.w3p` 包里的 `scene.json` | `migrate` | ✅ 外部字节，且是**播放器读到的每一份文档的必经之路**。回归：`storage/test/package-migrates.test.ts` |
 | `schema/src/migrate.ts:361` | 迁移链末端的产物 | `validate` | ✅ **唯一一处「validate 用对了」的正面样本**。每一份外部文档最后都从这里过一次，验的是迁移之后的形状。卡面漏了它 |
@@ -557,3 +557,28 @@ patch 未被识别` 一直在日志里，但没有任何断言看它。**日志�
 
 `snapshots.ts` 的回滚路径没有专门的单测。补它需要先造一份「快照里存着 v2 文档」的
 夹具，与 `.w3p` 那条重叠度很高。登记在这里，不假装它被覆盖了。
+
+---
+
+## 6 · ADR-0042 第二轮复核「登记后放」的十条（2026-08-11）
+
+M17 收尾的那次本地试跑查出四处缺陷，修完之后又派了五个 agent 对抗式复核，判**站不住**，
+共 30 条。两条 blocker 与八条「现在修」已在 ADR-0042 第二轮结账；下面十条是**明知有、
+现在不修**的，连同不修的理由一起记在这里——不假装它们被覆盖了。
+
+`editor/src/main.tsx:99` 那一行在上表里已随 T-282 挪到
+`editor/src/project/project-lifecycle.ts`（`BOOT_STEPS` 的第一步），守卫的 READERS 表
+同步改了一行。
+
+| # | 是什么 | 位置 | 为什么现在不修 |
+|---|---|---|---|
+| A6 | 「阴影贴图显存」平手时的选档已改成取更贵的档，但 `>` → `>=` 这条变异**仍然 5/5 存活**——因为平手要靠 2 盏 high 与 8 盏 medium 同时被测到，而爬坡通常先在其中一档收摊 | `metrics.ts` 的 `worst` reduce | 要一份「两档都恰好到达且显存相等」的构造数据才抓得住。已有一条单测钉住平手方向，变异存活的是**它的对偶**（取相等时的另一支）。记在这里比编一条断言诚实 |
+| A7 | `MIN_SAMPLES = 8` 偏低两个样本，且落在 p95 估计量退化区（n ≤ 20 时 p95 ≡ 最慢帧） | `metrics.ts:MIN_SAMPLES` · `summariseFrames` 的 index | 改大会让 `?fast=1` 下大量档变成「未测到」，而那个取舍需要真机数据。**随 G0.5-8 结账**：它要么是 24，要么由目标机器实测定 |
+| A8 | 后处理链的 `composed/direct fps` 打进 `console.info` 时不过 `isMeasured`，饥饿时打「0.0 fps」 | `main.ts` 的 `lightingRamp` 尾部 | 只进控制台，不进表、不进 JSON、不进附件A。修它要把 postFx 也接进 `frames` 的那套结构，收益与改动不成比例 |
+| A9 | 页面上三处进度文案（「约 6 秒」「最多约 5 秒」「最多约 20 秒」）没跟着 3× 硬上限改 | `main.ts` 的 `show(...)` | 纯文案。真要改就该让它从 `SAMPLE_MS` × `HARD_CAP_FACTOR` 算出来，与「首屏文案里的秒数」那条 e2e 断言一并设计 |
+| B4′ | `SectionCost` 形状的值在类型上可以带 `skipped` 键，`isSkip` 会误判 | `metrics.ts` 的 `SectionMeasurement` / `isSkip` | 要根治得给 `SectionCost` 加一个判别字段（`kind: 'cost'`），那会改掉已经写好的三处构造点与四条单测。今天两个生产构造点都不可能带上该键 |
+| B5 | `show('正在量剖切切换的首帧代价…')` 后面紧跟同步的 `measureSection`，浏览器拿不到绘制机会，这条提示**永远显示不出来** | `main.ts` | 要修得把 `measureSection` 前面加一次 `await nextFrame()`，而那会往「首帧还是冷的」这个前提里插一帧。等 B1 的正解（在首帧之前建 `withoutSections` 基线）一起做 |
+| C3 | bench 的零值守卫按**指标名**分档（帧率非 0、首屏/剖切毫秒可为 0、贴图显存可为 0、阴影显存不可为 0），而不是一条统一规则 | `e2e/tests/bench.spec.ts` | 统一规则不存在：每一档的零值合不合法确实不同。这一版是显式枚举，代价是加新指标时要想一下它属于哪一档。**加指标的人看不到这条提醒**——这是它留在这里的原因 |
+| C4 | 「整页一个数都没测到」仍然能让 bench 的 e2e 绿：把 `MIN_SAMPLES` 调到 100000 让全表变「未测到」，三条新断言全部容忍 | `e2e/tests/bench.spec.ts` | 补一条「至少头条指标是真读数」会在慢 CI 上抖动，而 SwiftShader 的抖动幅度今天没有数据。**这是一个需要真机数据的决策，不是一个补丁** |
+| D3 | 样板页两条链共用一个句柄之后，`subscribe` 变成顺序敏感的共享状态（`EmbedController.subscribe` 是**覆盖**不是并集）：快速开始发 `['hotspotClick','variableChange']`，接线段发 `null`，今天靠「快速开始在第一个 await 之前就发出去」侥幸不冲突 | `samples/host-demo/index.html` · `embed-controller.ts` | 正解是让 `subscribe` 取并集，那是协议语义变更（要动 `EMBED_PROTOCOL` 的文档与 `COMMANDS`）。**本次新引入**，如实登记 |
+| D4/D5 | 用例 5 的「iframe 不溢出」用了一个无出处的 `+2` 容差（实测余量恒为 1 px，来自 `#viewer` 的下边框）；截图只断言 `bytes > 1000`，没有用例 1 那两条真正管用的（`colours > 1`、`opaque > 0`） | `e2e/tests/embed.spec.ts` | 两条都是**弱断言而非错断言**。收紧截图那条要把用例 1 的解码逻辑抽出来共用，属于重构 |

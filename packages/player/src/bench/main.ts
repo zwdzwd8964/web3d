@@ -14,6 +14,7 @@ import {
   gradeLoad,
   gradeSection,
   gradeStress,
+  classifySection,
   isMeasured,
   shouldKeepSampling,
   summariseFrames,
@@ -108,14 +109,6 @@ async function run(bytes: Uint8Array, sourceName: string) {
       firstFrameMs: performance.now() - t2,
     }
 
-    // ADR-0042 决策 4 · 剖切档**在爬坡之前**测，因为 program 缓存这时候还是冷的。
-    //
-    // 原来它排在灯光扫描之后，而 `renderStats.programs` 读的是 program 缓存——爬坡跑完
-    // 时开与关两种变体早就都编译进去了，于是 `programsAfterOn - programsBefore` 结构上
-    // 恒为 0。那一行观测不到它声称要观测的东西，而它的说明还写着「开一次剖切等于全场
-    // 材质重编译一遍」：报告自己打架。
-    show('<p class="bench__note">正在量剖切切换的首帧代价…</p>')
-    const section = measureSection(runtime, session)
 
     show(`<p class="bench__note">正在测量…（约 ${SAMPLE_MS.main / 1000} 秒，期间相机会自动环绕）</p>`)
     const frameTimes = await measure(runtime, session)
@@ -137,6 +130,15 @@ async function run(bytes: Uint8Array, sourceName: string) {
 
     show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
     const lighting = await lightingRamp(runtime, session)
+
+    // ADR-0042 决策 4 **已撤回**（对抗式复核证伪）。它想让 program 缓存在测剖切时还是
+    // 冷的，于是把这一档挪到主采样之前——**没用**：「首屏 · 首帧」为了计时必然更早地按
+    // 文档态画过一帧，而走到 cost 分支的前提正是 clipPlanes > 0，那一帧已经把 clip=N 的
+    // 变体编译完了。挪动本身还带进一个回归：measureSection 为取基线画的 3 帧会编译一整套
+    // clip=0 变体，three 不回收（releaseProgram 只从 deallocateMaterial 进），于是
+    // 「几何体 / 着色器」把**测量道具**算进了客户模型（实测 5 → 9）。档序还原到爬坡之后。
+    show('<p class="bench__note">正在量剖切切换的首帧代价…</p>')
+    const section = measureSection(runtime, session)
 
     show('<p class="bench__note">正在量爆炸进行中的帧率…</p>')
     const explode = await measureExplode(runtime, session)
@@ -400,9 +402,14 @@ function measureSection(
   runtime: ReturnType<typeof createPlayerSession>['runtime'],
   session: ReturnType<typeof createPlayerSession>['session'],
 ): SectionMeasurement {
-  // 快速短路：一把刀都没有，连试都不用试。**但它不是判据**——见下面 `clipPlanes` 那一处。
+  // 判据本身在 `classifySection`（纯函数，有单测）。这里只负责**探针**：数一数文档里
+  // 有几把刀、开起来之后渲染器上装了几条平面。
+  //
+  // 抽出去的理由是对抗式复核查出来的：这个函数全仓**零测试引用**（模块私有 + e2e 夹具
+  // 每个节点写死 `section: null`），于是账本里为它登记的那条变异不可能成立。
   const sectionNodes = runtime.doc.nodes.filter((node) => node.section).length
-  if (sectionNodes === 0) return { skipped: 'no-section' }
+  const upfront = classifySection({ sectionNodes, clipPlanes: 1 })
+  if (upfront) return upfront
 
   /** 画一帧，返回它花了多久。 */
   const frame = (): number => {
@@ -428,7 +435,8 @@ function measureSection(
     // 一把 `visible: false` 的刀按 ADR-0039 的世界可见性判定不装任何裁剪平面，于是
     // 这三行会输出绿色「通过」的 `0 ms` / `+0 program`，读者据此得出「剖切几乎免费」——
     // 与事实相反。而带一把关着的刀是**合法文档**，客户送检的资产照样会这样。
-    if (clipPlanes === 0) return { skipped: 'no-planes', sectionNodes }
+    const skip = classifySection({ sectionNodes, clipPlanes })
+    if (skip) return skip
 
     runtime.setSectionsEnabled(false)
     const offFirstFrameMs = frame()

@@ -103,8 +103,21 @@ test.describe('T-278 · bench 页', () => {
     //     [pass] 最慢单帧   = 0.0 ms
     // `'fail'` 是合法判定、`0.0 fps` 是非空字符串，于是这条 e2e 绿了六次。
     for (const cell of cells) {
-      // 一个真的跑得起来的页面不会产出 0.0 fps / 0.0 ms：那只可能是空样本算出来的。
-      expect(cell.value, `「${cell.metric}」报了 ${cell.value} —— 空样本被印成了读数`).not.toMatch(/\b0\.0 (fps|ms)\b/)
+      // 一个真的跑得起来的页面不会产出 `0.0 fps`：那只可能是空样本算出来的。
+      //
+      // ⚠ **零值不能一刀切，两轮都在这里栽过。** 第一版写 `/\b0\.0 (fps|ms)\b/`，抓不到
+      // 提交信息自己引用的症状原文（`gradeSection`/`gradeLoad` 的毫秒走 `toFixed(0)`，
+      // 印的是 `0 ms`），也抓不到 `0.0 MB（0 盏 · low）`。第二版把 MB 一并禁掉，当场
+      // 红在一条**合法读数**上：这个 e2e 场景是三个没有贴图的立方体，
+      // 「贴图显存（估算）= 0.0 MB」是对的。
+      //
+      // 所以按**指标名**分：帧率永远不该是 0；首屏与剖切的毫秒在快机器上可以是 0；
+      // 贴图显存可以是 0（没有贴图）；而阴影显存那一行**不可能**是 0——0 盏投影灯时
+      // 它整行不出现（ADR-0042 第二轮 A3）。
+      expect(cell.value, `「${cell.metric}」报了 ${cell.value} —— 空样本被印成了读数`).not.toMatch(/\b0\.0 fps\b/)
+      if (cell.metric === '阴影贴图显存（估算）') {
+        expect(cell.value, '这一行是 0 就说明 0 盏灯当选了，而它本该整行不出现').not.toMatch(/\b0\.0 MB\b/)
+      }
       // 未测到的行必须判 warn。判 pass 的话它在报告里与一个真读数无从分辨；
       // 判 fail 的话它会被当成「这台机器不行」的硬件结论。
       if (cell.value.includes('未测到')) {

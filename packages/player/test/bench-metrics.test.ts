@@ -12,6 +12,7 @@ import {
   gradeLighting,
   HARD_CAP_FACTOR,
   MIN_SAMPLES,
+  classifySection,
   gradeExplode,
   gradeLoad,
   gradeSection,
@@ -609,16 +610,24 @@ describe('T-281 · 剖切切换的首帧代价', () => {
     expect(off.note).toContain('两次分别量')
   })
 
-  it('shader 重编译那一行报的是差值，不是绝对数', () => {
-    const row = gradeSection(cost).find((r) => r.metric === '剖切引起的 shader 重编译')!
-    expect(row.value).toBe('+12 个 program')
+  it('**program 那一行报绝对数，不再报差值** —— 决策 4 撤回后的诚实形态', () => {
+    // 原来它报「+N 个 program」并断言「开一次剖切等于全场材质重编译一遍」。对抗式复核
+    // 证明那个差值**结构上恒为 0**：`renderStats.programs` 读的是 program 缓存，而
+    // 「首屏 · 首帧」为了计时必然先按文档态画过一帧——走到这里的前提又正是 clipPlanes > 0，
+    // 即那一帧已经把 clip=N 的变体编译完了。真实代价被记进了「首屏 · 首帧」。
+    const row = gradeSection(cost).find((r) => r.metric === '剖切期间的 shader program 数')!
+    expect(row.value).toBe('24 个')
+    expect(row.value).not.toContain('+')
   })
 
-  it('program 数没涨时报 +0，不报负数', () => {
-    // 驱动缓存命中时 program 数可能不变甚至被回收。报一个负数会读成「剖切省了显存」。
-    const row = gradeSection({ ...cost, programsAfterOn: 10 }).find((r) => r.metric === '剖切引起的 shader 重编译')!
-    expect(row.value).toBe('+0 个 program')
+  it('那一行的说明**承认自己量不到编译代价**，而不是声称量到了', () => {
+    // 「留着一条声称已修好的行」比没有这一行更坏。
+    const row = gradeSection(cost).find((r) => r.metric === '剖切期间的 shader program 数')!
+    expect(row.note).toContain('这一行量不到那次编译的代价')
+    expect(row.note).toContain('首屏 · 首帧')
+    expect(row.note).not.toContain('这个数是上面那两个毫秒数的成因')
   })
+
 
   it('两个毫秒数的 limit 都是「—」：这一档没有阈值来源', () => {
     for (const row of gradeSection(cost)) expect(row.limit, row.metric).toBe('—')
@@ -953,5 +962,158 @@ describe('ADR-0042 · shouldKeepSampling —— 缺陷的根', () => {
 
   it('硬上限是标称的 3 倍，写在常量里而不是散在两处', () => {
     expect(HARD_CAP_FACTOR).toBe(3)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* ADR-0042 第二轮 · 对抗式复核查出来的                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 第一轮的净效果是正的，但复核判它**站不住**，两条 blocker：
+ *
+ * 1. 「一档都没测到」在**五条产能结论行**上仍然长成硬件结论——值写「不足 1 盏 / 不足
+ *    1 份」、判 fail。同一个文件的 `recommendShadowDefault` 明明为这件事单开了分支并写了
+ *    注释，作者自己的规矩没往上一格走。而第一轮新加的 e2e 守卫写的是「值含『未测到』才查
+ *    warn」，这五行不含那三个字，正好从守卫底下过。**那是起因那三行 0.0 fps 换了个措辞活下来。**
+ * 2. `docs/MUTATIONS.md` 里为决策 3 登记的「红 2 条」不可能成立：被变异的那一行
+ *    （`measureSection` 里的 `clipPlanes === 0`）全仓**零测试引用**。账本里一条
+ *    「声称红、实际绿」的记录，比没有记录更坏——它让下一个人以为这里有守卫。
+ */
+
+describe('ADR-0042 第二轮 · 「没测到」不许长成硬件结论（blocker A1）', () => {
+  /** 一整组灯光档，全部采样不足。 */
+  const starved: LightLevel[] = (['off', ...SHADOW_QUALITIES] as ShadowSetting[]).flatMap((shadows) =>
+    [0, 1].map((lights) => ({ lights, shadows, fps: 0, drawCalls: 1, frames: 2 })),
+  )
+
+  it('四条「动态灯上限」报未测到并判 **warn**，不是「不足 1 盏」判 fail', () => {
+    const rows = gradeLighting(starved)
+    for (const metric of [
+      '动态灯上限（无阴影）',
+      '动态灯上限（low 阴影）',
+      '动态灯上限（medium 阴影）',
+      '动态灯上限（high 阴影）',
+    ]) {
+      const row = rows.find((r) => r.metric === metric)!
+      expect(row.value, metric).toContain('未测到')
+      expect(row.value, metric).not.toContain('不足 1 盏')
+      expect(row.verdict, metric).toBe('warn')
+    }
+  })
+
+  it('那四行的说明里写着「这不是硬件结论」', () => {
+    const row = gradeLighting(starved).find((r) => r.metric === '动态灯上限（无阴影）')!
+    expect(row.note).toContain('这不是硬件结论')
+    expect(row.note).toContain('重跑')
+  })
+
+  it('「承载上限」同样：未测到 → warn，不是「不足 1 份」→ fail', () => {
+    const rows = gradeStress([
+      { copies: 1, fps: 0, drawCalls: 1, triangles: 10, frames: 0 },
+      { copies: 2, fps: 0, drawCalls: 1, triangles: 10, frames: 3 },
+    ])
+    const row = rows.find((r) => r.metric === '承载上限')!
+    expect(row.value).toContain('未测到')
+    expect(row.verdict).toBe('warn')
+    expect(row.note).toContain('这不是硬件结论')
+  })
+
+  it('**真的测了、真的一档都不过线时，仍然判 fail** —— 那才是硬件结论', () => {
+    // 两种成因必须分得开：把 none-passed 也改成 warn 的话，一台真的跑不动的机器
+    // 会得到一份「需要重测」的报告，而它已经测过了。
+    const tooSlow: LightLevel[] = [{ lights: 1, shadows: 'off', fps: 10, drawCalls: 1, frames: 60 }]
+    const row = gradeLighting(tooSlow).find((r) => r.metric === '动态灯上限（无阴影）')!
+    expect(row.value).toBe('不足 1 盏')
+    expect(row.verdict).toBe('fail')
+
+    const stress = gradeStress([{ copies: 1, fps: 10, drawCalls: 1, triangles: 10, frames: 60 }])
+    expect(stress.find((r) => r.metric === '承载上限')!.verdict).toBe('fail')
+  })
+
+  it('部分测到时不受影响 —— 只有「一档都没测到」才是 not-measured', () => {
+    const mixed: LightLevel[] = [
+      { lights: 1, shadows: 'off', fps: 60, drawCalls: 1, frames: 60 },
+      { lights: 8, shadows: 'off', fps: 0, drawCalls: 8, frames: 0 },
+    ]
+    const row = gradeLighting(mixed).find((r) => r.metric === '动态灯上限（无阴影）')!
+    expect(row.value).toContain('1 盏')
+    expect(row.verdict).toBe('pass')
+  })
+})
+
+describe('ADR-0042 第二轮 · 阴影显存那一行的三处（A2 / A3 / A5）', () => {
+  it('**0 盏不当选** —— 爬坡在 count=0 就收摊时不报「0.0 MB（0 盏 · low）」', () => {
+    // 第一版会把「没爬上去」印成一个判 pass 的读数，读者据此得出「阴影几乎不占显存」。
+    // 而第一版新加的 e2e 零值守卫按量纲写死成 fps|ms，MB 从底下走过去了。
+    const zeroOnly: LightLevel[] = SHADOW_QUALITIES.map((q) => ({
+      lights: 0,
+      shadows: q as ShadowSetting,
+      fps: 30,
+      drawCalls: 1,
+      frames: 60,
+    }))
+    expect(gradeLighting(zeroOnly).find((r) => r.metric === '阴影贴图显存（估算）'), '0 盏不该产出这一行').toBeUndefined()
+  })
+
+  it('**平手取更贵的档** —— 严格大于在平手时仍然偏向便宜的那个', () => {
+    // 2 盏 high = 2×2048²×4 = 32 MB；8 盏 medium = 8×1024²×4 = 32 MB。平手在真实网格上可达。
+    expect(estimateShadowMemory(2, 'high')).toBe(estimateShadowMemory(8, 'medium'))
+    const tie: LightLevel[] = [
+      { lights: 8, shadows: 'medium', fps: 50, drawCalls: 8, frames: 60 },
+      { lights: 2, shadows: 'high', fps: 50, drawCalls: 2, frames: 60 },
+    ]
+    expect(gradeLighting(tie).find((r) => r.metric === '阴影贴图显存（估算）')!.value).toContain('high')
+  })
+
+  it('**一档都没测到时报「未测到」，而不是整行消失**', () => {
+    // 同一个文件上方 gradeSection 的注释刚写过「少了一整档的报告与『这一档没量到』的
+    // 报告，在读者眼里是两件事」。两处纪律要一致。
+    const starved: LightLevel[] = SHADOW_QUALITIES.map((q) => ({
+      lights: 4,
+      shadows: q as ShadowSetting,
+      fps: 0,
+      drawCalls: 4,
+      frames: 1,
+    }))
+    const row = gradeLighting(starved).find((r) => r.metric === '阴影贴图显存（估算）')!
+    expect(row, '这一行不该消失').toBeDefined()
+    expect(row.value).toContain('未测到')
+    expect(row.verdict).toBe('warn')
+  })
+
+  it('那一行不再与「上限」打架 —— 说明里写清了它报的就是压垮爬坡的那一档', () => {
+    const row = gradeLighting(LADDER).find((r) => r.metric === '阴影贴图显存（估算）')!
+    expect(row.note).toContain('已测到的档里最重的那一个')
+    expect(row.note).toContain('不矛盾')
+  })
+})
+
+describe('ADR-0042 第二轮 · classifySection（blocker C1 + B3）', () => {
+  /**
+   * 判据从 `measureSection` 里抽出来，因为那个函数全仓**零测试引用**——模块私有，
+   * 而 bench 的 e2e 夹具每个节点写死 `section: null`。账本里为它登记的「红 2 条」
+   * 引的是 `gradeSection` 这个纯函数喂手搓输入的用例，与被变异的那一行毫无关系。
+   */
+  it('一把刀都没有 → no-section', () => {
+    expect(classifySection({ sectionNodes: 0, clipPlanes: 0 })).toEqual({ skipped: 'no-section' })
+    // 有平面但没有节点是不可能的状态；判据仍以节点数优先，因为那是「与这份资产无关」。
+    expect(classifySection({ sectionNodes: 0, clipPlanes: 3 })).toEqual({ skipped: 'no-section' })
+  })
+
+  it('**有刀但一条平面都没装 → no-planes**，且带上刀的数量', () => {
+    expect(classifySection({ sectionNodes: 2, clipPlanes: 0 })).toEqual({ skipped: 'no-planes', sectionNodes: 2 })
+  })
+
+  it('装上了平面 → 可以量', () => {
+    expect(classifySection({ sectionNodes: 1, clipPlanes: 1 })).toBeNull()
+    expect(classifySection({ sectionNodes: 3, clipPlanes: 2 })).toBeNull()
+  })
+
+  it('两种跳过给出的形状不同 —— 下游据此判 pass 还是 warn', () => {
+    const a = classifySection({ sectionNodes: 0, clipPlanes: 0 })!
+    const b = classifySection({ sectionNodes: 1, clipPlanes: 0 })!
+    expect(gradeSection(a)[0]!.verdict).toBe('pass')
+    expect(gradeSection(b)[0]!.verdict).toBe('warn')
   })
 })

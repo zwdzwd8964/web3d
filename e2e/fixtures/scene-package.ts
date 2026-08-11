@@ -72,6 +72,19 @@ export function buildScenePackage(options: ScenePackageOptions): Uint8Array {
     media: [],
     dataSources: [],
     prefabs: [],
+    // ADR-0042 第二轮 · **两个变量都要有，删任何一个都会让别处红。**
+    //
+    // - `step` 是 v3 fixture 自带的，T-276 用例 1 拿它测 getVariable / setVariable。
+    //   第二轮加 `var_step` 时把整个 `variables` 覆盖掉了，用例 1 当场红在
+    //   「没有名为『step』的变量」——**继承来的字段被整段替换，是这份派生夹具的固有风险**。
+    // - `var_step` 是 `samples/host-demo/index.html` 快速开始（与 EMBED_API §1 逐字相同、
+    //   客户照抄的就是这一段）最后一步 `setVariable('var_step', 2)` 要的。没有它，那条链
+    //   **在成功路径上每一次都走 catch**，控制台稳定输出「嵌入失败[unknown-variable]」，
+    //   而用例 5 的 `errors=[]` 照样绿（它只收 pageerror）。
+    variables: [
+      ...((base['variables'] as unknown[] | undefined) ?? []),
+      { id: 'var_step', name: '当前步骤', type: 'number', default: 1, persist: false, scope: 'scene' },
+    ],
   }
 
   return packScene({

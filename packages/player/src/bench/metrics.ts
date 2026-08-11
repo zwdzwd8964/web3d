@@ -28,8 +28,22 @@ export type Verdict = 'pass' | 'warn' | 'fail'
  * ## 为什么是 8 而不是 1
  *
  * 实测过一个 `frames === 1` 的窗口：那一帧吞了约 357 ms 的编译卡顿，算出 2.8 fps，
- * 照样把整条爬坡截断。**只挡 `frames === 0` 治的是表征**，不是成因。8 个样本足以让
- * 一次卡顿不再主导均值，而在任何跑得动 bench 的机器上，多等 8 帧以毫秒计。
+ * 照样把整条爬坡截断。**只挡 `frames === 0` 治的是表征**，不是成因。
+ *
+ * ⚠⚠ **8 不够，而且这里原本写的理由是错的。** 原文说「8 个样本足以让一次卡顿不再主导
+ * 均值」——算一下就知道不成立：一次 334 ms 的卡顿配 7 ms 的稳态帧，要摊到 fail 线
+ * （40 ms/帧）以上需要 ≥ 10 个样本，摊到 warn 线（22.2 ms/帧）以上需要 ≥ 22 个。
+ * 恰好 8 个样本时算出 20.9 fps —— `isMeasured` 放行，`shouldStop` 照样截断整条爬坡，
+ * 决策 1 要治的下游后果原样复现，只是从「未测到（诚实）」换成了「20.9 fps（看起来是
+ * 读数，实际是一次卡顿）」。
+ *
+ * 还有一处退化：`summariseFrames` 的 `index = min(n-1, floor(n * 0.95))`，在 n ≤ 20 时
+ * 恒等于 n-1，**于是「P95 帧时间」就是「最慢单帧」**。恰好 8 个样本时这两行报同一个数，
+ * 而 P95 是回填进附件A §7 的四行之一。
+ *
+ * 数字本身**没有在这一轮改**：它要么是 24（跨过 p95 退化区且摊得下一次 334 ms 卡顿），
+ * 要么该由 G0.5-8 的目标机器实测定。改大会让 `?fast=1` 下大量档位变成「未测到」，
+ * 而那个取舍需要真机数据，不是拍脑袋。**登记在 IMPL_NOTES，随 G0.5-8 结账。**
  *
  * ⚠ 这个数是**拍的，不是测的**（ADR-0042 代价 3，同 NORTH_STAR §8 破例清单那三个默认值）。
  */
@@ -301,21 +315,38 @@ export const STRESS_COPIES: readonly number[] = [1, 2, 4, 8]
 export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
   if (levels.length === 0) return []
 
-  // ADR-0042 决策 1 · 没测到的档不算数。与 `ceilingFor` 同一条纪律。
-  const passing = levels.filter((l) => isMeasured(l.frames) && l.fps >= BENCH_LIMITS.fpsWarn)
-  const ceiling = passing.reduce<StressLevel | null>((best, l) => (best && best.copies >= l.copies ? best : l), null)
+  // ADR-0042 决策 1（第二轮）· 「一档都没测到」与「测了但一档都撑不住」是两件事。
+  //
+  // 第一轮只 `filter(isMeasured)` 就 reduce 成 `null`，然后一律印「不足 1 份」判 fail——
+  // 于是一次没跑成的测量，被印成「这台机器连 1 份场景都撑不住」。与四条「动态灯上限」
+  // 同型，同一次对抗式复核查出。
+  const measured = levels.filter((l) => isMeasured(l.frames))
+  const ceiling: Ceiling<StressLevel> =
+    measured.length === 0
+      ? { kind: 'not-measured' }
+      : (() => {
+          const best = measured
+            .filter((l) => l.fps >= BENCH_LIMITS.fpsWarn)
+            .reduce<StressLevel | null>((top, l) => (top && top.copies >= l.copies ? top : l), null)
+          return best ? { kind: 'ok' as const, level: best } : { kind: 'none-passed' as const }
+        })()
 
   const rows: BenchRow[] = [
     {
       metric: '承载上限',
-      value: ceiling
-        ? `${ceiling.copies} 份场景（${ceiling.drawCalls} drawcall · ${ceiling.triangles.toLocaleString('en-US')} 面）`
-        : '不足 1 份',
+      value:
+        ceiling.kind === 'ok'
+          ? `${ceiling.level.copies} 份场景（${ceiling.level.drawCalls} drawcall · ${ceiling.level.triangles.toLocaleString('en-US')} 面）`
+          : ceiling.kind === 'not-measured'
+            ? '未测到（一个样本都没采够）'
+            : '不足 1 份',
       limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: ceiling ? 'pass' : 'fail',
+      verdict: verdictOf(ceiling.kind),
       note:
-        '把整个场景复制若干份同时渲染，一级一级加到跌破帧率为止。副本共享几何与贴图，' +
-        '所以本项压的是 drawcall 与顶点吞吐，**不压显存**——同等倍数的真实模型通常还会带来成倍的贴图。',
+        ceiling.kind === 'not-measured'
+          ? '**这不是硬件结论**：爬坡一档都没采够样本，所以给不出承载上限。去掉 `?fast=1` 重跑一次。'
+          : '把整个场景复制若干份同时渲染，一级一级加到跌破帧率为止。副本共享几何与贴图，' +
+            '所以本项压的是 drawcall 与顶点吞吐，**不压显存**——同等倍数的真实模型通常还会带来成倍的贴图。',
     },
   ]
 
@@ -385,6 +416,31 @@ export type SectionMeasurement = SectionCost | SectionSkip
 const isSkip = (m: SectionMeasurement): m is SectionSkip => 'skipped' in m
 
 /**
+ * ADR-0042 决策 3 的判据本身，抽成纯函数。
+ *
+ * ## 为什么抽出来
+ *
+ * 第一轮它是 `main.ts` 里 `measureSection` 的两行。对抗式复核查出：`measureSection`
+ * 全仓**零测试引用**（它是模块私有函数，而 bench 的 e2e 夹具每个节点写死 `section: null`，
+ * 于是那条路径在任何自动化里一次都没被执行过）。而 `docs/MUTATIONS.md` 里为它登记的
+ * 那条「红 2 条」**不可能成立**——被引用的两条红打的是 `gradeSection` 这个纯函数，
+ * 喂的是手搓的 `{ skipped: 'no-planes' }`，与被变异的那一行毫无关系。
+ *
+ * **账本里一条「声称红、实际绿」的记录，比没有记录更坏**：它让下一个人以为这里有守卫。
+ * 判据抽到这里，变异才真的红得起来。
+ *
+ * @returns 跳过的理由；`null` = 可以量。
+ */
+export function classifySection(probe: { readonly sectionNodes: number; readonly clipPlanes: number }): SectionSkip | null {
+  // 一把刀都没有：这一档与这份资产无关。
+  if (probe.sectionNodes === 0) return { skipped: 'no-section' }
+  // 有刀，但开起来之后渲染器上一条裁剪平面都没装。**这才是真正的判据**——
+  // 「文档里配了刀」不保证「量得到东西」，而带一把关着的刀是合法文档。
+  if (probe.clipPlanes === 0) return { skipped: 'no-planes', sectionNodes: probe.sectionNodes }
+  return null
+}
+
+/**
  * 剖切那一档，成表。
  *
  * **报一行说明而不是省掉这一档**：一份少了一整档的报告与一份「这一档没量到」的报告，
@@ -406,9 +462,9 @@ export function gradeSection(measurement: SectionMeasurement): BenchRow[] {
         verdict: noSection ? 'pass' : 'warn',
         note: noSection
           ? '这一档只有在场景里真的有剖切平面时才测得出来。送检资产带剖切时请重测。'
-          : `场景里有 ${measurement.sectionNodes} 个剖切节点，但强制开之后渲染器上一条裁剪平面都没装——` +
-            '按 [ADR-0039](../../../docs/adr/0039-剖切面的启用判定用世界可见性.md)，世界不可见的刀不装平面。' +
-            '**这一档没有读数，不是「代价为 0」。** 把要验收的那把刀打开（或让它的祖先可见）后重测。',
+          : `场景里有 ${measurement.sectionNodes} 个剖切节点，但渲染器上一条裁剪平面都没装。` +
+            '常见成因有两种：那把刀（或它的某个祖先）不可见（[ADR-0039](../../../docs/adr/0039-剖切面的启用判定用世界可见性.md) 的世界可见性判定），' +
+            '或者它被关掉了。**这一档没有读数，不是「代价为 0」。** 把要验收的那把刀打开、并确认它的祖先都可见，然后重测。',
       },
     ]
   }
@@ -431,11 +487,24 @@ export function gradeSection(measurement: SectionMeasurement): BenchRow[] {
       note: `再切回「关」之后的第一帧，shader program ${cost.programsAfterOn} → ${cost.programsAfterOff}。**两次分别量**——复用同一个数字会让「回切也要重编译一遍」这件事看不见。`,
     },
     {
-      metric: '剖切引起的 shader 重编译',
-      value: `+${Math.max(0, cost.programsAfterOn - cost.programsBefore)} 个 program`,
+      metric: '剖切期间的 shader program 数',
+      // ADR-0042 决策 4（**已撤回**）· 这一行报的是**绝对数**，不是差值。
+      //
+      // 原来它报 `+N 个 program` 并断言「开一次剖切等于全场材质重编译一遍」。对抗式复核
+      // 证明那个差值**结构上恒为 0**：`renderStats.programs` 读的是 program 缓存，而
+      // 「首屏 · 首帧」为了计时必然先按文档态画过一帧——走到这里的前提又正是
+      // `clipPlanes > 0`，即那一帧已经把 clip=N 的变体编译完了。真实的编译代价被记进了
+      // 「首屏 · 首帧」，这里再也看不见它。
+      //
+      // 决策 4 曾把这一档挪到爬坡之前想让缓存变冷，**没用**（首帧那一帧在更前面），
+      // 反而让 bench 自己编译出来的变体混进了「几何体 / 着色器」那一行。档序已还原。
+      value: `${cost.programsAfterOn} 个`,
       limit: '—',
       verdict: 'pass',
-      note: 'three 把裁剪平面的**数量**放进 program 的 cache key，所以开一次剖切等于全场材质重编译一遍。这个数是上面那两个毫秒数的成因，不是另一件事。',
+      note:
+        'three 把裁剪平面的**数量**放进 program 的 cache key，所以开剖切确实会让全场材质各多编译一份变体。' +
+        '**但这一行量不到那次编译的代价**：首帧那一帧已经按文档态把它编译完了，编译时间落在「首屏 · 首帧」里。' +
+        '这里报的是绝对数，供两台机器之间横向比较，不是「开剖切多花了多少」。',
     },
   ]
 }
@@ -631,13 +700,17 @@ export const SHADOW_MODES: readonly ShadowSetting[] = ['off', ...SHADOW_QUALITIE
 export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
   if (levels.length === 0) return []
 
+  const noShadow = ceilingFor(levels, 'off')
   const rows: BenchRow[] = [
     {
       metric: '动态灯上限（无阴影）',
-      value: describeCeiling(ceilingFor(levels, 'off')),
+      value: describeCeiling(noShadow),
       limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: ceilingFor(levels, 'off') ? 'pass' : 'fail',
-      note: '灯数只增加逐像素的着色量，代价是平滑上升的。',
+      verdict: verdictOf(noShadow.kind),
+      note:
+        noShadow.kind === 'not-measured'
+          ? '**这不是硬件结论**：这一档一个样本都没采够，所以给不出上限。去掉 `?fast=1` 重跑一次再看这一行。'
+          : '灯数只增加逐像素的着色量，代价是平滑上升的。',
     },
   ]
 
@@ -649,11 +722,13 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
       metric: `动态灯上限（${quality} 阴影）`,
       value: describeCeiling(ceiling),
       limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: ceiling ? 'pass' : 'fail',
+      verdict: verdictOf(ceiling.kind),
       note:
-        quality === 'low'
-          ? `阴影贴图 ${shadowMapSizeFor(quality)}²。`
-          : `阴影贴图 ${shadowMapSizeFor(quality)}²，是 low 的 ${(shadowMapSizeFor(quality) / shadowMapSizeFor('low')) ** 2} 倍像素。`,
+        ceiling.kind === 'not-measured'
+          ? `阴影贴图 ${shadowMapSizeFor(quality)}²。**这不是硬件结论**：这一档一个样本都没采够。`
+          : quality === 'low'
+            ? `阴影贴图 ${shadowMapSizeFor(quality)}²。`
+            : `阴影贴图 ${shadowMapSizeFor(quality)}²，是 low 的 ${(shadowMapSizeFor(quality) / shadowMapSizeFor('low')) ** 2} 倍像素。`,
     })
   }
 
@@ -669,29 +744,45 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
   // 阴影贴图显存。**估算**，与「贴图显存（估算）」同一个口径：它给的是数量级，
   // 而这个数量级正是「为什么开到 8 盏 high 会掉帧」的那半个解释——另外半个是深度 pass。
   //
-  // ADR-0042 决策 2 · **按显存取最大，不是按灯数取最大。**
+  // ADR-0042 决策 2 · **按显存取最大，不是按灯数取最大。** 原来是 `l.lights > best.lights`
+  // （严格大于 + 插入序），于是永远取第一个到达最大灯数的档，也就是最便宜的 `low`。
+  // **这个错在完全没有采样问题的干净跑里也成立**：慢跑 12 档全过，它照样报「8.0 MB（8 盏 · low）」。
   //
-  // 原来写的是 `l.lights > best.lights`（严格大于 + 插入序遍历），于是永远取**第一个**
-  // 达到最大灯数的档——也就是 `low`，最便宜的那一档。而这一行的说明写着「报的是最重的
-  // 那一档」。**这个错在完全没有采样问题的干净跑里也成立**：实测慢跑 12 档全过，它照样
-  // 报「8.0 MB（8 盏 · low）」，而同一轮 medium 与 high 也都到了 8 盏。
-  const worst = levels
-    .filter((l) => l.shadows !== 'off' && isMeasured(l.frames))
-    .reduce<LightLevel | null>(
-      (best, l) =>
-        !best || estimateShadowMemory(l.lights, l.shadows as ShadowQuality) > estimateShadowMemory(best.lights, best.shadows as ShadowQuality)
-          ? l
-          : best,
-      null,
-    )
+  // 第二轮补三条（对抗式复核查出）：
+  //
+  // 1. **0 盏不算数。** 爬坡在 count=0 就收摊时，`levels` 里全是 `lights: 0`，于是这一行
+  //    印出「0.0 MB（0 盏 · low）」并判 pass —— 把「没爬上去」印成一个读数，读者据此得出
+  //    「阴影几乎不占显存」。
+  // 2. **平手取更贵的档。** 2 盏 high 与 8 盏 medium 都是 32 MB，严格 `>` 在平手时保留先
+  //    遇到的那个，也就是仍然偏向便宜档——ADR 要消灭的结构在平手分支上原样活着。
+  // 3. **一档都没测到时报「未测到」，而不是整行消失。** 同一个文件上方 `gradeSection` 的
+  //    注释刚写过「少了一整档的报告与『这一档没量到』的报告，在读者眼里是两件事」。
+  const shadowed = levels.filter((l) => l.shadows !== 'off' && l.lights >= 1)
+  const measuredShadowed = shadowed.filter((l) => isMeasured(l.frames))
+  const memoryOf = (l: LightLevel) => estimateShadowMemory(l.lights, l.shadows as ShadowQuality)
+  const worst = measuredShadowed.reduce<LightLevel | null>(
+    (best, l) => (!best || memoryOf(l) >= memoryOf(best) ? l : best),
+    null,
+  )
   if (worst) {
-    const bytes = estimateShadowMemory(worst.lights, worst.shadows as ShadowQuality)
+    const bytes = memoryOf(worst)
     rows.push({
       metric: '阴影贴图显存（估算）',
       value: `${(bytes / (1024 * 1024)).toFixed(1)} MB（${worst.lights} 盏 · ${worst.shadows}）`,
       limit: '—',
       verdict: 'pass',
-      note: `按「投影灯数 × 贴图边长² × 4 字节」推算，边长取 ${shadowMapSizeFor(worst.shadows as ShadowQuality)}。与灯数成正比，与档位成平方。`,
+      note:
+        `按「投影灯数 × 贴图边长² × 4 字节」推算，边长取 ${shadowMapSizeFor(worst.shadows as ShadowQuality)}。` +
+        '与灯数成正比，与档位成平方。**报的是已测到的档里最重的那一个**，而爬坡跌破红线就收摊——' +
+        '所以这一档往往正是把爬坡压垮的那一档，它与上面几行「上限」不矛盾，是同一件事的两种说法。',
+    })
+  } else if (shadowed.length > 0) {
+    rows.push({
+      metric: '阴影贴图显存（估算）',
+      value: '未测到（带阴影的档一个都没采够样本）',
+      limit: '—',
+      verdict: 'warn',
+      note: '**这一行不是「不占显存」，是没量到。** 去掉 `?fast=1` 重跑一次。',
     })
   }
 
@@ -715,19 +806,42 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
 }
 
 /**
- * 某一档设置下，还能跑在黄灯线以上的最多灯数。
+ * 一条产能结论：撑得住多少，或者**为什么给不出这个数**。
  *
- * ADR-0042 决策 1 · **先滤掉没测到的档**。不滤的话，一个采样不足的 `fps: 0` 会被判成
- * 「这一档撑不住」，于是上限被系统性低报，而报告上看不出任何异常。
+ * ADR-0042 决策 1（第二轮）· **`null` 有两种成因，而它们不是同一件事。**
+ *
+ * - `none-passed`：真的测了，真的没一档过线 —— 这是**硬件结论**，判 fail。
+ * - `not-measured`：一档都没采到足够的样本 —— 这是**一次没跑成的测量**，判 warn。
+ *
+ * 第一轮只 `filter(isMeasured)` 然后 reduce 成 `null`，于是两种成因合流，全部印成
+ * 「不足 1 盏」判 fail。**那正是这条 ADR 起因的那三行 `0.0 fps` 换了个措辞活下来**：
+ * 一次没跑成的测量，被印成「这台机器连 1 盏投影灯都撑不住」。而第一轮新加的 e2e 守卫
+ * 写的是「值里含『未测到』才查 warn」，这五行不含那三个字，正好从守卫底下走过去。
  */
-function ceilingFor(levels: readonly LightLevel[], shadows: ShadowSetting): LightLevel | null {
-  return levels
-    .filter((l) => l.shadows === shadows && isMeasured(l.frames) && l.fps >= BENCH_LIMITS.fpsWarn)
-    .reduce<LightLevel | null>((best, l) => (best && best.lights >= l.lights ? best : l), null)
+export type Ceiling<T> = { readonly kind: 'ok'; readonly level: T } | { readonly kind: 'none-passed' } | { readonly kind: 'not-measured' }
+
+/** 某一档设置下，还能跑在黄灯线以上的最多灯数。 */
+function ceilingFor(levels: readonly LightLevel[], shadows: ShadowSetting): Ceiling<LightLevel> {
+  const inGroup = levels.filter((l) => l.shadows === shadows)
+  const measured = inGroup.filter((l) => isMeasured(l.frames))
+  // 这一组一档都没测到 —— 给不出结论，且这**不是**关于硬件的结论。
+  if (inGroup.length > 0 && measured.length === 0) return { kind: 'not-measured' }
+  const best = measured
+    .filter((l) => l.fps >= BENCH_LIMITS.fpsWarn)
+    .reduce<LightLevel | null>((top, l) => (top && top.lights >= l.lights ? top : l), null)
+  return best ? { kind: 'ok', level: best } : { kind: 'none-passed' }
 }
 
-const describeCeiling = (level: LightLevel | null): string =>
-  level ? `${level.lights} 盏 · ${level.fps.toFixed(1)} fps` : '不足 1 盏'
+const describeCeiling = (ceiling: Ceiling<LightLevel>): string =>
+  ceiling.kind === 'ok'
+    ? `${ceiling.level.lights} 盏 · ${ceiling.level.fps.toFixed(1)} fps`
+    : ceiling.kind === 'not-measured'
+      ? '未测到（这一档一个样本都没采够）'
+      : '不足 1 盏'
+
+/** 三种结论各自的判定。**`not-measured` 判 warn，不判 fail** —— 它不是硬件结论。 */
+const verdictOf = (kind: Ceiling<unknown>['kind']): Verdict =>
+  kind === 'ok' ? 'pass' : kind === 'not-measured' ? 'warn' : 'fail'
 
 /** 阴影贴图占的显存，字节。`投影灯数 × 边长² × 4`。 */
 export function estimateShadowMemory(castingLights: number, quality: ShadowQuality): number {
@@ -761,10 +875,10 @@ export function recommendShadowDefault(levels: readonly LightLevel[]): ShadowRec
   // `ceilingFor` 已经滤掉没测到的档（ADR-0042 决策 1），所以这里拿到的必定是真实读数。
   for (const quality of [...SHADOW_QUALITIES].reverse()) {
     const ceiling = ceilingFor(levels, quality)
-    if (ceiling && ceiling.lights >= 1) {
+    if (ceiling.kind === 'ok' && ceiling.level.lights >= 1) {
       return {
         setting: quality,
-        reason: `这台机器在 ${quality} 档下还能带 ${ceiling.lights} 盏投影灯跑到 ${ceiling.fps.toFixed(1)} fps。`,
+        reason: `这台机器在 ${quality} 档下还能带 ${ceiling.level.lights} 盏投影灯跑到 ${ceiling.level.fps.toFixed(1)} fps。`,
       }
     }
   }
