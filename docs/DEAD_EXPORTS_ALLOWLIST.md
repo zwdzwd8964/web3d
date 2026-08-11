@@ -15,7 +15,7 @@
 | `symbol` | 全限定名，`<包>:<导出名>` 或 `<包>:<类型名>.<成员名>` |
 | `reason` | **谁**会用到它、**什么时候**。**少于 10 个汉字直接判红**——「以后要用」不是理由 |
 | `owner` | 任务卡号（形如 `T-317`），且必须在台账里真实存在 |
-| `expires` | 版本阶梯上的一级（`v1.2` / `v1.5` / `v2` …）。**到期未清即 CI 转红** |
+| `expires` | 版本阶梯上的一级（`v1.2` / `v1.5` / `v2` …）。**到期未清即 CI 转红**。冻结接口表还认**卡号**（T-287 起，见那一节） |
 
 **棘轮**：`MAX_EXEMPTIONS` 写在脚本头部，**只能降不能升**。它是晋级门槛 G1.2-9
 （「豁免表条数只降不升」）的全部实现——没有这个常量，那条门槛没有落点，而
@@ -74,6 +74,12 @@
 | core:RendererLike.capabilities | T-262 的出图钳位公式要读 maxTextureSize 判上限 | T-262 | v1.2 |
 | core:RendererLike.setRenderTarget | T-235 的 composer 需要它切换离屏目标与画布 | T-235 | v1.2 |
 
+> **T-288 · 成员扫描的同名属性盲区，第 5 次。**
+> `storage:Lease.heldBy` 这一行是被 `acquisition.heldBy` 消掉的——而那是 `LeaseAcquisition`
+> 的字段，不是 v1.5 那把服务端编辑锁 `Lease` 的。成员扫描是一条跨包文本正则（`[.?]\s*名字`），
+> 分不出两个同名属性。删掉这一行是**如实**的（守卫确实不再认为它是孤儿），但它意味着
+> `Lease.heldBy` 从此不再被这道门看着——真正的消费者仍然要等 v1.5。
+
 ## 冻结接口（接口先落，消费者在后）
 
 **规划 §4 与两份 SPEC 是逐字实现的冻结规范**（CLAUDE.md 停下来问人第 8 条）。v1.0 照它交付
@@ -101,9 +107,7 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | core:SceneRuntime.swapDocument | T-429 的多场景切换按七步清场顺序换文档 | T-429 | v1.5 | 规划§4 |
 | core:RuntimeContext.highlightOf | T-294 的 parity 轨迹按它逐步比对两侧高亮状态；生产读者要等到规则条件读得到高亮，v1 的条件表里没有这一条 | T-294 | v2 | 规划§4 |
 | core:SceneRuntime.highlightOf | 同上，这是真运行时那一侧的实现；两侧必须同时在，否则契约套件跑不起来 | T-294 | v2 | 规划§4 |
-| storage:IndexedDbProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
 | storage:IndexedDbProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
-| storage:MemoryProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
 | storage:MemoryProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
 | storage:Identity.userId | v1.5 的后端把当前登录者填进来，成员列表与审计日志两处都按它区分人 | T-286 | v1.5 | 规划§4 |
 | storage:Identity.displayName | v1.5 的成员面板与审计日志显示这个名字，用户看不懂用户标识本身 | T-286 | v1.5 | 规划§4 |
@@ -113,7 +117,6 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | storage:Page.cursor | v1.5 的审计与历史修订列表可能有上万条，游标分页是那时唯一不改调用点的形状 | T-286 | v1.5 | 规划§4 |
 | storage:ProjectMember.identity | v1.5 的成员面板逐行显示这个人是谁，与他的角色一起 | T-286 | v1.5 | 规划§4 |
 | storage:ProjectMember.role | v1.5 的成员面板据它决定这一行能不能改，以及当前用户能不能改这一行 | T-286 | v1.5 | 规划§4 |
-| storage:Lease.heldBy | v1.5 的编辑锁被别人持有时，界面要说清是被谁持有的 | T-286 | v1.5 | 规划§4 |
 | storage:Lease.expiresAt | v1.5 的编辑锁到期后自动可抢，界面据它显示还剩多久 | T-286 | v1.5 | 规划§4 |
 | storage:AuditEntry.by | v1.5 的审计日志与历史修订都要显示这一条是谁产生的 | T-286 | v1.5 | 规划§4 |
 | storage:LocksFacet.acquire | v1.5 的多人编辑在打开工程时抢一把锁，抢不到就进只读模式 | T-286 | v1.5 | 规划§4 |
@@ -128,16 +131,7 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | storage:AssetsFacet.presignDownload | v1.5 的播放器按预签名地址取资产，后端不代理字节流 | T-286 | v1.5 | 规划§4 |
 | storage:ProviderFacets.locks | v1.5 的编辑器在打开工程时问它有没有锁这个能力，没有就跳过抢锁 | T-286 | v1.5 | 规划§4 |
 | storage:ProviderFacets.revisions | v1.5 的历史面板问它有没有修订能力，没有就不显示那个入口 | T-286 | v1.5 | 规划§4 |
-| storage:StorageProvider.facets | v1.5 的后端 provider 按它声明自己支持哪几个 facet，契约套件据此跑对应子套件 | T-286 | v1.5 | 规划§4 |
 | storage:StorageProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
-| storage:DraftRecord.edits | T-288 的崩溃横幅按它显示「有 N 处修改没保存」，写死一个「若干」用户就没法判断该恢复还是该丢弃 | T-288 | T-288 | 规划§4 |
-| storage:DraftRecord.savedAt | T-288 的横幅显示草稿是什么时候留下的，只说「有草稿」不足以让人决定要不要它 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.saveDraft | T-288 的 AutoSaver 草稿通道，一次 flush 的第一步 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.loadDraft | T-288 开机判定为 crashed 之后读它，横幅上那个数字来自这里 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.clearDraft | T-288 的 flush 第三步，正式保存成功之后才调 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.acquireLease | T-288 的开机租约判定，拿不到就是另一个标签页正开着 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.heartbeatLease | T-288 每 HEARTBEAT_MS 续一次租约，另一个标签页据此知道这一个还活着 | T-288 | T-288 | 规划§4 |
-| storage:DraftsFacet.releaseLease | T-288 的 pagehide 监听，干净退出记一笔 | T-288 | T-288 | 规划§4 |
 
 ## v0 / v0.5 遗留基线
 

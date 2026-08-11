@@ -1,7 +1,8 @@
 import type { SceneDocument } from '@w3/schema'
 import { PUMP_DEMO_IDS, createEmptyDocument, createGoldenPathDocument, createPumpDemoDocument, migrate } from '@w3/schema'
 import { buildPumpDemoGlb, buildSamplePumpGlb } from '@w3/core'
-import type { ProjectSummary } from '@w3/storage'
+import type { DraftRecord, DraftsFacet, LeaseAcquisition, LeaseRequest, ProjectSummary } from '@w3/storage'
+import { HEARTBEAT_MS } from '@w3/storage'
 import type { ProjectSession } from './session.js'
 
 /**
@@ -245,6 +246,22 @@ export interface BootContext {
   doc: SceneDocument | null
   /** 走到哪一步、发生了什么。按顺序追加。 */
   readonly notes: string[]
+  /**
+   * T-288 · 开机之后要不要给用户看一条横幅，看哪一条。
+   *
+   * 是 `BootContext` 的字段而不是 `crash-recovery` 那一步的返回值：步骤表的
+   * `run` 统一返回 `void`，加一个返回值等于把每一步的签名都改了。
+   */
+  recovery: RecoveryBanner
+  /**
+   * T-288 · 拿到的会话租约要续，续的活儿归调用方（`main.tsx`）。
+   *
+   * 参数是**当次**的毫秒时刻，不是复用 `request.nowMs`：复用的话 `heartbeatAt` 每次
+   * 都写回开机那一刻，租约会在标签页活得好好的时候过期，然后被另一个标签页接管。
+   */
+  heartbeat: ((nowMs: number) => void) | null
+  /** T-288 · 当前会话是谁、现在几点。时钟注入，冷启动才能在纯 Node 里跑。 */
+  readonly request: LeaseRequest
 }
 
 /** 冷启动的一步。 */
@@ -312,18 +329,149 @@ export const BOOT_STEPS: readonly BootStep[] = [
       ctx.notes.push('内置文档的占位资产已物化，发布闸门可通过')
     },
   },
+  {
+    // T-288 · **插在最后，不动前面三步。** 租约要认工程 id，所以它必须排在文档选定
+    // 之后；而它又必须排在 store 建起来之前，否则用户已经能编了才告诉他「另一个标签页
+    // 正开着这份」。这两条把它钉死在这个位置。
+    id: 'crash-recovery',
+    what: '抢会话租约，判断上一次是崩的还是关的',
+    async run(ctx) {
+      if (!ctx.doc) throw new Error('走到崩溃恢复这一步时还没有文档。')
+      const { banner, drafts } = await claimSession(ctx.session, ctx.doc.projectId, ctx.request)
+      ctx.recovery = banner
+      if (drafts) {
+        const projectId = ctx.doc.projectId
+        ctx.heartbeat = (nowMs) => void drafts.heartbeatLease(projectId, { ...ctx.request, nowMs })
+      }
+      ctx.notes.push(NOTE_OF[banner.kind])
+    },
+  },
 ]
+
+/** 每种横幅在启动日志里对应的一句话。**日志与界面说的是同一件事。** */
+const NOTE_OF: Record<RecoveryBanner['kind'], string> = {
+  none: '上一次是干净退出的，没有要恢复的东西',
+  crashed: '上一次没有干净退出，草稿已找到',
+  'other-tab': '这份工程正被另一个标签页占着',
+}
+
+/* ── 崩溃恢复（T-288） ───────────────────────────────────────────────────── */
+
+/**
+ * 开机之后该给用户看什么。
+ *
+ * 三种，且**只有三种**：
+ *
+ * - `none` — 上一次是干净退出的（或者根本没有上一次）。**什么都不问。** 一个每次开机
+ *   都问「要不要恢复」的编辑器，会让用户在真的崩了的那一次也顺手点掉。
+ * - `crashed` — 上一个会话没打招呼就没了，而且**草稿还在**。带着真实的编辑次数问。
+ * - `other-tab` — 另一个标签页正开着这份工程。
+ */
+export type RecoveryBanner =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'crashed'; readonly edits: number; readonly savedAt: string; readonly draft: SceneDocument }
+  | { readonly kind: 'other-tab'; readonly heldBy: string }
+
+/**
+ * 从「租约申请的结果」与「库里的草稿」推出该显示哪条横幅。**纯函数。**
+ *
+ * 判定拆出来是因为它有四个输入分支而只有三个输出，中间那两条最容易写错：
+ *
+ * 1. 崩了**但没有草稿** → `none`。崩溃本身不值得打扰用户，没保存的东西才值得；
+ *    没有草稿说明上一次崩之前所有东西都已经落盘了。
+ * 2. 拿不到租约 → `other-tab`，**而且这一条压过崩溃**。另一个标签页正拿着这份工程时，
+ *    把草稿恢复进来会让两边同时编同一份，后写的覆盖先写的。
+ *
+ * @param acquisition `acquireLease` 的结果。
+ * @param draft 库里那份草稿，没有就是 `null`。
+ */
+export function bannerFor(acquisition: LeaseAcquisition, draft: DraftRecord | null): RecoveryBanner {
+  if (!acquisition.ok) return { kind: 'other-tab', heldBy: acquisition.heldBy.sessionId }
+  if (acquisition.previous !== 'crashed') return { kind: 'none' }
+  if (!draft || draft.edits <= 0) return { kind: 'none' }
+  return { kind: 'crashed', edits: draft.edits, savedAt: draft.savedAt, draft: draft.document }
+}
+
+/** `startHeartbeat` 要的东西。定时器注入，所以它在纯 Node 里可测。 */
+export interface HeartbeatOptions {
+  readonly beat: () => void
+  readonly intervalMs?: number
+  readonly setTimer?: (fn: () => void, ms: number) => unknown
+  readonly clearTimer?: (handle: unknown) => void
+}
+
+/**
+ * 每 `intervalMs` 跳一次，直到调用返回的那个函数。
+ *
+ * 间隔非正数直接抛：`setInterval(fn, 0)` 会变成「每一帧一次」，把租约心跳变成一个
+ * 忙等循环——而那件事在功能上**看起来完全正常**（租约确实一直是新鲜的），只有电池
+ * 和风扇知道。
+ *
+ * @returns 停止心跳。
+ */
+export function startHeartbeat(options: HeartbeatOptions): () => void {
+  const intervalMs = options.intervalMs ?? HEARTBEAT_MS
+  if (!(intervalMs > 0)) throw new Error(`心跳间隔必须是正数，实际是 ${intervalMs}。`)
+  const setTimer = options.setTimer ?? ((fn, ms) => setInterval(fn, ms))
+  const clearTimer = options.clearTimer ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>))
+  const handle = setTimer(() => options.beat(), intervalMs)
+  return () => clearTimer(handle)
+}
+
+/**
+ * 这个标签页的会话标识。**一次开机一个，刷新算新会话。**
+ *
+ * 刷新之后旧的那份租约确实没人续了，所以它该被判成一个结束了的会话——如果沿用同一个
+ * 标识，`classifyLease` 会返回 `self`，于是「刷新之前崩过一次」这件事永远查不出来。
+ *
+ * 模块级可变状态，是铁律 1 的运行时瞬态例外（与「当前播放进度」同类）：它不进文档、
+ * 不跨刷新、不影响任何两个视图之间的一致性。
+ */
+let currentSessionId: string | null = null
+
+/** 这个标签页的会话标识。第一次调用时生成。 */
+export function sessionIdOf(): string {
+  currentSessionId ??= `ses_${Math.random().toString(36).slice(2, 10)}`
+  return currentSessionId
+}
+
+/** 这个 provider 支持崩溃恢复吗。不支持时整条路径静默跳过——不是报错。 */
+export function draftsOf(session: ProjectSession): DraftsFacet | null {
+  return session.storage.facets.includes('drafts') ? (session.storage.ext.drafts ?? null) : null
+}
+
+/**
+ * 一次开机的租约申请 + 草稿读取，合成一条横幅。
+ *
+ * @param request 当前会话是谁、现在几点、多久算崩（E2E 用 `?w3LeaseStaleMs=` 调小）。
+ */
+export async function claimSession(
+  session: ProjectSession,
+  projectId: string,
+  request: LeaseRequest,
+): Promise<{ banner: RecoveryBanner; drafts: DraftsFacet | null }> {
+  const drafts = draftsOf(session)
+  if (!drafts) return { banner: { kind: 'none' }, drafts: null }
+  const acquisition = await drafts.acquireLease(projectId, request)
+  // 草稿只在真崩了的时候才读：拿不到租约时读它没有意义，而每次开机都读一遍等于给
+  // 冷启动加一次不必要的库往返。
+  const draft = acquisition.ok && acquisition.previous === 'crashed' ? await drafts.loadDraft(projectId) : null
+  return { banner: bannerFor(acquisition, draft), drafts }
+}
 
 /**
  * 按表跑一遍冷启动。
  *
  * @returns 选定的文档与一路上的说明。**文档一定非空**——表的最后一步之前必有兜底。
  */
-export async function runBoot(session: ProjectSession): Promise<{ doc: SceneDocument; notes: readonly string[] }> {
-  const ctx: BootContext = { session, doc: null, notes: [] }
+export async function runBoot(
+  session: ProjectSession,
+  request: LeaseRequest,
+): Promise<{ doc: SceneDocument; notes: readonly string[]; recovery: RecoveryBanner; heartbeat: ((nowMs: number) => void) | null }> {
+  const ctx: BootContext = { session, doc: null, notes: [], recovery: { kind: 'none' }, request, heartbeat: null }
   for (const step of BOOT_STEPS) await step.run(ctx)
   if (!ctx.doc) throw new Error('冷启动跑完了但没有文档，步骤表少了兜底那一步。')
-  return { doc: ctx.doc, notes: ctx.notes }
+  return { doc: ctx.doc, notes: ctx.notes, recovery: ctx.recovery, heartbeat: ctx.heartbeat }
 }
 
 /**

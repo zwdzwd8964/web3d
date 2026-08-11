@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from './ProjectContext.jsx'
 import { AutoSaver } from './autosave.js'
-import type { SaveState } from './autosave.js'
+import type { AutoSaverOptions, SaveState } from './autosave.js'
+import { draftsOf, sessionIdOf } from './project-lifecycle.js'
 import { useDocumentStore } from '../store/StoreContext.js'
 
 /**
@@ -12,11 +13,18 @@ import { useDocumentStore } from '../store/StoreContext.js'
  * not the same event, and tying persistence to the second one makes saves depend on which
  * panel happens to be open.
  */
-export function useAutoSave(): { state: SaveState; error: string | null; saveNow: () => void } {
+export function useAutoSave(): {
+  state: SaveState
+  error: string | null
+  /** T-288 · 存储侧的错误码。`quota-exceeded` 时界面要多给一个「清理本地数据」的入口。 */
+  errorCode: string | null
+  saveNow: () => void
+} {
   const session = useProject()
   const store = useDocumentStore()
   const [state, setState] = useState<SaveState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [errorCode, setErrorCode] = useState<string | null>(null)
 
   // Kept in a ref so the keydown and beforeunload handlers below never close over a stale
   // saver after a re-render.
@@ -29,12 +37,17 @@ export function useAutoSave(): { state: SaveState; error: string | null; saveNow
         // 显式丢掉它而不是改钩子的签名：AutoSaver 不消费修订号，让它的类型跟着变
         // 只会把一个它用不到的概念带进来。
         save: async (doc) => void (await session.save(doc)),
-        onStateChange: (next, message) => {
+        // T-288 · 草稿通道。provider 没有 `drafts` facet 时**两个钩子都不给**——
+        // 给一对空函数的话，「顺序是 saveDraft → save → clearDraft」那条断言会在一个
+        // 根本没有草稿的实现上照样绿。
+        ...draftHooks(session, () => store.getState().doc.projectId),
+        onStateChange: (next, message, code) => {
           setState(next)
           setError(message ?? null)
+          setErrorCode(code ?? null)
         },
       }),
-    [session],
+    [session, store],
   )
   saverRef.current = saver
 
@@ -88,9 +101,41 @@ export function useAutoSave(): { state: SaveState; error: string | null; saveNow
   return {
     state,
     error,
+    errorCode,
     saveNow: () => {
       saver.schedule(store.getState().doc)
       void saver.flush()
+    },
+  }
+}
+
+/**
+ * T-288 · 把 `AutoSaver` 的草稿通道接到 provider 的 `drafts` facet 上。
+ *
+ * 会话标识每次开机一个，来自 `sessionIdOf()`——同一个标签页刷新算新会话，这是对的：
+ * 刷新之后旧的那份租约确实没人续了。
+ *
+ * @param projectIdOf 现读，不是构造时读一次。切换工程之后草稿要写进新工程的槽里，
+ *   而 saver 是按 session 记忆化的，闭包捕获旧 id 会让草稿一直写在上一份工程上。
+ */
+function draftHooks(
+  session: ReturnType<typeof useProject>,
+  projectIdOf: () => string,
+): Pick<AutoSaverOptions, 'saveDraft' | 'clearDraft'> {
+  const drafts = draftsOf(session)
+  if (!drafts) return {}
+  return {
+    saveDraft: async (doc, edits) => {
+      await drafts.saveDraft({
+        projectId: projectIdOf(),
+        document: doc,
+        edits,
+        savedAt: new Date().toISOString(),
+        sessionId: sessionIdOf(),
+      })
+    },
+    clearDraft: async () => {
+      await drafts.clearDraft(projectIdOf())
     },
   }
 }

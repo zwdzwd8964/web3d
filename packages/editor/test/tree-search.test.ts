@@ -179,12 +179,19 @@ describe('滚动钳位与拖拽互锁', () => {
 })
 
 describe('ui-store · UI 瞬态不进文档', () => {
-  it('holds the four transients and notifies on change', () => {
+  it('holds every transient and notifies on change', () => {
     const seen: string[] = []
     setUi({ search: '叶轮' })
     expect(getUi().search).toBe('叶轮')
     setUi({ renaming: 'nd_00000001', pendingDelete: 'nd_00000002', helpOpen: true })
-    expect(getUi()).toEqual({ search: '叶轮', renaming: 'nd_00000001', pendingDelete: 'nd_00000002', helpOpen: true })
+    expect(getUi()).toEqual({
+      search: '叶轮',
+      renaming: 'nd_00000001',
+      pendingDelete: 'nd_00000002',
+      helpOpen: true,
+      // T-288 · 配额写满时那条错误旁边的「清理本地数据」把它置 true。
+      projectListOpen: false,
+    })
     void seen
   })
 
@@ -195,12 +202,17 @@ describe('ui-store · UI 瞬态不进文档', () => {
     const before = getUi()
     setUi({ search: '叶轮' })
     expect(getUi()).toBe(before)
+    // T-288 · 新加的字段也要在那个逐字段比较里。漏一个，它的写入就永远不通知，
+    // 而症状是「点了『清理本地数据』，什么都没发生」。
+    setUi({ projectListOpen: true })
+    expect(getUi().projectListOpen).toBe(true)
+    expect(getUi()).not.toBe(before)
   })
 
   it('is reset by the test seam', () => {
     setUi({ search: 'x', helpOpen: true })
     resetUi()
-    expect(getUi()).toEqual({ search: '', renaming: null, pendingDelete: null, helpOpen: false })
+    expect(getUi()).toEqual({ search: '', renaming: null, pendingDelete: null, helpOpen: false, projectListOpen: false })
   })
 })
 

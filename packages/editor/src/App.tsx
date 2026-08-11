@@ -1,7 +1,7 @@
 import { checkIntegrity, errorsOf, warningsOf } from '@w3/schema'
 import type { ProjectSummary } from '@w3/storage'
 import { createActionRefResolver } from '@w3/core'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Splitter } from './layout/Splitter.js'
 import { AnimationPanel } from './panels/AnimationPanel.js'
 import { AssetPanel } from './panels/AssetPanel.js'
@@ -31,12 +31,15 @@ import {
   createFromBuiltin,
   createProject,
   deleteProject,
+  draftsOf,
   listProjects,
   openProject,
   renameStoredProject,
 } from './project/project-lifecycle.js'
+import type { RecoveryBanner } from './project/project-lifecycle.js'
 import { useAutoSave } from './project/useAutoSave.js'
 import { useDocumentActions, useDocumentSelector, useDocumentStore } from './store/StoreContext.js'
+import { setUi, useUi } from './store/ui-store.js'
 import { Viewport } from './viewport/Viewport.js'
 import { exportImage, exportSettings, fullRebuildCount } from './viewport/runtime-registry.js'
 import { useShortcuts } from './shortcuts.js'
@@ -65,10 +68,11 @@ type BottomTab =
   | 'history'
   | 'snapshots'
 
-export function App() {
+export function App({ recovery }: { recovery?: RecoveryBanner }) {
   useShortcuts()
   return (
     <div className="shell">
+      <RecoveryBar recovery={recovery ?? { kind: 'none' }} />
       <TopBar />
       <div className="shell__body">
         <HierarchyTree />
@@ -145,6 +149,17 @@ export function ProjectButton() {
     void refresh().then(() => setView('list'))
   }
 
+  // T-288 · 第二个开启者：配额写满时那条错误旁边的「清理本地数据」。它只置一个标志位，
+  // 由这里翻译成「刷新列表再打开」——否则那个入口要么重复一遍刷新逻辑，要么打开一个空列表。
+  const listRequested = useUi().projectListOpen
+  useEffect(() => {
+    if (!listRequested) return
+    setUi({ projectListOpen: false })
+    openList()
+    // `openList` 每次渲染都是新函数，进依赖数组会让这个 effect 每帧都跑一遍。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listRequested])
+
   const swapTo = async (doc: Parameters<typeof replaceDocument>[0]) => {
     // `keepHistory` 恒 false —— 由 `openProject` 返回的字段带过来，而不是在这里再写一遍
     // `false`。写两遍的话，改一处忘一处的那次不会有任何东西红。
@@ -205,6 +220,70 @@ export function ProjectButton() {
 }
 
 /**
+ * T-288 · 崩溃恢复与「另一个标签页」两条横幅。
+ *
+ * ## 三选一，而且没有默认动作
+ *
+ * 「恢复」「丢弃」「稍后再说」三个按钮，**没有一个是自动执行的**。恢复一份草稿是覆盖
+ * 用户当前看到的文档，丢弃是删掉他仅存的那一份——两件事都不该由一个横幅替他决定。
+ * 「稍后再说」只关横幅，草稿留在库里，下次开机还会问。
+ *
+ * ## 数字是真的
+ *
+ * 「有 N 处修改没保存」的 N 来自草稿记录里的 `edits`，一路从 `AutoSaver` 的编辑计数
+ * 传下来。写死一句「有一些修改」的话，用户没有任何依据判断该恢复还是该丢弃。
+ */
+function RecoveryBar({ recovery }: { recovery: RecoveryBanner }) {
+  const session = useProject()
+  const { replaceDocument } = useDocumentActions()
+  const [dismissed, setDismissed] = useState(false)
+
+  if (dismissed || recovery.kind === 'none') return null
+
+  if (recovery.kind === 'other-tab') {
+    return (
+      <div className="banner banner--warn" role="alert">
+        <span>这份工程正在另一个标签页里编辑。在这里改动会互相覆盖，建议关掉另一个再继续。</span>
+        <button type="button" className="tbtn" onClick={() => setDismissed(true)}>
+          知道了
+        </button>
+      </div>
+    )
+  }
+
+  const discard = () => {
+    void draftsOf(session)?.clearDraft(recovery.draft.projectId)
+    setDismissed(true)
+  }
+
+  return (
+    <div className="banner banner--warn" role="alert">
+      <span>
+        上次没有正常关闭，有 <b>{recovery.edits}</b> 处修改没保存。
+      </span>
+      <button
+        type="button"
+        className="tbtn"
+        onClick={() => {
+          // 恢复 = 换文档，且**清撤销栈**：留着的话 Ctrl+Z 会重放一条属于崩溃前那份
+          // 文档的逆补丁，理由与 `openProject` 那处逐字相同。
+          replaceDocument(recovery.draft, { keepHistory: false })
+          setDismissed(true)
+        }}
+      >
+        恢复
+      </button>
+      <button type="button" className="tbtn" onClick={discard}>
+        丢弃
+      </button>
+      <button type="button" className="tbtn" onClick={() => setDismissed(true)}>
+        稍后再说
+      </button>
+    </div>
+  )
+}
+
+/**
  * The save button and its state.
  *
  * The state is shown rather than assumed. Autosave that gives no feedback is
@@ -212,7 +291,7 @@ export function ProjectButton() {
  * no way to know whether it was ever written.
  */
 function SaveControl() {
-  const { state, error, saveNow } = useAutoSave()
+  const { state, error, errorCode, saveNow } = useAutoSave()
   return (
     <>
       <button
@@ -227,6 +306,19 @@ function SaveControl() {
       <span className={`savestate savestate--${state}`} title={error ?? undefined}>
         {SAVE_LABELS[state]}
       </span>
+      {/*
+        T-288 · 配额写满是**用户能自己解决**的唯一一种保存失败，所以它带一个入口；
+        其余失败只显示文案。文案本身来自 `StorageError.userMessage`，不是浏览器抛的
+        `QuotaExceededError: Failed to execute 'put' on 'IDBObjectStore'`。
+      */}
+      {errorCode === 'quota-exceeded' && (
+        <span className="savestate savestate--error" role="alert">
+          {error}
+          <button type="button" className="tbtn" onClick={() => setUi({ projectListOpen: true })}>
+            清理本地数据
+          </button>
+        </span>
+      )}
     </>
   )
 }

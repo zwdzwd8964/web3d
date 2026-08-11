@@ -38,9 +38,18 @@ export interface UiState {
    * store's shape once avoids two cards editing the same four-field type.
    */
   readonly helpOpen: boolean
+  /**
+   * T-288 · 工程列表对话框开着没有。
+   *
+   * 在这里而不是 `ProjectButton` 的局部 state，因为它现在有**第二个**开启者：保存因
+   * 配额写满而失败时，那条错误旁边的「清理本地数据」入口要能把列表打开——而删掉一份
+   * 不用的工程正是用户唯一能自己做的腾地方的事。局部 state 的话，那个入口只能是一句
+   * 「请手动打开工程列表」，也就是一个不做事的按钮。
+   */
+  readonly projectListOpen: boolean
 }
 
-const INITIAL: UiState = { search: '', renaming: null, pendingDelete: null, helpOpen: false }
+const INITIAL: UiState = { search: '', renaming: null, pendingDelete: null, helpOpen: false, projectListOpen: false }
 
 let current: UiState = INITIAL
 const listeners = new Set<() => void>()
@@ -57,7 +66,8 @@ export function setUi(patch: Partial<UiState>): void {
     next.search === current.search &&
     next.renaming === current.renaming &&
     next.pendingDelete === current.pendingDelete &&
-    next.helpOpen === current.helpOpen
+    next.helpOpen === current.helpOpen &&
+    next.projectListOpen === current.projectListOpen
   ) {
     return
   }
@@ -77,7 +87,7 @@ export function resetUi(): void {
 }
 
 /**
- * Subscribes a component to the four transients.
+ * Subscribes a component to the transients.
  *
  * `getUi` serves as both snapshot and server snapshot: the store has no SSR path, and
  * returning the same frozen initial object on both sides is what keeps hydration quiet.

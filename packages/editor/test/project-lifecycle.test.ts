@@ -128,11 +128,15 @@ describe('T-282 · 内置文档表取代硬编码的 id 比较', () => {
 
 /* ── 冷启动步骤表 ───────────────────────────────────────────────────────── */
 
+/** T-288 · 冷启动现在要一个租约申请。固定时钟——测试里不许有真实时间。 */
+const BOOT_REQUEST = { sessionId: 'ses_test01', nowMs: 1_000_000 }
+
 describe('T-282 · 冷启动是一张显式的表', () => {
   it('顺序被钉住 —— 后续三张卡只许加步骤，不许重排', () => {
     // 顺序在这里是有语义的：物化必须先于 store 建好，否则视口一挂载就向 resolver
     // 要字节，得到的是「资产加载失败：pump.glb」。T-288 / v1.5 两张卡还要往表里加东西。
-    expect(BOOT_STEPS.map((s) => s.id)).toEqual(['restore-last', 'fallback-builtin', 'materialise'])
+    // T-288 插了第四步 crash-recovery，**追加在末尾**，前三步一个字没动。
+    expect(BOOT_STEPS.map((s) => s.id)).toEqual(['restore-last', 'fallback-builtin', 'materialise', 'crash-recovery'])
   })
 
   it('每一步都说得出自己在做什么', () => {
@@ -140,7 +144,7 @@ describe('T-282 · 冷启动是一张显式的表', () => {
   })
 
   it('空存储 → 落到内置文档，且资产被物化（发布闸门能过）', async () => {
-    const { doc, notes } = await runBoot(session)
+    const { doc, notes } = await runBoot(session, BOOT_REQUEST)
     expect(doc.projectId).toBe(BUILTIN_DOCUMENTS[0]!.projectId)
     // 物化的证据是**字节真的在存储里**，不是「文档打开了」。
     expect(await storage.hasBlob(doc.assets[0]!.hash)).toBe(true)
@@ -149,7 +153,7 @@ describe('T-282 · 冷启动是一张显式的表', () => {
 
   it('有存过的工程 → 恢复它，而不是又打开样例', async () => {
     const mine = await createProject(session, '我的工程')
-    const { doc } = await runBoot(session)
+    const { doc } = await runBoot(session, BOOT_REQUEST)
     expect(doc.projectId).toBe(mine.projectId)
     expect(doc.name).toBe('我的工程')
   })

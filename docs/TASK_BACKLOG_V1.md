@@ -2763,8 +2763,21 @@
   「清后 load 返回 null」红。**⚠ 最容易假绿**：`loadDraft` 返回 `undefined` 而断言写
   `not.toBeNull()` —— **前置断言要断形状（`toBeNull()` 或 `toMatchObject`），不要断「不是 null」。**
 
-### [ ] T-288 · 崩溃恢复 · 编辑器侧（草稿通道 + 崩溃检测 + 三选一横幅）
-- **依赖** T-287 · **预估** 1.2d · **实际** —
+### [x] T-288 · 崩溃恢复 · 编辑器侧（草稿通道 + 崩溃检测 + 三选一横幅）
+- **依赖** T-287 · **预估** 1.2d · **实际** 1.3d
+- `BOOT_STEPS` **插了第四步 `crash-recovery`，前三步一个字没动**——T-282 那条「顺序被钉住」
+  的断言同步改成四项，改的是期望值不是顺序。
+- **自己写出来又自己改掉一个 bug 并登记成变异 ⑤**：心跳原本复用开机那一刻的 `nowMs`，
+  于是 `heartbeatAt` 每次都写回开机时刻，租约会在标签页活得好好的时候过期、被另一个
+  标签页接管。第一版测试直接调 `heartbeatLease`（那一层是对的），对它完全无感——
+  改成走 `runBoot` 交出来的闭包之后才红。
+- **T-287 的卡号到期机制在这里第一次兑现**：守卫点名要求删掉那 8 行冻结接口，
+  连同 `facets` 三行与 `Lease.heldBy` 一共清掉 **12 行**。
+- **交付偏差** 三处：① 动了 `project-lifecycle.ts`（卡面独占里没有它，但 T-282 的卡面
+  已经把 T-288 列为步骤表的四个所有者之一，横幅判定与心跳都写在那里，纯 Node 可测）；
+  ② `ui-store.ts` 加一个 `projectListOpen` 字段——「清理本地数据」需要第二个开启者能
+  打开工程列表，否则那个入口只能是一句「请手动打开工程列表」，也就是一个不做事的按钮；
+  ③ `tree-search.test.ts` 的两条 ui-store 断言跟着改（字段数变了）。
 - **独占** `packages/editor/src/project/autosave.ts` · `useAutoSave.ts` · `packages/editor/src/main.tsx` ·
   `packages/editor/src/App.tsx`（两条横幅，列 A）· `packages/editor/test/autosave-draft.test.ts`(新)
 - **做** AutoSaver 草稿通道（`saveDraft → save → clearDraft`）与编辑计数；开机租约判定与心跳；
