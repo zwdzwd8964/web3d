@@ -77,6 +77,54 @@ describe('schema fixtures', () => {
   )
 })
 
+describe('T-292 · 迁移不许改动历史文档里写明的阴影档', () => {
+  /**
+   * 遗留决议 S3 的护栏。
+   *
+   * `ShadowSchema.quality` 的 `.default('medium')` 是**出厂默认**——它只该作用于「文档里
+   * 压根没写这一项」的情况。改出厂默认（S3 实测之后可能会改）**不该动任何一份已经存在的
+   * 文档**，因为那份文档里的 `low` 是作者当年按他那台机器的表现选的。
+   *
+   * ⚠ 光有 `fixtures/v2/golden-path-2.json` 守不住这件事：那份文档里写的就是 `medium`，
+   * 与默认值一模一样，所以「保留了原值」和「被默认值覆盖了」在它身上完全同形。
+   * `shadow-quality-v2.json` 存在的唯一理由就是**它写的不是默认值**。
+   */
+  it('每一份 fixture 里写明的 quality，迁移之后逐个不变', () => {
+    let checked = 0
+    for (const fixture of fixtures) {
+      const raw = JSON.parse(readFileSync(fixture.path, 'utf8'))
+      const before = qualitiesIn(raw)
+      if (before.length === 0) continue
+
+      const migrated = migrate(raw)
+      expect(migrated.ok).toBe(true)
+      if (!migrated.ok) continue
+      expect(qualitiesIn(migrated.value.document), `${fixture.name} 的阴影档被迁移改动了`).toEqual(before)
+      checked += 1
+    }
+    // 一份都没查到，说明取值路径写错了——那时上面那个循环是空转，而空转永远绿。
+    expect(checked, '没有任何一份 fixture 含 shadow.quality，这条断言在空转').toBeGreaterThan(0)
+  })
+
+  it('至少有一份 fixture 写的**不是**出厂默认档', () => {
+    const nonDefault = fixtures.flatMap((f) => qualitiesIn(JSON.parse(readFileSync(f.path, 'utf8')))).filter((q) => q !== 'medium')
+    // 少了这一条，上面那条会在「所有 fixture 都写着 medium」的世界里继续绿——而在那个
+    // 世界里，把迁移改成「强制写 medium」也一样绿。
+    expect(nonDefault.length, '每一份 fixture 写的都是默认值，上一条断言证明不了任何事').toBeGreaterThan(0)
+  })
+})
+
+/** 一份文档里全部 `shadow.quality`，按节点顺序。 */
+function qualitiesIn(doc: unknown): string[] {
+  const out: string[] = []
+  const nodes = (doc as { nodes?: unknown[] }).nodes ?? []
+  for (const node of nodes) {
+    const quality = (node as { light?: { shadow?: { quality?: unknown } } }).light?.shadow?.quality
+    if (typeof quality === 'string') out.push(quality)
+  }
+  return out
+}
+
 describe('the golden path fixture and the in-code sample are one document', () => {
   it('SCHEMA_SPEC §12, migrated to today’s version, matches createGoldenPathDocument()', () => {
     // The fixture is frozen at v1 (append-only) while the builder tracks CURRENT_VERSION,
