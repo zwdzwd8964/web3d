@@ -44,11 +44,17 @@
 
       // ⚠ 下面这一段与 docs/EMBED_API.md §1 的代码块**逐字相同**，由一条测试盯着。
       // 改这里就要改那里，反过来也一样。
+      //
+      // ⚠⚠ **只 mount 一次。** 第一版这里调了两次（这一段一次、下面的接线一次），于是
+      // 起了两套完整运行时：两个 iframe 一上一下排开，第二个整个溢出 540px 的容器压在
+      // 按钮行上，而按钮绑的恰好是溢出到框外那一个。见 ADR-0042 决策 5。
       // doc:quickstart:start
-      W3Player.mount({
+      const ready = W3Player.mount({
         src: '/player/index.html?embed=1&src=demo.w3p',
         container: document.getElementById('viewer'),
-      }).then(async (player) => {
+      })
+
+      ready.then(async (player) => {
         // 播放器报上来它支持什么。**据它判断，不要硬编码一份清单。**
         console.log('可用命令：', player.commands.join(', '))
 
@@ -58,14 +64,16 @@
 
         await player.subscribe(['hotspotClick', 'variableChange'])
         await player.setVariable('var_step', 2)
+      }).catch((error) => {
+        // **别省掉这一段。** 握手失败（超时 / origin 被拒 / 协议不匹配）与命令失败都会走到
+        // 这里，而没有它的话，浏览器控制台里只有一条 unhandled rejection，宿主页面自己不知情。
+        console.error('嵌入失败[' + error.code + ']：' + error.message)
       })
       // doc:quickstart:end
 
       // —— 以下是样板页自己的部分，不属于快速开始 ——————————————————————
-      W3Player.mount({
-        src: '/player/index.html?embed=1&src=demo.w3p',
-        container: document.getElementById('viewer'),
-      })
+      // 复用上面那个句柄，**不再 mount 一次**。
+      ready
         .then((player) => {
           log('握手成功。协议 ' + player.protocol)
           log('可用命令：' + player.commands.join(', '))

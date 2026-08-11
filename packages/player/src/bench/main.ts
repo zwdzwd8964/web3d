@@ -14,11 +14,13 @@ import {
   gradeLoad,
   gradeSection,
   gradeStress,
+  isMeasured,
+  shouldKeepSampling,
   summariseFrames,
   toJsonReport,
   toMarkdown,
 } from './metrics.js'
-import type { BenchRow, ExplodeCost, LightLevel, LoadTiming, SceneStats, SectionCost, StressLevel } from './metrics.js'
+import type { BenchRow, ExplodeCost, LightLevel, LoadTiming, SceneStats, SectionMeasurement, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -42,7 +44,9 @@ import './bench.css'
  * 帧率。缩短之后的读数没有验收价值——所以它只由 URL 参数打开，页面上没有这个开关，
  * 客户不会误按。
  *
- * 报告里那张表的**行数与结构完全不变**，这正是 e2e 要断言的东西。
+ * ⚠ 曾经这里写着「报告里那张表的**行数与结构完全不变**」。**那句话是错的**，而且被同一个
+ * 提交自己的 bug 当场证伪：行数随爬坡收摊的位置变（实测 33 / 41 / 42 / 43 都出现过）。
+ * 不变的是**结构**——每一段都在、每一行都有判定；行数只有下界。见 ADR-0042。
  */
 const FAST = new URLSearchParams(location.search).get('fast') === '1'
 
@@ -104,6 +108,15 @@ async function run(bytes: Uint8Array, sourceName: string) {
       firstFrameMs: performance.now() - t2,
     }
 
+    // ADR-0042 决策 4 · 剖切档**在爬坡之前**测，因为 program 缓存这时候还是冷的。
+    //
+    // 原来它排在灯光扫描之后，而 `renderStats.programs` 读的是 program 缓存——爬坡跑完
+    // 时开与关两种变体早就都编译进去了，于是 `programsAfterOn - programsBefore` 结构上
+    // 恒为 0。那一行观测不到它声称要观测的东西，而它的说明还写着「开一次剖切等于全场
+    // 材质重编译一遍」：报告自己打架。
+    show('<p class="bench__note">正在量剖切切换的首帧代价…</p>')
+    const section = measureSection(runtime, session)
+
     show(`<p class="bench__note">正在测量…（约 ${SAMPLE_MS.main / 1000} 秒，期间相机会自动环绕）</p>`)
     const frameTimes = await measure(runtime, session)
 
@@ -125,8 +138,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
     show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
     const lighting = await lightingRamp(runtime, session)
 
-    show('<p class="bench__note">正在量剖切与爆炸…</p>')
-    const section = measureSection(runtime, session)
+    show('<p class="bench__note">正在量爆炸进行中的帧率…</p>')
     const explode = await measureExplode(runtime, session)
 
     const scene: SceneStats = {
@@ -174,6 +186,14 @@ function measure(
   durationMs = SAMPLE_MS.main,
   warmupFrames = 30,
 ): Promise<number[]> {
+  // ADR-0042 决策 1 · 继续与否的判据抽在 `shouldKeepSampling`（纯函数，有单测）。
+  //
+  // 修的是**两把尺子不同量纲**：窗口按墙钟收，warmup 按帧扣。窗口内跑不满
+  // `warmupFrames + 1` 帧时 `times` 是空的，而空样本算出来的 `fps: 0` 与「真的 0 fps」
+  // 在下游完全同形——判 fail、截断爬坡、污染上限与推荐，最后落进合同附件 A §7。
+  //
+  // 判据不写在这里，是因为**它在浏览器里测不出确定的红**：要复现饥饿得让一次 shader
+  // 编译卡顿正好落在 warmup 帧里，而那取决于机器与时刻。见 `shouldKeepSampling` 的注释。
   return new Promise((resolve) => {
     const times: number[] = []
     let warmup = warmupFrames
@@ -190,11 +210,33 @@ function measure(
       else times.push(now - previous)
       previous = now
 
-      if (now - started < durationMs) requestAnimationFrame(frame)
-      else resolve(times)
+      if (shouldKeepSampling({ elapsedMs: now - started, samples: times.length, durationMs })) {
+        requestAnimationFrame(frame)
+      } else {
+        resolve(times)
+      }
     }
     requestAnimationFrame(frame)
   })
+}
+
+/**
+ * ADR-0042 决策 1 · 这一档之后还要不要继续爬。
+ *
+ * **报什么与还爬不爬是两个决定，第一版把它们混成了一个。**
+ *
+ * - *报什么*：采样不足的档报「未测到」、判 warn、不进上限与推荐。
+ * - *还爬不爬*：**停**。理由不是「它慢」，而是「延长到硬上限（`durationMs` 的 3 倍）
+ *   都凑不满 8 个样本」这件事本身就是读数——按 `?fast=1` 的 200 ms 档算，平均帧时已经
+ *   超过 75 ms，即 13 fps 以下，本来就在 fail 线（25 fps）以下。
+ *
+ * 只按「测到且低于 fail 线」收摊的那一版实测挂死：SwiftShader 上一帧要好几秒，16 档灯光
+ * 一档都收不了摊，整页跑过 3 分钟还没出表。而**延长本身已经把「一次编译卡顿」这种成因
+ * 滤掉了**——一次 334 ms 的卡顿之后还有 600 ms 窗口去收满 8 个 7 ms 的帧，凑不满只可能是
+ * 持续地慢。
+ */
+function shouldStop(stats: { readonly fps: number; readonly frames: number }): boolean {
+  return !isMeasured(stats.frames) || stats.fps < BENCH_LIMITS.fpsFail
 }
 
 /**
@@ -270,9 +312,9 @@ async function lightingRamp(
         while (added.length > count) added.pop()?.removeFromParent()
 
         const stats = summariseFrames(await measure(runtime, session, SAMPLE_MS.lighting, 4))
-        levels.push({ lights: count, shadows, fps: stats.fps, drawCalls: runtime.info?.calls ?? 0 })
+        levels.push({ lights: count, shadows, fps: stats.fps, drawCalls: runtime.info?.calls ?? 0, frames: stats.frames })
 
-        if (stats.fps < BENCH_LIMITS.fpsFail) break
+        if (shouldStop(stats)) break
       }
 
       while (added.length > 0) added.pop()?.removeFromParent()
@@ -332,11 +374,12 @@ async function stressRamp(
         fps: stats.fps,
         drawCalls: info?.calls ?? 0,
         triangles: info?.triangles ?? 0,
+        frames: stats.frames,
       })
 
       // Past the fail line there is nothing left to learn from a bigger rung, and the
       // page would keep the machine at single-digit frame rates to prove it.
-      if (stats.fps < BENCH_LIMITS.fpsFail) break
+      if (shouldStop(stats)) break
     }
   } finally {
     for (const clone of copies) clone.removeFromParent()
@@ -356,8 +399,10 @@ async function stressRamp(
 function measureSection(
   runtime: ReturnType<typeof createPlayerSession>['runtime'],
   session: ReturnType<typeof createPlayerSession>['session'],
-): SectionCost | null {
-  if (!runtime.doc.nodes.some((node) => node.section)) return null
+): SectionMeasurement {
+  // 快速短路：一把刀都没有，连试都不用试。**但它不是判据**——见下面 `clipPlanes` 那一处。
+  const sectionNodes = runtime.doc.nodes.filter((node) => node.section).length
+  if (sectionNodes === 0) return { skipped: 'no-section' }
 
   /** 画一帧，返回它花了多久。 */
   const frame = (): number => {
@@ -368,8 +413,7 @@ function measureSection(
   }
 
   try {
-    // 先确定地关掉并画几帧，让「切换前」是一个稳定的起点：上一档灯光扫描刚跑完，
-    // 直接读的话读到的是它留下的状态。
+    // 先确定地关掉并画几帧，让「切换前」是一个稳定的起点。
     runtime.setSectionsEnabled(false)
     for (let i = 0; i < 3; i++) frame()
     const programsBefore = runtime.renderStats.programs
@@ -377,6 +421,14 @@ function measureSection(
     runtime.setSectionsEnabled(true)
     const onFirstFrameMs = frame()
     const { programs: programsAfterOn, clipPlanes } = runtime.renderStats
+
+    // ADR-0042 决策 3 · **真正的判据在这里。**
+    //
+    // 上面那句 `sectionNodes === 0` 只保证「文档里配了刀」，不保证「这一档量得到东西」。
+    // 一把 `visible: false` 的刀按 ADR-0039 的世界可见性判定不装任何裁剪平面，于是
+    // 这三行会输出绿色「通过」的 `0 ms` / `+0 program`，读者据此得出「剖切几乎免费」——
+    // 与事实相反。而带一把关着的刀是**合法文档**，客户送检的资产照样会这样。
+    if (clipPlanes === 0) return { skipped: 'no-planes', sectionNodes }
 
     runtime.setSectionsEnabled(false)
     const offFirstFrameMs = frame()
@@ -419,6 +471,7 @@ async function measureExplode(
       members: runtime.doc.nodes.filter((node) => node.parent === group.id).length,
       fps: stats.fps,
       drawCalls: runtime.info?.calls ?? 0,
+      frames: stats.frames,
     }
   } finally {
     controller.abort()

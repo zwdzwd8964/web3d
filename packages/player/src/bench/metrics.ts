@@ -15,6 +15,64 @@ import type { ShadowQuality } from '@w3/schema'
 
 export type Verdict = 'pass' | 'warn' | 'fail'
 
+/**
+ * ADR-0042 · 一档读数要作数，至少要这么多个采样帧。
+ *
+ * ## 为什么需要这条线
+ *
+ * `measure()` 用**墙钟**结束采样窗口，却用**帧数**扣 warmup——两把尺子不同量纲。窗口里
+ * 跑不满 `warmupFrames + 1` 帧时 `times` 是空的，而 `summariseFrames([])` 返回 `fps: 0`。
+ * **「没测到」与「测出来是 0」于是长得一模一样**，而下游把它当成「太慢了」：判 fail、
+ * 截断爬坡、污染上限与推荐，最后经 T-280 的回填脚本落进合同附件 A §7。
+ *
+ * ## 为什么是 8 而不是 1
+ *
+ * 实测过一个 `frames === 1` 的窗口：那一帧吞了约 357 ms 的编译卡顿，算出 2.8 fps，
+ * 照样把整条爬坡截断。**只挡 `frames === 0` 治的是表征**，不是成因。8 个样本足以让
+ * 一次卡顿不再主导均值，而在任何跑得动 bench 的机器上，多等 8 帧以毫秒计。
+ *
+ * ⚠ 这个数是**拍的，不是测的**（ADR-0042 代价 3，同 NORTH_STAR §8 破例清单那三个默认值）。
+ */
+export const MIN_SAMPLES = 8
+
+/** 这一档的读数作不作数。**唯一判据**，不许在别处另写一遍。 */
+export const isMeasured = (frames: number): boolean => frames >= MIN_SAMPLES
+
+/** 未测到时那一格写什么。三处共用一份措辞，好让读者一眼认出这是同一种情形。 */
+export const notMeasured = (frames: number): string => `未测到（样本 ${frames}/${MIN_SAMPLES}）`
+
+/** 窗口最多延长到标称时长的几倍。**拍的**（ADR-0042 代价 3）。 */
+export const HARD_CAP_FACTOR = 3
+
+/**
+ * ADR-0042 决策 1 · 采样窗口还要不要继续。
+ *
+ * ## 为什么它是一个纯函数，而不是 `measure()` 里的一行
+ *
+ * 这一行是整条缺陷链的**根**：窗口按墙钟收、warmup 按帧扣，两把尺子不同量纲。
+ * 而它在浏览器里**测不出确定的红**——要复现饥饿得让一次 shader 编译卡顿正好落在
+ * warmup 帧里，而那取决于这台机器、这个驱动、这一刻。实测把修复回退掉之后，
+ * bench 的 e2e 照样绿（那一轮机器够快，没饿着）。
+ *
+ * **一条只在某些机器上某些时刻会红的守卫，等于没有守卫。** 所以把判据抽成纯函数，
+ * 用构造出来的时间线钉死它。
+ *
+ * @param elapsedMs 从窗口开始到现在
+ * @param samples   已经收到的**有效**样本数（warmup 之后的）
+ * @param durationMs 标称窗口
+ */
+export function shouldKeepSampling(state: {
+  readonly elapsedMs: number
+  readonly samples: number
+  readonly durationMs: number
+}): boolean {
+  // 标称窗口没到：无条件继续，与原来一样。
+  if (state.elapsedMs < state.durationMs) return true
+  // 到点了但样本不够：延长，直到硬上限。到硬上限还不够就如实收摊——延长不是万能的，
+  // 一台一帧要几百毫秒的机器延到多久都凑不满，而那时正确的输出是「未测到」。
+  return state.samples < MIN_SAMPLES && state.elapsedMs < state.durationMs * HARD_CAP_FACTOR
+}
+
 export interface Sample {
   readonly frames: number
   readonly elapsedMs: number
@@ -121,6 +179,21 @@ export const BENCH_LIMITS = {
 } as const
 
 export function gradeFrames(stats: FrameStats): BenchRow[] {
+  // ADR-0042 决策 1 · 样本不足时三行一起报「未测到」。
+  //
+  // 三行一起，而不是只改第一行：`p95FrameMs` 与 `worstFrameMs` 在空样本下都是 0，
+  // 而「0 毫秒的帧时间」会被 `<= 33ms` 判成**通过**——一份写着「P95 帧时间 0.0 ms ✅」
+  // 的报告比一份写着 fail 的更危险，因为它看起来是个好消息。
+  if (!isMeasured(stats.frames)) {
+    const why =
+      `采样窗口里只收到 ${stats.frames} 个有效帧（至少要 ${MIN_SAMPLES}）。` +
+      '常见成因：窗口太短（`?fast=1`）、或者这台机器在这个场景上一帧就要几百毫秒。**这一行不是读数，不要引用。**'
+    return [
+      { metric: '平均帧率', value: notMeasured(stats.frames), limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`, verdict: 'warn', note: why },
+      { metric: 'P95 帧时间', value: notMeasured(stats.frames), limit: `≤ ${BENCH_LIMITS.p95FrameWarn} ms`, verdict: 'warn', note: why },
+      { metric: '最慢单帧', value: notMeasured(stats.frames), limit: '—', verdict: 'warn', note: why },
+    ]
+  }
   return [
     {
       metric: '平均帧率',
@@ -206,6 +279,8 @@ export interface StressLevel {
   readonly fps: number
   readonly drawCalls: number
   readonly triangles: number
+  /** ADR-0042 · 这一档收到几个有效采样帧。不足 MIN_SAMPLES 时 fps 没有意义。 */
+  readonly frames: number
 }
 
 /** The rungs the bench page climbs, until one of them drops under `fpsFail`. */
@@ -226,7 +301,8 @@ export const STRESS_COPIES: readonly number[] = [1, 2, 4, 8]
 export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
   if (levels.length === 0) return []
 
-  const passing = levels.filter((l) => l.fps >= BENCH_LIMITS.fpsWarn)
+  // ADR-0042 决策 1 · 没测到的档不算数。与 `ceilingFor` 同一条纪律。
+  const passing = levels.filter((l) => isMeasured(l.frames) && l.fps >= BENCH_LIMITS.fpsWarn)
   const ceiling = passing.reduce<StressLevel | null>((best, l) => (best && best.copies >= l.copies ? best : l), null)
 
   const rows: BenchRow[] = [
@@ -244,12 +320,21 @@ export function gradeStress(levels: readonly StressLevel[]): BenchRow[] {
   ]
 
   for (const level of levels) {
+    const measured = isMeasured(level.frames)
     rows.push({
       metric: `逐级加载 ×${level.copies}`,
-      value: `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall`,
+      value: measured ? `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall` : notMeasured(level.frames),
       limit: '—',
-      verdict: level.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : level.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
-      note: `${level.triangles.toLocaleString('en-US')} 面。`,
+      verdict: !measured
+        ? 'warn'
+        : level.fps >= BENCH_LIMITS.fpsWarn
+          ? 'pass'
+          : level.fps >= BENCH_LIMITS.fpsFail
+            ? 'warn'
+            : 'fail',
+      note: measured
+        ? `${level.triangles.toLocaleString('en-US')} 面。`
+        : `${level.triangles.toLocaleString('en-US')} 面。采样窗口没收到足够的帧，这一档**没有读数**——它不参与上面的承载上限。`,
     })
   }
   return rows
@@ -282,23 +367,52 @@ export interface SectionCost {
 }
 
 /**
+ * 这一档为什么没量到。
+ *
+ * ADR-0042 决策 3 · **两种跳过要分开说。**「场景里没有刀」是资产的属性，读者据此知道
+ * 这一档与他无关；「有刀但都关着」是**这次测量的问题**，读者据此知道要重测。合成一句
+ * 「不适用」的话，第二种会被当成第一种放过去。
+ */
+export type SectionSkip =
+  /** 文档里一个 `section` 节点都没有。 */
+  | { readonly skipped: 'no-section' }
+  /** 有剖切节点，但强制开之后渲染器上一条裁剪平面都没装（按 ADR-0039，世界不可见的刀不装）。 */
+  | { readonly skipped: 'no-planes'; readonly sectionNodes: number }
+
+/** 一次剖切测量的结果：读数，或者一个说得出理由的跳过。 */
+export type SectionMeasurement = SectionCost | SectionSkip
+
+const isSkip = (m: SectionMeasurement): m is SectionSkip => 'skipped' in m
+
+/**
  * 剖切那一档，成表。
  *
- * `null` = 本场景没有剖切平面。**报一行说明而不是省掉这一档**：一份少了一整档的报告
- * 与一份「这一档不适用」的报告，在读者眼里是两件事，而只有后者能被信任。
+ * **报一行说明而不是省掉这一档**：一份少了一整档的报告与一份「这一档没量到」的报告，
+ * 在读者眼里是两件事，而只有后者能被信任。
  */
-export function gradeSection(cost: SectionCost | null): BenchRow[] {
-  if (cost === null) {
+export function gradeSection(measurement: SectionMeasurement): BenchRow[] {
+  if (isSkip(measurement)) {
+    // ADR-0042 决策 3 · 「有刀但都关着」判 warn 而不是 pass。
+    //
+    // 送检资产带了刀却量不到，是需要重测的信号，不是通过。原实现两种情形共用一句
+    // 「不适用（本场景没有剖切平面）」并判 pass——于是一份带着一把关着的刀的资产，
+    // 会得到三行绿色「通过」的 `0 ms`，读者据此得出「剖切几乎免费」，与事实相反。
+    const noSection = measurement.skipped === 'no-section'
     return [
       {
         metric: '剖切切换首帧代价',
-        value: '不适用（本场景没有剖切平面）',
+        value: noSection ? '不适用（本场景没有剖切平面）' : '未测到（剖切平面都是关的）',
         limit: '—',
-        verdict: 'pass',
-        note: '这一档只有在场景里真的有剖切平面时才测得出来。送检资产带剖切时请重测。',
+        verdict: noSection ? 'pass' : 'warn',
+        note: noSection
+          ? '这一档只有在场景里真的有剖切平面时才测得出来。送检资产带剖切时请重测。'
+          : `场景里有 ${measurement.sectionNodes} 个剖切节点，但强制开之后渲染器上一条裁剪平面都没装——` +
+            '按 [ADR-0039](../../../docs/adr/0039-剖切面的启用判定用世界可见性.md)，世界不可见的刀不装平面。' +
+            '**这一档没有读数，不是「代价为 0」。** 把要验收的那把刀打开（或让它的祖先可见）后重测。',
       },
     ]
   }
+  const cost = measurement
 
   const ms = (value: number) => `${value.toFixed(0)} ms`
   return [
@@ -333,6 +447,8 @@ export interface ExplodeCost {
   readonly members: number
   readonly fps: number
   readonly drawCalls: number
+  /** ADR-0042 · 这一档收到几个有效采样帧。 */
+  readonly frames: number
 }
 
 /**
@@ -353,13 +469,21 @@ export function gradeExplode(cost: ExplodeCost | null): BenchRow[] {
       },
     ]
   }
+  const measured = isMeasured(cost.frames)
+  const scope = `分组「${cost.groupName}」的 ${cost.members} 个直接成员同时在动。量的是**动画进行中**，不是终态——终态与静止画面没有区别。`
   return [
     {
       metric: '爆炸进行中帧率',
-      value: `${cost.fps.toFixed(1)} fps · ${cost.drawCalls} drawcall`,
+      value: measured ? `${cost.fps.toFixed(1)} fps · ${cost.drawCalls} drawcall` : notMeasured(cost.frames),
       limit: `≥ ${BENCH_LIMITS.fpsWarn} fps`,
-      verdict: cost.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : cost.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
-      note: `分组「${cost.groupName}」的 ${cost.members} 个直接成员同时在动。量的是**动画进行中**，不是终态——终态与静止画面没有区别。`,
+      verdict: !measured
+        ? 'warn'
+        : cost.fps >= BENCH_LIMITS.fpsWarn
+          ? 'pass'
+          : cost.fps >= BENCH_LIMITS.fpsFail
+            ? 'warn'
+            : 'fail',
+      note: measured ? scope : `${scope}采样窗口没收到足够的帧，这一档**没有读数**。`,
     },
   ]
 }
@@ -474,6 +598,8 @@ export interface LightLevel {
   readonly shadows: ShadowSetting
   readonly fps: number
   readonly drawCalls: number
+  /** ADR-0042 · 这一档收到几个有效采样帧。不足 MIN_SAMPLES 时 fps 没有意义。 */
+  readonly frames: number
 }
 
 /** Light counts the page climbs. 0 is the baseline: the scene as published. */
@@ -542,10 +668,22 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
 
   // 阴影贴图显存。**估算**，与「贴图显存（估算）」同一个口径：它给的是数量级，
   // 而这个数量级正是「为什么开到 8 盏 high 会掉帧」的那半个解释——另外半个是深度 pass。
-  const worst = levels.reduce<LightLevel | null>(
-    (best, l) => (l.shadows !== 'off' && (!best || l.lights > best.lights) ? l : best),
-    null,
-  )
+  //
+  // ADR-0042 决策 2 · **按显存取最大，不是按灯数取最大。**
+  //
+  // 原来写的是 `l.lights > best.lights`（严格大于 + 插入序遍历），于是永远取**第一个**
+  // 达到最大灯数的档——也就是 `low`，最便宜的那一档。而这一行的说明写着「报的是最重的
+  // 那一档」。**这个错在完全没有采样问题的干净跑里也成立**：实测慢跑 12 档全过，它照样
+  // 报「8.0 MB（8 盏 · low）」，而同一轮 medium 与 high 也都到了 8 盏。
+  const worst = levels
+    .filter((l) => l.shadows !== 'off' && isMeasured(l.frames))
+    .reduce<LightLevel | null>(
+      (best, l) =>
+        !best || estimateShadowMemory(l.lights, l.shadows as ShadowQuality) > estimateShadowMemory(best.lights, best.shadows as ShadowQuality)
+          ? l
+          : best,
+      null,
+    )
   if (worst) {
     const bytes = estimateShadowMemory(worst.lights, worst.shadows as ShadowQuality)
     rows.push({
@@ -558,21 +696,33 @@ export function gradeLighting(levels: readonly LightLevel[]): BenchRow[] {
   }
 
   for (const level of levels) {
+    const measured = isMeasured(level.frames)
     rows.push({
       metric: `灯 ×${level.lights} · 阴影 ${level.shadows}`,
-      value: `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall`,
+      value: measured ? `${level.fps.toFixed(1)} fps · ${level.drawCalls} drawcall` : notMeasured(level.frames),
       limit: '—',
-      verdict: level.fps >= BENCH_LIMITS.fpsWarn ? 'pass' : level.fps >= BENCH_LIMITS.fpsFail ? 'warn' : 'fail',
-      note: '',
+      verdict: !measured
+        ? 'warn'
+        : level.fps >= BENCH_LIMITS.fpsWarn
+          ? 'pass'
+          : level.fps >= BENCH_LIMITS.fpsFail
+            ? 'warn'
+            : 'fail',
+      note: measured ? '' : '采样窗口没收到足够的帧，这一档**没有读数**——它不参与上面的上限与推荐。',
     })
   }
   return rows
 }
 
-/** 某一档设置下，还能跑在黄灯线以上的最多灯数。 */
+/**
+ * 某一档设置下，还能跑在黄灯线以上的最多灯数。
+ *
+ * ADR-0042 决策 1 · **先滤掉没测到的档**。不滤的话，一个采样不足的 `fps: 0` 会被判成
+ * 「这一档撑不住」，于是上限被系统性低报，而报告上看不出任何异常。
+ */
 function ceilingFor(levels: readonly LightLevel[], shadows: ShadowSetting): LightLevel | null {
   return levels
-    .filter((l) => l.shadows === shadows && l.fps >= BENCH_LIMITS.fpsWarn)
+    .filter((l) => l.shadows === shadows && isMeasured(l.frames) && l.fps >= BENCH_LIMITS.fpsWarn)
     .reduce<LightLevel | null>((best, l) => (best && best.lights >= l.lights ? best : l), null)
 }
 
@@ -607,6 +757,8 @@ export interface ShadowRecommendation {
 export function recommendShadowDefault(levels: readonly LightLevel[]): ShadowRecommendation {
   // 从高到低找第一档过线的。顺序取自 `SHADOW_QUALITIES` 的倒序而不是手写
   // ['high','medium','low']：手写的那份在 schema 加第四档时不会有任何东西提醒它。
+  //
+  // `ceilingFor` 已经滤掉没测到的档（ADR-0042 决策 1），所以这里拿到的必定是真实读数。
   for (const quality of [...SHADOW_QUALITIES].reverse()) {
     const ceiling = ceilingFor(levels, quality)
     if (ceiling && ceiling.lights >= 1) {
@@ -614,6 +766,17 @@ export function recommendShadowDefault(levels: readonly LightLevel[]): ShadowRec
         setting: quality,
         reason: `这台机器在 ${quality} 档下还能带 ${ceiling.lights} 盏投影灯跑到 ${ceiling.fps.toFixed(1)} fps。`,
       }
+    }
+  }
+  // ADR-0042 决策 1 · **「都没测到」与「都带不动」是两件事，不能给同一句话。**
+  // 前者要人重测，后者要人关掉阴影。给同一句话的话，一次坏采样会被当成一条硬件结论。
+  const anyMeasured = levels.some((l) => l.shadows !== 'off' && isMeasured(l.frames))
+  if (!anyMeasured) {
+    return {
+      setting: 'off',
+      reason:
+        '三档阴影**一档都没测到**（采样窗口没收到足够的帧），所以这不是硬件结论，是一次没跑成的测量。' +
+        '请去掉 `?fast=1` 重跑一次再看这一行。',
     }
   }
   return {

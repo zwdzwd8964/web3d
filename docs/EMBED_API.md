@@ -15,10 +15,12 @@
 <div id="viewer" style="width: 960px; height: 540px"></div>
 <script src="/player/embed.js"></script>
 <script>
-  W3Player.mount({
+  const ready = W3Player.mount({
     src: '/player/index.html?embed=1&src=demo.w3p',
     container: document.getElementById('viewer'),
-  }).then(async (player) => {
+  })
+
+  ready.then(async (player) => {
     // 播放器报上来它支持什么。**据它判断，不要硬编码一份清单。**
     console.log('可用命令：', player.commands.join(', '))
 
@@ -28,6 +30,10 @@
 
     await player.subscribe(['hotspotClick', 'variableChange'])
     await player.setVariable('var_step', 2)
+  }).catch((error) => {
+    // **别省掉这一段。** 握手失败（超时 / origin 被拒 / 协议不匹配）与命令失败都会走到
+    // 这里，而没有它的话，浏览器控制台里只有一条 unhandled rejection，宿主页面自己不知情。
+    console.error('嵌入失败[' + error.code + ']：' + error.message)
   })
 </script>
 ```
@@ -35,6 +41,11 @@
 
 `?embed=1` **不能省**：不带它，播放器不装嵌入层（那三个模块一个字节都不下载），
 `mount()` 会在超时后 reject。
+
+**一个容器只 mount 一次。** `mount()` 每次调用都新建一个 iframe，它不检查容器里是不是
+已经有播放器了——调两次就是两套完整运行时（两个 WebGL 上下文、两条渲染循环、包被下载
+两遍），而两个 iframe 会一上一下排开，第二个溢出到容器外面。要拿到句柄就把
+`mount()` 的返回值存下来复用，不要再调一次。
 
 ---
 

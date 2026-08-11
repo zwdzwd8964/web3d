@@ -10,12 +10,17 @@ import {
   gradeFrames,
   gradeScene,
   gradeLighting,
+  HARD_CAP_FACTOR,
+  MIN_SAMPLES,
   gradeExplode,
   gradeLoad,
   gradeSection,
   gradeStress,
   estimateShadowMemory,
   recommendShadowDefault,
+  isMeasured,
+  notMeasured,
+  shouldKeepSampling,
   summariseFrames,
   toJsonReport,
   toMarkdown,
@@ -172,11 +177,14 @@ describe('gradeScene', () => {
  * and that is the part that ends up in 附件A.
  */
 describe('gradeStress', () => {
-  const rung = (copies: number, fps: number): StressLevel => ({
+  // ADR-0042 · 60 帧 = 采到样了。既有断言全部关心 fps 的分级，不关心样本数，
+  // 所以统一给一个「测到了」的值，让那些断言继续测它们本来测的东西。
+  const rung = (copies: number, fps: number, frames = 60): StressLevel => ({
     copies,
     fps,
     drawCalls: copies * 100,
     triangles: copies * 50_000,
+    frames,
   })
   const ceilingOf = (levels: readonly StressLevel[]) => gradeStress(levels).find((r) => r.metric === '承载上限')!
 
@@ -267,11 +275,12 @@ describe('toMarkdown', () => {
 })
 
 describe('the lighting ladder (T-174)', () => {
-  const level = (lights: number, shadows: ShadowSetting, fps: number): LightLevel => ({
+  const level = (lights: number, shadows: ShadowSetting, fps: number, frames = 60): LightLevel => ({
     lights,
     shadows,
     fps,
     drawCalls: 10 + lights,
+    frames,
   })
 
   it('reports the two ceilings SEPARATELY', () => {
@@ -337,22 +346,22 @@ describe('the lighting ladder (T-174)', () => {
  * T-184 踩过一次（基准文档恰好已排好序，于是排序是空操作）。
  */
 const LADDER: LightLevel[] = [
-  { lights: 0, shadows: 'off', fps: 60, drawCalls: 10 },
-  { lights: 1, shadows: 'off', fps: 59, drawCalls: 11 },
-  { lights: 4, shadows: 'off', fps: 58, drawCalls: 14 },
-  { lights: 8, shadows: 'off', fps: 57, drawCalls: 18 },
-  { lights: 0, shadows: 'low', fps: 56, drawCalls: 10 },
-  { lights: 1, shadows: 'low', fps: 55, drawCalls: 11 },
-  { lights: 4, shadows: 'low', fps: 54, drawCalls: 14 },
-  { lights: 8, shadows: 'low', fps: 53, drawCalls: 18 },
-  { lights: 0, shadows: 'medium', fps: 52, drawCalls: 10 },
-  { lights: 1, shadows: 'medium', fps: 51, drawCalls: 11 },
-  { lights: 4, shadows: 'medium', fps: 50, drawCalls: 14 },
-  { lights: 8, shadows: 'medium', fps: 20, drawCalls: 18 },
-  { lights: 0, shadows: 'high', fps: 49, drawCalls: 10 },
-  { lights: 1, shadows: 'high', fps: 48, drawCalls: 11 },
-  { lights: 4, shadows: 'high', fps: 24, drawCalls: 14 },
-  { lights: 8, shadows: 'high', fps: 9, drawCalls: 18 },
+  { lights: 0, shadows: 'off', fps: 60, drawCalls: 10, frames: 60 },
+  { lights: 1, shadows: 'off', fps: 59, drawCalls: 11, frames: 60 },
+  { lights: 4, shadows: 'off', fps: 58, drawCalls: 14, frames: 60 },
+  { lights: 8, shadows: 'off', fps: 57, drawCalls: 18, frames: 60 },
+  { lights: 0, shadows: 'low', fps: 56, drawCalls: 10, frames: 60 },
+  { lights: 1, shadows: 'low', fps: 55, drawCalls: 11, frames: 60 },
+  { lights: 4, shadows: 'low', fps: 54, drawCalls: 14, frames: 60 },
+  { lights: 8, shadows: 'low', fps: 53, drawCalls: 18, frames: 60 },
+  { lights: 0, shadows: 'medium', fps: 52, drawCalls: 10, frames: 60 },
+  { lights: 1, shadows: 'medium', fps: 51, drawCalls: 11, frames: 60 },
+  { lights: 4, shadows: 'medium', fps: 50, drawCalls: 14, frames: 60 },
+  { lights: 8, shadows: 'medium', fps: 20, drawCalls: 18, frames: 60 },
+  { lights: 0, shadows: 'high', fps: 49, drawCalls: 10, frames: 60 },
+  { lights: 1, shadows: 'high', fps: 48, drawCalls: 11, frames: 60 },
+  { lights: 4, shadows: 'high', fps: 24, drawCalls: 14, frames: 60 },
+  { lights: 8, shadows: 'high', fps: 9, drawCalls: 18, frames: 60 },
 ]
 
 describe('T-279 · 三档阴影各有一条结论行', () => {
@@ -386,7 +395,7 @@ describe('T-279 · 三档阴影各有一条结论行', () => {
   })
 
   it('一档都过不了时，那一档判 fail 而不是挑一个最不差的', () => {
-    const rows2 = gradeLighting([{ lights: 1, shadows: 'high', fps: 10, drawCalls: 1 }])
+    const rows2 = gradeLighting([{ lights: 1, shadows: 'high', fps: 10, drawCalls: 1, frames: 60 }])
     expect(rows2.find((r) => r.metric === '动态灯上限（high 阴影）')!.value).toBe('不足 1 盏')
     expect(rows2.find((r) => r.metric === '动态灯上限（high 阴影）')!.verdict).toBe('fail')
   })
@@ -395,9 +404,9 @@ describe('T-279 · 三档阴影各有一条结论行', () => {
 describe('T-279 · recommendShadowDefault', () => {
   it('三档都带得动 1 盏时推荐 high', () => {
     const result = recommendShadowDefault([
-      { lights: 1, shadows: 'low', fps: 60, drawCalls: 1 },
-      { lights: 1, shadows: 'medium', fps: 58, drawCalls: 1 },
-      { lights: 1, shadows: 'high', fps: 50, drawCalls: 1 },
+      { lights: 1, shadows: 'low', fps: 60, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'medium', fps: 58, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'high', fps: 50, drawCalls: 1, frames: 60 },
     ])
     expect(result.setting).toBe('high')
     expect(result.reason).toContain('high')
@@ -405,27 +414,27 @@ describe('T-279 · recommendShadowDefault', () => {
 
   it('high 带不动时退到 medium', () => {
     const result = recommendShadowDefault([
-      { lights: 1, shadows: 'low', fps: 60, drawCalls: 1 },
-      { lights: 1, shadows: 'medium', fps: 50, drawCalls: 1 },
-      { lights: 1, shadows: 'high', fps: 20, drawCalls: 1 },
+      { lights: 1, shadows: 'low', fps: 60, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'medium', fps: 50, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'high', fps: 20, drawCalls: 1, frames: 60 },
     ])
     expect(result.setting).toBe('medium')
   })
 
   it('只有 low 带得动时推荐 low', () => {
     const result = recommendShadowDefault([
-      { lights: 1, shadows: 'low', fps: 46, drawCalls: 1 },
-      { lights: 1, shadows: 'medium', fps: 30, drawCalls: 1 },
-      { lights: 1, shadows: 'high', fps: 12, drawCalls: 1 },
+      { lights: 1, shadows: 'low', fps: 46, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'medium', fps: 30, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'high', fps: 12, drawCalls: 1, frames: 60 },
     ])
     expect(result.setting).toBe('low')
   })
 
   it('三档都带不动 1 盏时推荐关闭，并说清为什么', () => {
     const result = recommendShadowDefault([
-      { lights: 1, shadows: 'low', fps: 30, drawCalls: 1 },
-      { lights: 1, shadows: 'medium', fps: 20, drawCalls: 1 },
-      { lights: 1, shadows: 'high', fps: 8, drawCalls: 1 },
+      { lights: 1, shadows: 'low', fps: 30, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'medium', fps: 20, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'high', fps: 8, drawCalls: 1, frames: 60 },
     ])
     expect(result.setting).toBe('off')
     // 这句话会被抄进验收单，所以它不是调试信息。
@@ -435,8 +444,8 @@ describe('T-279 · recommendShadowDefault', () => {
   it('「0 盏也能跑」不算数 —— 门槛是至少带得动 1 盏投影灯', () => {
     // 0 盏投影灯下开着阴影和关着阴影是同一件事。把它算进去的话，任何机器都会被推荐 high。
     const result = recommendShadowDefault([
-      { lights: 0, shadows: 'high', fps: 60, drawCalls: 1 },
-      { lights: 1, shadows: 'high', fps: 10, drawCalls: 1 },
+      { lights: 0, shadows: 'high', fps: 60, drawCalls: 1, frames: 60 },
+      { lights: 1, shadows: 'high', fps: 10, drawCalls: 1, frames: 60 },
     ])
     expect(result.setting).toBe('off')
   })
@@ -479,7 +488,7 @@ describe('T-279 · 阴影贴图显存估算', () => {
   })
 
   it('全程没开过阴影时不报这一行', () => {
-    const rows = gradeLighting([{ lights: 4, shadows: 'off', fps: 60, drawCalls: 1 }])
+    const rows = gradeLighting([{ lights: 4, shadows: 'off', fps: 60, drawCalls: 1, frames: 60 }])
     expect(rows.find((r) => r.metric === '阴影贴图显存（估算）')).toBeUndefined()
   })
 })
@@ -624,7 +633,7 @@ describe('T-281 · 剖切切换的首帧代价', () => {
   it('没有剖切平面时报「不适用」，而不是省掉这一档', () => {
     // 一份少了一整档的报告与一份「这一档不适用」的报告，在读者眼里是两件事，
     // 而只有后者能被信任。
-    const rows = gradeSection(null)
+    const rows = gradeSection({ skipped: 'no-section' })
     expect(rows).toHaveLength(1)
     expect(rows[0]!.value).toContain('不适用')
     expect(rows[0]!.value).not.toBe('0 ms')
@@ -632,7 +641,7 @@ describe('T-281 · 剖切切换的首帧代价', () => {
 })
 
 describe('T-281 · 爆炸进行中的稳态帧率', () => {
-  const cost = { groupName: '径向分组', members: 3, fps: 52.5, drawCalls: 210 }
+  const cost = { groupName: '径向分组', members: 3, fps: 52.5, drawCalls: 210, frames: 60 }
 
   it('按与其余各档同一条帧率线评级', () => {
     expect(gradeExplode(cost)[0]!.verdict).toBe('pass')
@@ -672,7 +681,7 @@ describe('T-281 · 两档都跟着软渲警告一起走', () => {
         programsAfterOn: 2,
         programsAfterOff: 2,
         clipPlanes: 1,
-      }), ...gradeExplode({ groupName: 'g', members: 1, fps: 10, drawCalls: 1 })],
+      }), ...gradeExplode({ groupName: 'g', members: 1, fps: 10, drawCalls: 1, frames: 60 })],
       scene: { triangles: 1, drawCalls: 2, geometries: 3, textures: 4, programs: 5, textureMemoryBytes: 6 },
       userAgent: 'test',
       screen: '800×600 @1x',
@@ -682,5 +691,267 @@ describe('T-281 · 两档都跟着软渲警告一起走', () => {
     expect(md).toContain('不可作为验收依据')
     expect(md).toContain('剖切切换首帧代价（开）')
     expect(md).toContain('爆炸进行中帧率')
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* ADR-0042 · 「没测到」必须与「测出来是 0」长得不一样                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 这一组守的是**一个在合同附件里出现假数字**的路径。
+ *
+ * 试跑实测（e2e 自己的环境：`--disable-gpu` + `?fast=1`）报告头三行是
+ *   [fail] 平均帧率   = 0.0 fps
+ *   [pass] P95 帧时间 = 0.0 ms      ← 0 毫秒的帧时间，判「通过」
+ *   [pass] 最慢单帧   = 0.0 ms
+ * 而 `pnpm test:e2e bench` 在这份报告上是绿的。
+ */
+
+describe('ADR-0042 · 采样不足的判据', () => {
+  it('判据是 8 个样本，不是 1 个', () => {
+    // frames === 1 的窗口实测出现过：那一帧吞了约 357ms 的编译卡顿，算出 2.8 fps，
+    // 照样把整条爬坡截断。只挡 frames === 0 治的是表征，不是成因。
+    expect(MIN_SAMPLES).toBe(8)
+    expect(isMeasured(0)).toBe(false)
+    expect(isMeasured(1)).toBe(false)
+    expect(isMeasured(MIN_SAMPLES - 1)).toBe(false)
+    expect(isMeasured(MIN_SAMPLES)).toBe(true)
+  })
+
+  it('未测到的文案带上样本数 —— 读者要看得出差多少', () => {
+    expect(notMeasured(3)).toBe('未测到（样本 3/8）')
+  })
+})
+
+describe('ADR-0042 · gradeFrames 样本不足', () => {
+  const starved = summariseFrames([])
+
+  it('空样本时**三行一起**报未测到', () => {
+    // 三行一起，而不是只改第一行：p95 与 worst 在空样本下都是 0，而「0 毫秒的帧时间」
+    // 会被 <= 33ms 判成通过——一份写着「P95 帧时间 0.0 ms ✅」的报告比写着 fail 的更危险。
+    const rows = gradeFrames(starved)
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      expect(row.value, row.metric).toBe('未测到（样本 0/8）')
+      expect(row.verdict, row.metric).toBe('warn')
+    }
+  })
+
+  it('**没有一行判 pass** —— 这是塌掉的那一格', () => {
+    expect(gradeFrames(starved).some((r) => r.verdict === 'pass')).toBe(false)
+  })
+
+  it('7 个样本仍算未测到，8 个才作数', () => {
+    const seven = summariseFrames(Array.from({ length: 7 }, () => 16.7))
+    const eight = summariseFrames(Array.from({ length: 8 }, () => 16.7))
+    expect(gradeFrames(seven)[0]!.value).toContain('未测到')
+    expect(gradeFrames(eight)[0]!.value).toContain('fps')
+    expect(gradeFrames(eight)[0]!.verdict).toBe('pass')
+  })
+
+  it('说明里写清了怎么办，而不只是说它坏了', () => {
+    expect(gradeFrames(starved)[0]!.note).toContain('?fast=1')
+    expect(gradeFrames(starved)[0]!.note).toContain('不要引用')
+  })
+})
+
+describe('ADR-0042 · 未测到的档不参与任何推导', () => {
+  /** low 全测到且很快；medium 的高灯档「没测到」；high 全测到但慢。 */
+  const mixed: LightLevel[] = [
+    { lights: 1, shadows: 'low', fps: 60, drawCalls: 1, frames: 60 },
+    { lights: 8, shadows: 'low', fps: 55, drawCalls: 8, frames: 60 },
+    { lights: 1, shadows: 'medium', fps: 58, drawCalls: 1, frames: 60 },
+    // 采样不足：fps 字段是 0，但它不是读数
+    { lights: 8, shadows: 'medium', fps: 0, drawCalls: 8, frames: 0 },
+    { lights: 1, shadows: 'high', fps: 50, drawCalls: 1, frames: 60 },
+    { lights: 8, shadows: 'high', fps: 46, drawCalls: 8, frames: 60 },
+  ]
+
+  it('上限只从测到的档里取', () => {
+    // medium 的 8 盏没测到，所以 medium 的上限是 1 盏，不是「8 盏但 0 fps」也不是被它拖成 fail。
+    const rows = gradeLighting(mixed)
+    expect(rows.find((r) => r.metric === '动态灯上限（medium 阴影）')!.value).toContain('1 盏')
+    expect(rows.find((r) => r.metric === '动态灯上限（low 阴影）')!.value).toContain('8 盏')
+  })
+
+  it('没测到的那一档在明细里报「未测到」并判 warn，不判 fail', () => {
+    const row = gradeLighting(mixed).find((r) => r.metric === '灯 ×8 · 阴影 medium')!
+    expect(row.value).toBe('未测到（样本 0/8）')
+    expect(row.verdict).toBe('warn')
+    expect(row.value).not.toContain('0.0 fps')
+  })
+
+  it('推荐档不被假 0 拖下去', () => {
+    // high 的 8 盏是真读数且过线，所以推荐 high。假 0 若参与，medium 会被判成撑不住，
+    // 而 high 反而看起来更好——那正是试跑里看到的反序。
+    expect(recommendShadowDefault(mixed).setting).toBe('high')
+  })
+
+  it('**一档都没测到时，说的是「没跑成」而不是「硬件不行」**', () => {
+    // 两件事给同一句话的话，一次坏采样会被当成一条硬件结论抄进验收单。
+    const allStarved: LightLevel[] = SHADOW_QUALITIES.map((q) => ({
+      lights: 1,
+      shadows: q,
+      fps: 0,
+      drawCalls: 1,
+      frames: 0,
+    }))
+    const result = recommendShadowDefault(allStarved)
+    expect(result.setting).toBe('off')
+    expect(result.reason).toContain('一档都没测到')
+    expect(result.reason).toContain('重跑')
+    expect(result.reason).not.toContain('带不动')
+  })
+
+  it('真的带不动时仍然说「带不动」', () => {
+    const tooSlow: LightLevel[] = SHADOW_QUALITIES.map((q) => ({
+      lights: 1,
+      shadows: q,
+      fps: 10,
+      drawCalls: 1,
+      frames: 60,
+    }))
+    expect(recommendShadowDefault(tooSlow).reason).toContain('带不动')
+  })
+
+  it('承载上限也只从测到的档里取', () => {
+    const rows = gradeStress([
+      { copies: 1, fps: 60, drawCalls: 100, triangles: 1000, frames: 60 },
+      { copies: 2, fps: 55, drawCalls: 200, triangles: 2000, frames: 60 },
+      { copies: 4, fps: 0, drawCalls: 400, triangles: 4000, frames: 0 },
+    ])
+    expect(rows.find((r) => r.metric === '承载上限')!.value).toContain('2 份场景')
+    const starved = rows.find((r) => r.metric === '逐级加载 ×4')!
+    expect(starved.value).toBe('未测到（样本 0/8）')
+    expect(starved.verdict).toBe('warn')
+  })
+
+  it('爆炸档同理', () => {
+    const row = gradeExplode({ groupName: 'g', members: 2, fps: 0, drawCalls: 1, frames: 2 })[0]!
+    expect(row.value).toBe('未测到（样本 2/8）')
+    expect(row.verdict).toBe('warn')
+  })
+})
+
+describe('ADR-0042 · 阴影贴图显存取最贵的那一档', () => {
+  it('按显存取最大，不是按灯数取最大', () => {
+    // 原实现是 `l.lights > best.lights`（严格大于 + 插入序），于是永远取第一个达到最大
+    // 灯数的档——也就是 low，最便宜的。这个错在完全干净的跑里也成立。
+    const levels: LightLevel[] = [
+      { lights: 8, shadows: 'low', fps: 60, drawCalls: 8, frames: 60 },
+      { lights: 8, shadows: 'medium', fps: 55, drawCalls: 8, frames: 60 },
+      { lights: 8, shadows: 'high', fps: 50, drawCalls: 8, frames: 60 },
+    ]
+    const row = gradeLighting(levels).find((r) => r.metric === '阴影贴图显存（估算）')!
+    expect(row.value).toContain('high')
+    expect(row.value).not.toContain('low')
+    const mb = estimateShadowMemory(8, 'high') / (1024 * 1024)
+    expect(row.value).toContain(mb.toFixed(1))
+  })
+
+  it('灯少但档高时也取显存大的那个', () => {
+    // 4 盏 high = 4×2048²×4 = 64MB > 8 盏 low = 8×512²×4 = 8MB
+    const levels: LightLevel[] = [
+      { lights: 8, shadows: 'low', fps: 60, drawCalls: 8, frames: 60 },
+      { lights: 4, shadows: 'high', fps: 50, drawCalls: 4, frames: 60 },
+    ]
+    expect(gradeLighting(levels).find((r) => r.metric === '阴影贴图显存（估算）')!.value).toContain('4 盏 · high')
+  })
+
+  it('没测到的档不进选择', () => {
+    const levels: LightLevel[] = [
+      { lights: 1, shadows: 'low', fps: 60, drawCalls: 1, frames: 60 },
+      { lights: 8, shadows: 'high', fps: 0, drawCalls: 8, frames: 0 },
+    ]
+    expect(gradeLighting(levels).find((r) => r.metric === '阴影贴图显存（估算）')!.value).toContain('1 盏 · low')
+  })
+})
+
+describe('ADR-0042 · 剖切「有刀但都关着」与「没有刀」分开报', () => {
+  it('没有刀：不适用，判 pass', () => {
+    const rows = gradeSection({ skipped: 'no-section' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.value).toContain('不适用')
+    expect(rows[0]!.verdict).toBe('pass')
+  })
+
+  it('**有刀但都关着：未测到，判 warn**', () => {
+    // 送检资产带了刀却量不到，是需要重测的信号，不是通过。原实现两种共用一句
+    // 「不适用」并判 pass——于是一份带着关刀的资产会得到三行绿色的 0 ms。
+    const rows = gradeSection({ skipped: 'no-planes', sectionNodes: 2 })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.value).toContain('未测到')
+    expect(rows[0]!.verdict).toBe('warn')
+    expect(rows[0]!.value).not.toContain('不适用')
+  })
+
+  it('两种跳过的文案不一样 —— 合成一句的话第二种会被当成第一种放过去', () => {
+    const a = gradeSection({ skipped: 'no-section' })[0]!
+    const b = gradeSection({ skipped: 'no-planes', sectionNodes: 1 })[0]!
+    expect(a.value).not.toBe(b.value)
+    expect(a.verdict).not.toBe(b.verdict)
+  })
+
+  it('「都关着」那条说清了有几把刀、以及怎么办', () => {
+    const row = gradeSection({ skipped: 'no-planes', sectionNodes: 3 })[0]!
+    expect(row.note).toContain('3 个剖切节点')
+    expect(row.note).toContain('ADR-0039')
+    expect(row.note).toContain('不是「代价为 0」')
+  })
+
+  it('一个 0 ms 都不会出现在跳过的那一行里', () => {
+    // 这是本条修复的全部要点：0 ms 只能来自真的量了一次。
+    for (const m of [{ skipped: 'no-section' } as const, { skipped: 'no-planes', sectionNodes: 1 } as const]) {
+      expect(gradeSection(m)[0]!.value).not.toContain('0 ms')
+    }
+  })
+})
+
+describe('ADR-0042 · shouldKeepSampling —— 缺陷的根', () => {
+  const FAST_LIGHTING = 200
+
+  it('标称窗口没到就继续，与原来一样', () => {
+    expect(shouldKeepSampling({ elapsedMs: 10, samples: 0, durationMs: FAST_LIGHTING })).toBe(true)
+    expect(shouldKeepSampling({ elapsedMs: 199, samples: 999, durationMs: FAST_LIGHTING })).toBe(true)
+  })
+
+  it('到点且样本够了就收', () => {
+    expect(shouldKeepSampling({ elapsedMs: 200, samples: MIN_SAMPLES, durationMs: FAST_LIGHTING })).toBe(false)
+  })
+
+  it('**到点但样本不够就延长** —— 这一条就是修复本身', () => {
+    // 原实现在这里返回 false，于是 times 是空的，summariseFrames 算出 fps 0，
+    // 而那个 0 与「真的 0 fps」在下游完全同形。
+    expect(shouldKeepSampling({ elapsedMs: 200, samples: 0, durationMs: FAST_LIGHTING })).toBe(true)
+    expect(shouldKeepSampling({ elapsedMs: 400, samples: MIN_SAMPLES - 1, durationMs: FAST_LIGHTING })).toBe(true)
+  })
+
+  it('延长有上限 —— 一台一帧几百毫秒的机器不该把 bench 挂在那里', () => {
+    expect(shouldKeepSampling({ elapsedMs: 200 * HARD_CAP_FACTOR, samples: 0, durationMs: FAST_LIGHTING })).toBe(false)
+    expect(shouldKeepSampling({ elapsedMs: 200 * HARD_CAP_FACTOR - 1, samples: 0, durationMs: FAST_LIGHTING })).toBe(true)
+  })
+
+  it('实测那条时间线：一次 334ms 的编译卡顿不再让这一档归零', () => {
+    // 试跑抓到的真实窗口：dur=339.7ms frames=2 frameMs=[6,334]，warmup=4。
+    // 两帧全被 warmup 吃掉，有效样本 0。
+    //
+    // 旧规则：elapsed(340) >= duration(200) → 停 → times=[] → 0.0 fps → 判 fail →
+    //         截断爬坡 → 污染上限与推荐 → 经 T-280 落进合同附件 A §7。
+    // 新规则：样本 0 < 8 且 340 < 600 → 继续。卡顿过去之后帧回到 ~7ms，
+    //         再有 60ms 就能收满 8 个。
+    expect(shouldKeepSampling({ elapsedMs: 339.7, samples: 0, durationMs: FAST_LIGHTING })).toBe(true)
+    // 收满之后的下一次判定：停。
+    expect(shouldKeepSampling({ elapsedMs: 400, samples: MIN_SAMPLES, durationMs: FAST_LIGHTING })).toBe(false)
+  })
+
+  it('主采样档（?fast=1 下 600ms / warmup 30）同一条规则', () => {
+    // 这一档才是最刺眼的那个：e2e 自己的环境下它报出「平均帧率 0.0 fps」。
+    expect(shouldKeepSampling({ elapsedMs: 600, samples: 0, durationMs: 600 })).toBe(true)
+    expect(shouldKeepSampling({ elapsedMs: 1800, samples: 0, durationMs: 600 })).toBe(false)
+  })
+
+  it('硬上限是标称的 3 倍，写在常量里而不是散在两处', () => {
+    expect(HARD_CAP_FACTOR).toBe(3)
   })
 })

@@ -247,6 +247,46 @@ function playerUrl(options: { embed: boolean }): string {
   return `${PLAYER}/?src=/embed.w3p${options.embed ? '&embed=1' : ''}`
 }
 
+/**
+ * ADR-0042 决策 5 · 把**仓库里那份真的样板宿主页**架起来。
+ *
+ * 上面四条用例测的是协议，用的是本文件自己造的 `HOST_HTML`。而 `samples/host-demo/index.html`
+ * 是**交给客户抄的那一页**，它自己的接线从来没有被任何自动化打开过——第一版在同一个容器上
+ * mount 了两次、起了两套完整运行时、按钮绑到了溢出到框外的那一个，六个提交全绿。
+ *
+ * 它用的全是相对路径（`/player/embed.js`、`/player/index.html?...`），所以必须**架在播放器
+ * 那个 origin 上**，不能塞进 `https://host.example`——那样相对路径会指向一个不存在的播放器。
+ * 于是这一条不是跨源用例，它测的是这一页自己的接线。
+ */
+async function openSamplePage(
+  context: import('@playwright/test').BrowserContext,
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  const sample = readFileSync(join(ROOT, 'samples', 'host-demo', 'index.html'), 'utf8')
+
+  await context.route(`${PLAYER}/sample.html`, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: sample }),
+  )
+  await context.route(`${PLAYER}/player/embed.js`, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: sdkBundle() }),
+  )
+  // dev server 上没有 `/player/` 前缀（那是部署时 `--base` 才有的），所以把它映到根。
+  // iframe 的**文档 URL 仍然是 `/player/index.html?...`**，于是 `?src=demo.w3p` 与
+  // `embed-policy.json` 两条相对路径都落在 `/player/` 下面——与真部署一致。
+  await context.route(`${PLAYER}/player/index.html*`, async (route) => {
+    const response = await route.fetch({ url: `${PLAYER}/` })
+    await route.fulfill({ response })
+  })
+  await context.route(`${PLAYER}/player/demo.w3p`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/zip', body: Buffer.from(buildScenePackage({ name: '样板页场景' })) }),
+  )
+  await context.route(`${PLAYER}/player/embed-policy.json`, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([PLAYER]) }),
+  )
+
+  await page.goto(`${PLAYER}/sample.html`)
+}
+
 test.beforeAll(() => {
   const bytes = buildScenePackage({ name: '嵌入用例场景' })
   const dir = join(ROOT, 'packages', 'player', 'public')
@@ -361,6 +401,49 @@ test.describe('T-276 · 跨源嵌入', () => {
     // 回一次是礼貌，回第二次开始就是把自己做成反射放大器。
     expect(denied.length, `三条命令只该收到一条拒绝，实际 ${denied.length} 条`).toBe(1)
     expect(acks.length, '一条都不该被执行').toBe(0)
+  })
+
+  test('用例 5 · 仓库里那份样板宿主页：一个播放器，按钮指挥的就是它', async ({ context, page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+
+    await openSamplePage(context, page)
+    await expect(page.locator('#log'), '样板页应当握上手').toContainText('握手成功', { timeout: 60_000 })
+
+    /* ① 只有一个播放器 ------------------------------------------------------- */
+    // ADR-0042 决策 5。第一版是 2 个：两套完整运行时、包与策略各下载两遍。
+    await expect(page.locator('#viewer iframe'), '一个容器只该有一个播放器').toHaveCount(1)
+
+    /* ② 而且它在框里，没有溢出到按钮行上 -------------------------------------- */
+    // 只数 iframe 个数挡不住「两个都塞进去但第二个溢出」——第一版的症状恰恰是这个。
+    const box = await page.locator('#viewer').boundingBox()
+    const frame = await page.locator('#viewer iframe').boundingBox()
+    expect(box, '#viewer 要有盒子').not.toBeNull()
+    expect(frame, 'iframe 要有盒子').not.toBeNull()
+    expect(frame!.y + frame!.height, 'iframe 不该溢出容器底边').toBeLessThanOrEqual(box!.y + box!.height + 2)
+
+    /* ③ 按钮按 `player.commands` 启用，而且指挥的是框里那个 -------------------- */
+    for (const [id, enabled] of [
+      ['play', true],
+      ['pause', true],
+      ['shot', true],
+      // X-53：`goToStep` 在 v1.0 没有实现，命令不进 `ready.commands`，按钮就该是灰的。
+      ['step', false],
+    ] as const) {
+      expect(await page.locator(`#${id}`).isDisabled(), `按钮 ${id}`).toBe(!enabled)
+    }
+
+    // 真按一次截图：它走的是 iframe 里那个播放器。**按钮绑错人时这一条会超时**——
+    // 第一版绑的是溢出到框外的第二个实例，那个实例照样能回，所以只按一下不够，
+    // 还要连着上面那条「只有一个 iframe」一起看。
+    await page.locator('#shot').click()
+    await expect(page.locator('#log'), '截图应当成功').toContainText('screenshot 成功', { timeout: 60_000 })
+    const log = (await page.locator('#log').textContent()) ?? ''
+    const bytes = Number(/截图 (\d+) 字节/.exec(log)?.[1] ?? 0)
+    expect(bytes, `截图字节数：${bytes}`).toBeGreaterThan(1000)
+
+    /* ④ 快速开始那段没有把未处理的异常丢出来 ---------------------------------- */
+    expect(errors, `样板页不该抛异常：${errors.join(' | ')}`).toEqual([])
   })
 
   test('用例 4 · 地址没带 ?embed=1：嵌入层根本没下载', async ({ context, page }) => {

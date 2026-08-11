@@ -116,6 +116,42 @@ describe('T-277 · 事件表双向一致', () => {
   })
 })
 
+describe('ADR-0042 决策 5 · 样板页只 mount 一次', () => {
+  /**
+   * 第一版调了两次 `W3Player.mount`（快速开始切片一次、样板自身接线一次），容器同一个。
+   *
+   * 后果不是「多了一个 iframe」这么轻：两套完整运行时（两个 WebGL2 上下文、两条 rAF
+   * 循环、包与策略各下载两遍），两个 iframe 一上一下排开，第二个整个溢出 540px 的容器
+   * 压在按钮行上，而**四个按钮绑的恰好是溢出到框外的那一个**——用户看到的那个只收到
+   * 快速开始那三条命令。
+   *
+   * 当时没有任何东西挡得住：`docs-sync` 只比文本切片，没有任何 E2E 打开过这一页。
+   */
+  const sample = readFileSync(SAMPLE, 'utf8')
+
+  it('全文只有一处 `W3Player.mount(`', () => {
+    const calls = [...sample.matchAll(/W3Player\.mount\(/g)]
+    expect(calls.length, `样板页 mount 了 ${calls.length} 次`).toBe(1)
+  })
+
+  it('快速开始里那次 mount 的结果被存下来复用', () => {
+    // 只数一次调用还不够：把第二次 mount 换成「不存句柄、按钮全绑不上」也是一次调用。
+    expect(sample).toMatch(/const\s+ready\s*=\s*W3Player\.mount\(/)
+    expect(sample, '样板页自己的接线要复用那个句柄').toMatch(/\n\s*ready\s*\n?\s*\.then\(/)
+  })
+
+  it('快速开始带 `.catch` —— 客户照抄的就是这一段', () => {
+    const doc = readFileSync(DOC, 'utf8')
+    const slice = (text: string, a: string, b: string) => text.slice(text.indexOf(a), text.indexOf(b))
+    for (const [name, text] of [
+      ['样板页', slice(sample, '// doc:quickstart:start', '// doc:quickstart:end')],
+      ['EMBED_API.md', slice(doc, '<!-- doc:quickstart:start -->', '<!-- doc:quickstart:end -->')],
+    ] as const) {
+      expect(text, `${name} 的快速开始没有 .catch`).toContain('.catch(')
+    }
+  })
+})
+
 describe('T-277 · 样板页零外链', () => {
   it('没有一个 http(s):// 地址', () => {
     // C6：内网部署下任何外链都是白屏。样板页是我们交给客户抄的东西，它得是能抄的。

@@ -94,6 +94,28 @@ test.describe('T-278 · bench 页', () => {
     expect(cells.some((c) => c.metric.startsWith('逐级加载 ×')), '压力爬坡那一段要在').toBe(true)
     expect(cells.some((c) => c.metric.includes('动态灯上限')), '灯光爬坡那一段要在').toBe(true)
 
+    /* ②' ADR-0042 · 「没测到」不许长成一个读数 -------------------------------- */
+    //
+    // **这一段是本文件最初漏掉的那一块。** 第一版按卡面查了行数、`data-verdict` 合法、
+    // 指标名与实测值非空——三条全中，而同一份报告的头三行是：
+    //     [fail] 平均帧率   = 0.0 fps
+    //     [pass] P95 帧时间 = 0.0 ms      ← 0 毫秒的帧时间，判「通过」
+    //     [pass] 最慢单帧   = 0.0 ms
+    // `'fail'` 是合法判定、`0.0 fps` 是非空字符串，于是这条 e2e 绿了六次。
+    for (const cell of cells) {
+      // 一个真的跑得起来的页面不会产出 0.0 fps / 0.0 ms：那只可能是空样本算出来的。
+      expect(cell.value, `「${cell.metric}」报了 ${cell.value} —— 空样本被印成了读数`).not.toMatch(/\b0\.0 (fps|ms)\b/)
+      // 未测到的行必须判 warn。判 pass 的话它在报告里与一个真读数无从分辨；
+      // 判 fail 的话它会被当成「这台机器不行」的硬件结论。
+      if (cell.value.includes('未测到')) {
+        expect(cell.verdict, `「${cell.metric}」未测到却判 ${cell.verdict}`).toBe('warn')
+      }
+    }
+    // 头条指标只有两种合法形态：一个真读数，或者明说没测到。
+    const headline = cells.find((c) => c.metric === '平均帧率')
+    expect(headline, '报告里要有「平均帧率」这一行').toBeDefined()
+    expect(headline!.value, `平均帧率 = ${headline!.value}`).toMatch(/^(\d+\.\d fps|未测到（样本 \d+\/\d+）)$/)
+
     /* ③ 软件渲染那句话 ------------------------------------------------------ */
     // e2e 全程跑在 SwiftShader 上（见 playwright.config.ts），所以这句话**必须**出现。
     // 它不是装饰：这一页的产出会被贴进验收单，而一份没标注「软渲」的帧率数据会被当成
