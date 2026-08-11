@@ -52,6 +52,10 @@ const GUARDED = ['core', 'editor', 'player']
  */
 const PROVIDER_SITES = new Map([
   ['packages/editor/src/project/session.ts', 'defaultStorage() — the single feature-detection point (C7)'],
+  // T-299 · `resolveAiProvider()` 的默认返回值。与上面那条同形：**唯一**的构造点，
+  // 换实现就是换这一处。而它比上面那条更严——`resolveAiProvider` 里连特性探测都没有，
+  // 不读环境变量、不读配置、不探端点，所以它在任何机器上返回的都是同一个默认关闭的实现。
+  ['packages/core/src/ai/ai-provider.ts', 'resolveAiProvider() — v1 的唯一 AI provider 构造点，默认关闭（P-18）'],
 ])
 
 /**

@@ -2091,6 +2091,60 @@ export const FACET_NAMES = ['drafts', 'locks', 'members', 'audit', 'revisions', 
 
 到期 **`v1.0`**。T-288 接线之后，这一批的冻结接口表行**全部删掉**——留着就成了下一个垃圾桶。
 
+### 4.8 AI 插座的冻结接口（T-299 · 消费者在 v2）
+
+> 与 §4.6 / §4.7 同一条裁决（[ADR-0043](adr/0043-provider-v2-接口写进冻结清单.md)）：**v1.0 交付
+> 形状、消费者排在后面版本**的接口写进这一节，走冻结接口表，不占四列豁免表的条数棘轮。
+>
+> ⚠ 与 §4.0 的「一次性冻结」不冲突，理由与 §4.6 逐字相同：§4.0 冻的是 `SceneDocument` 的
+> 字段、动作与事件。`AiProvider` 不在 `SceneDocument` 里、不 bump `schemaVersion`。
+
+#### 4.8.1 为什么 v1 只留插座
+
+拍板项 **P-18**：**v1 不接任何模型、不引任何依赖。** 这一节存在的唯一理由是——v2 接模型时
+不必改 `@w3/core` 的公共 API 形状。
+
+形状照 `StorageProvider` 抄：**一个字都不提模型名、厂商名、端点、鉴权**。那些是实现该知道的
+事；接口知道了它们，换实现就变成改接口。
+
+#### 4.8.2 逐字清单
+
+```ts
+export interface AiSuggestInput {
+  readonly kind: string
+  readonly prompt: string
+}
+
+export interface AiSuggestion {
+  readonly title: string
+  readonly detail: string
+}
+
+export interface AiProvider {
+  readonly kind: string
+  readonly enabled: boolean
+  suggest(input: AiSuggestInput, signal?: AbortSignal): Promise<AiSuggestion[]>
+}
+
+/** v1 的唯一实现。enabled 恒 false，suggest 一律抛。 */
+export class NullAiProvider implements AiProvider {}
+
+export function resolveAiProvider(override?: AiProvider): AiProvider
+```
+
+#### 4.8.3 三条约束，逐字
+
+1. **`suggest()` 未启用时抛，不返回空数组。** 空数组会被调用方读成「问过了，没结果」，而实际是
+   「压根没问」——功能整个没接，界面上却看起来像「这次没建议」。那是最难查的一类静默失败。
+2. **`resolveAiProvider` 没有任何读环境变量 / 读配置文件 / 探测端点的分支。** 有一条，「默认关闭」
+   就变成「默认取决于部署环境」，而内网部署的那台机器上没人会去验证它。
+3. **`packages/core/src/ai/` 零网络原语**（`fetch` / `XMLHttpRequest` / `WebSocket` /
+   `EventSource` / 动态 `import(`）。插座本身不许有网络能力，接不接得上是 v2 的事。
+
+#### 4.8.4 到期
+
+到期 **`v2`**。v2 接第一个模型时，这批冻结接口表行全部删掉。
+
 
 ## 5. 关键设计决策（D21 – D40，续 v0 的 D1–D10 与 v0.5 的 D11–D20）
 

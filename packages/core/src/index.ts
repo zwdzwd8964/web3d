@@ -14,3 +14,5 @@ export * from './assets/index.js'
 export * from './runtime/index.js'
 export * from './embed/index.js'
 export * from './util/filename.js'
+// T-299 · AI 能力的插座。v1 只有接口与一个默认关闭的空实现，不接任何模型。
+export * from './ai/ai-provider.js'

@@ -132,6 +132,11 @@ API，而消费它们的卡排在 v1.2 / v1.5。这类行不计入 `MAX_EXEMPTIO
 | storage:ProviderFacets.locks | v1.5 的编辑器在打开工程时问它有没有锁这个能力，没有就跳过抢锁 | T-286 | v1.5 | 规划§4 |
 | storage:ProviderFacets.revisions | v1.5 的历史面板问它有没有修订能力，没有就不显示那个入口 | T-286 | v1.5 | 规划§4 |
 | storage:StorageProvider.readDocument | v1.5 的多人协作要先读到修订号才能做乐观并发保存，编辑器届时改调它 | T-286 | v1.5 | 规划§4 |
+| core:AiSuggestInput.prompt | v2 接模型时把拼好的中文问题交给实现，提示词模板按 kind 分派 | T-299 | v2 | 规划§4 |
+| core:AiSuggestion.detail | v2 的建议列表展开之后显示这段正文，标题一行不足以让人判断要不要采纳 | T-299 | v2 | 规划§4 |
+| core:AiProvider.suggest | v2 的唯一入口方法，规则编辑器与材质面板届时都调它 | T-299 | v2 | 规划§4 |
+| core:NullAiProvider.suggest | 默认实现那一侧；两侧必须同时在，否则接口没有任何实现可对照 | T-299 | v2 | 规划§4 |
+| core:resolveAiProvider | v2 的宿主接线点，注入真实现；v1 它恒返回默认关闭的那一个 | T-299 | v2 | 规划§4 |
 
 ## v0 / v0.5 遗留基线
 

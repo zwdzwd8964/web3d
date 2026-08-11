@@ -3032,8 +3032,18 @@
   ③ 把黄金路径 III 的 `fullRebuildCount` 断言从**末尾**挪到中间 → 必须说明它为什么失去意义
   （v0.5 T-115 的教训：断言点全在回落之前，等于没断言）。
 
-### [ ] T-299 · AI provider 插座：接口 + 默认关闭的空实现
-- **依赖** T-205 · **预估** 0.2d · **实际** —
+### [x] T-299 · AI provider 插座：接口 + 默认关闭的空实现
+- **依赖** T-205 · **预估** 0.2d · **实际** 0.4d
+- `pnpm size` 335.0 / 400.0 KB，**与本卡之前逐字相同**（接口是类型，`NullAiProvider` 三行）。
+- **卡面第 ⑤ 步与实际不符两处，如实记**：① 守卫点名的是 **5 个**符号（`AiSuggestInput.prompt` /
+  `AiSuggestion.detail` / `AiProvider.suggest` / `NullAiProvider.suggest` / `resolveAiProvider`），
+  而卡面写的 `AiProvider` 本身**不是**孤儿——符号级扫描认「在定义它的文件里被用到」，
+  而它被 `implements` 与形参用到了；② 四列豁免表的 `MAX_EXEMPTIONS` 仍是 19/19，只能降不能升，
+  加一行就红。走规划 **§4.8** + 冻结接口表，与 T-286（ADR-0043 裁决甲）、T-287 同一条路，
+  **两把棘轮一格都没动**。
+- **守卫先于我发现一件事**：`new NullAiProvider()` 被 C7 的 R1 当场拦下（未申报的 provider
+  构造点）。申报进 `PROVIDER_SITES` 之后绿。这正是 R1 用集合相等而不是计数的价值。
+- **交付偏差** 一处：动了 `scripts/check-provider-swap.mjs`（卡面独占里没有它，但上一条要求申报）。
 - **独占** `packages/core/src/ai/ai-provider.ts`(新) · `packages/core/test/ai/ai-provider.test.ts`(新) ·
   `packages/core/src/index.ts`（一行导出）· `docs/DEAD_EXPORTS_ALLOWLIST.md`（一行）
 - **做** 拍板项 **P-18**：**v1 只留插座，不接任何模型，不引任何依赖。**
