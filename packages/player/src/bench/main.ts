@@ -11,6 +11,7 @@ import {
   gradeScene,
   gradeExplode,
   gradeLighting,
+  gradePostFx,
   gradeLoad,
   gradeSection,
   gradeStress,
@@ -21,7 +22,7 @@ import {
   toJsonReport,
   toMarkdown,
 } from './metrics.js'
-import type { BenchRow, ExplodeCost, LightLevel, LoadTiming, SceneStats, SectionMeasurement, StressLevel } from './metrics.js'
+import type { BenchRow, ExplodeCost, LightLevel, LoadTiming, PostFxCost, SceneStats, SectionMeasurement, StressLevel } from './metrics.js'
 import '../styles.css'
 import './bench.css'
 
@@ -129,7 +130,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
     const stress = await stressRamp(runtime, session)
 
     show('<p class="bench__note">正在做灯光 / 阴影压力测试…（最多约 20 秒）</p>')
-    const lighting = await lightingRamp(runtime, session)
+    const { levels: lighting, postFx } = await lightingRamp(runtime, session)
 
     // ADR-0042 决策 4 **已撤回**（对抗式复核证伪）。它想让 program 缓存在测剖切时还是
     // 冷的，于是把这一档挪到主采样之前——**没用**：「首屏 · 首帧」为了计时必然更早地按
@@ -158,6 +159,7 @@ async function run(bytes: Uint8Array, sourceName: string) {
       ...gradeScene(scene),
       ...gradeStress(stress),
       ...gradeLighting(lighting),
+      ...gradePostFx(postFx),
       ...gradeSection(section),
       ...gradeExplode(explode),
     ]
@@ -275,11 +277,11 @@ function shouldStop(stats: { readonly fps: number; readonly frames: number }): b
 async function lightingRamp(
   runtime: ReturnType<typeof createPlayerSession>['runtime'],
   session: ReturnType<typeof createPlayerSession>['session'],
-): Promise<LightLevel[]> {
+): Promise<{ levels: LightLevel[]; postFx: PostFxCost | null }> {
   const spread = Math.max(1, boundingSpan(runtime.graph.root))
   const added: { removeFromParent: () => void; dispose?: () => void }[] = []
   const levels: LightLevel[] = []
-  let postFx: { composedFps: number; directFps: number; mode: string } | null = null
+  let postFx: PostFxCost | null = null
 
   try {
     for (const shadows of SHADOW_MODES) {
@@ -326,12 +328,35 @@ async function lightingRamp(
       // 走 `setPostFxEnabled` 而不是改文档：改文档会连带触发一次补丁与一次
       // `applyBackground`，测出来的是两件事混在一起的数。量完交还给文档（`null`）。
       if (shadows === 'off') {
-        runtime.setPostFxEnabled(true)
-        const composed = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
+        // T-294 · 三档，而不是两档。第三档（两条 pass）是 `MAX_ACTIVE_OUTLINE_PRESETS`
+        // 的上限，而**那个上限今天是拍的不是测的**——这几行就是把它变成实测的第一步。
+        //
+        // 一条 pass = 一种被激活的描边预设（`outline-layer.ts` 的 ensurePass）。所以
+        // 「几条 pass」不是一个开关，是「有多少种预设正被用着」，只能靠真的高亮几个节点造出来。
+        const lit = runtime.doc.nodes.filter((n: { assetRef: unknown; id: string }) => n.assetRef !== null).slice(0, 2)
+
         runtime.setPostFxEnabled(false)
-        const direct = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
+        const off = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
+
+        runtime.setPostFxEnabled(true)
+        if (lit[0]) runtime.highlight(lit[0].id, 'outline_amber')
+        const onePass = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
+
+        if (lit[1]) runtime.highlight(lit[1].id, 'outline_cyan')
+        const twoPass = summariseFrames(await measure(runtime, session, SAMPLE_MS.postFx, 4))
+
+        // 还原：高亮与管线都交回文档说了算，否则后面几档量到的是「带着两条描边」的数。
+        for (const node of lit) runtime.highlight(node.id, null)
         runtime.setPostFxEnabled(null)
-        postFx = { composedFps: composed.fps, directFps: direct.fps, mode: runtime.pipelineMode }
+
+        postFx = {
+          offFps: off.fps,
+          onePassFps: onePass.fps,
+          twoPassFps: twoPass.fps,
+          mode: runtime.pipelineMode,
+          // 三档里最少的那一档决定这一行可不可信（ADR-0042）。
+          frames: Math.min(off.frames, onePass.frames, twoPass.frames),
+        }
       }
     }
   } finally {
@@ -341,12 +366,7 @@ async function lightingRamp(
   // T-235 · 后处理链的开 / 关对比跟着灯光扫描一起回报。它不是一档「灯光级别」，
   // 所以挂在返回值旁边而不是塞进 levels —— 混进去会让「第几档掉到 30fps 以下」这个
   // 读数变成两件事的混合。
-  if (postFx) {
-    console.info(
-      `[bench] 后处理链：composed ${postFx.composedFps.toFixed(1)} fps / direct ${postFx.directFps.toFixed(1)} fps（当前 mode=${postFx.mode}）`,
-    )
-  }
-  return levels
+  return { levels, postFx }
 }
 
 async function stressRamp(

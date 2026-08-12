@@ -112,6 +112,52 @@ if (import.meta.env.DEV) {
   ;(globalThis as Record<string, unknown>)['__w3DevDoc'] = () => activeDoc?.() ?? null
 
   /**
+   * T-294 · DEV-only · **渲染器上真正装着的那几张裁剪平面**。
+   *
+   * 读的是 `renderer.clippingPlanes`，不是 `sections.livePlanes`，也不是文档里那几个
+   * `section` 节点。这个区别就是这个探针存在的全部理由：
+   *
+   * - 读**文档**：`setVisible(刀, true)` 之后 `doc.nodes[i].visible` 确实变了，于是一条
+   *   「剖切生效了」的断言会通过——**哪怕整条剖切链路被删光**。这正是 T-176 抓到的
+   *   `setLight` 假绿的同一个形状。
+   * - 读 `livePlanes`：那是剖切层自己的账本，它算对了不代表它把结果交给了渲染器。
+   *   T-252 的 E2E 三条断言当年全红在 `clipPlanes === 0` 上，坏的正是「算了但没装上」。
+   *
+   * 只读，且只转发运行时已有的东西——不在这里重新算一遍平面，那样探针会变成第二份实现，
+   * 而两份实现里错的那一份通常是没人看的那一份。
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevSectionPlanes'] = (): SectionPlaneProbe[] => {
+    const renderer = active?.activeRenderer
+    const planes = (renderer as { clippingPlanes?: unknown[] } | null | undefined)?.clippingPlanes ?? []
+    return planes.map((plane) => {
+      const p = plane as { normal?: { x: number; y: number; z: number }; constant?: number }
+      return {
+        normal: p.normal ? [round(p.normal.x), round(p.normal.y), round(p.normal.z)] : [0, 0, 0],
+        constant: round(p.constant ?? 0),
+      }
+    })
+  }
+
+  /**
+   * T-294 · DEV-only · 一个节点的**世界位置**。
+   *
+   * 爆炸走的是叠加层：它每帧改三对象的 transform，**从不写文档**（与 `setLight` 同一条
+   * 纪律）。所以「爆炸把零件挪开了」是一句关于渲染器的话，拿 `doc.nodes[i].transform.p`
+   * 去断言是空转——那个值从头到尾一动不动，断言在功能整个被删掉时也成立。
+   *
+   * 照 `__w3DevMaterialOf` 的路子走 `graph.objectFor`：编辑器 owns no 3D behaviour（C3），
+   * 全仓没有 `import 'three'`，一个测试钩子不是开头的理由——所以这里读的是世界矩阵的
+   * 平移分量，不 new 任何 three 对象。
+   */
+  ;(globalThis as Record<string, unknown>)['__w3DevPositionOf'] = (nodeId: string): [number, number, number] | null => {
+    const object = active?.graph.objectFor(nodeId)
+    if (!object) return null
+    object.updateWorldMatrix(true, false)
+    const m = object.matrixWorld.elements
+    return [round(m[12] ?? 0), round(m[13] ?? 0), round(m[14] ?? 0)]
+  }
+
+  /**
    * DEV-only read-back of the runtime's media state.
    *
    * Golden path II step 11 asserts that clicking the pump starts the alarm. It must NOT
@@ -261,4 +307,15 @@ export async function exportImage(order: CaptureOrder, filename?: string): Promi
     }
   }
   return runtime.captureImage(order, filename === undefined ? {} : { filename })
+}
+
+/** `__w3DevSectionPlanes` 报的一张平面。法向 + 常数就是一张平面的全部。 */
+export interface SectionPlaneProbe {
+  readonly normal: [number, number, number]
+  readonly constant: number
+}
+
+/** 探针一律取到小数点后三位：浮点尾数在断言里只会制造噪声。 */
+function round(value: number): number {
+  return Number(value.toFixed(3))
 }

@@ -15,6 +15,7 @@ import {
   classifySection,
   gradeExplode,
   gradeLoad,
+  gradePostFx,
   gradeSection,
   gradeStress,
   estimateShadowMemory,
@@ -1115,5 +1116,53 @@ describe('ADR-0042 第二轮 · classifySection（blocker C1 + B3）', () => {
     const b = classifySection({ sectionNodes: 1, clipPlanes: 0 })!
     expect(gradeSection(a)[0]!.verdict).toBe('pass')
     expect(gradeSection(b)[0]!.verdict).toBe('warn')
+  })
+})
+
+/**
+ * T-294 · 后处理三档。
+ *
+ * 在此之前 bench 已经在量「开 / 关后处理」两档了（T-235），但结果只 `console.info`。
+ * **不进表就等于没量**：报告导出的是 `rows`，回填脚本读的也是 `rows`，一个只在控制台
+ * 出现过的数字，第二天就没人找得到。
+ */
+describe('gradePostFx · 后处理链的三档', () => {
+  const cost = { offFps: 60, onePassFps: 54, twoPassFps: 45, mode: 'composed', frames: 40 }
+
+  it('报的是相对代价，不是绝对帧率', () => {
+    const rows = gradePostFx(cost)
+    // 绝对帧率只在这一台机器上有意义；「开一条描边掉 10%」才是能跨机器比的那个数。
+    expect(rows[0]!.value).toContain('10.0%')
+    expect(rows[1]!.value).toContain('25.0%')
+    // 原始读数也要留着，否则读者没法判断这台机器本来快不快。
+    expect(rows[0]!.value).toContain('60.0')
+  })
+
+  it('两条 pass 那一行说清它是上限', () => {
+    // `MAX_ACTIVE_OUTLINE_PRESETS = 2`，而这个默认值**今天是拍的不是测的**。
+    expect(gradePostFx(cost)[1]!.metric).toContain('上限')
+  })
+
+  it('采样不足时报「未测到」，不是报 0%', () => {
+    const rows = gradePostFx({ ...cost, frames: 3 })
+    // ADR-0042 的同一条纪律：没量到与「代价为 0」是两件事，而后者会被读成好消息。
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.value).toContain('未测到')
+    expect(rows[0]!.verdict).toBe('warn')
+    expect(rows[0]!.value).not.toContain('0.0%')
+  })
+
+  it('整轮没跑到时也出一行，不是整行消失', () => {
+    const rows = gradePostFx(null)
+    // 整行消失读起来像「这一档不存在」，而实际是「这一档没量到」。
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.verdict).toBe('warn')
+    expect(rows[0]!.value).toContain('未测到')
+  })
+
+  it('代价越界时判 fail，不是永远 pass', () => {
+    // 一条永远 pass 的判据，与没有判据是同一件事。
+    expect(gradePostFx({ ...cost, twoPassFps: 20 })[1]!.verdict).toBe('fail')
+    expect(gradePostFx({ ...cost, onePassFps: 30 })[0]!.verdict).toBe('fail')
   })
 })

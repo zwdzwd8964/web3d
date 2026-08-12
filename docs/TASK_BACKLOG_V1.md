@@ -2996,16 +2996,25 @@
   - **六条防空转自检**：片段真被找到（读运行时警告）· 那条规则真挂满 · 爆炸真跑完 ·
     ops 非空 · 有 marker · 有 panel op · 有节点被高亮。
 
-  **未交付，四项**：
-  1. **`exportImage` 比对**——两侧都没有 renderer，`readPixels` 返回 null，比的是**两次失败**
+  **第二批补齐（同一张卡）**：
+  - **bench 增三档后处理**：`PostFxCost` + `gradePostFx` 进 `rows`。在此之前 T-235 已经在量
+    「开 / 关后处理」两档，但只 `console.info`——**不进表就等于没量**，报告导出的是 `rows`，
+    回填脚本读的也是 `rows`。第三档（两条 pass）是 `MAX_ACTIVE_OUTLINE_PRESETS` 的上限，
+    而**那个上限今天是拍的不是测的**。bench E2E 9.4s，仍在 30s 预算内。
+  - **两个 DEV 探针**：`__w3DevSectionPlanes`（读 `renderer.clippingPlanes`，不是剖切层的账本）
+    与 `__w3DevPositionOf`（读三对象的世界矩阵）。
+  - **`e2e/tests/explode-section.spec.ts`**：爆炸真的挪开了零件、关掉回原位；剖切打开时
+    渲染器上真的多一张平面、关掉回到 0 张。**卡面第 4 组变异实测红**——把探针换成读文档，
+    E2E 仍然红在「位置必须真的变了」那一句上。
+
+  **仍未交付，两项**：
+  1. ~~**`exportImage` 比对**~~ —— **已改挂 T-295**（产品批准）。两侧都没有 renderer，比的是**两次失败**
      （`ok:false, width:0, height:0`，`toEqual` 会绿）。补播放器侧的 `createRenderer` 注入口
      要动 `packages/player/src/session.ts`，**不在 C3 允许的 diff 面里**（只许 `bench/`、
-     `embed/` 与 `app.ts` 的装配段）。这一项要么单开一张卡带 ADR，要么并进 T-295。
+     `embed/` 与 `app.ts` 的装配段）。T-295 本来就要在真浏览器里跑出图链路、有真 renderer，
+     在那里比有意义得多。
   2. **样板工程作为第二份 parity 输入**（`event-script-pump.json`）。
-  3. **E2E 两条新 spec**（`postfx.spec.ts` / `explode-section.spec.ts`）与两个 DEV 探针
-     （`__w3DevSectionPlanes` / `__w3DevPositionOf`，今天全仓不存在）。
-  4. **bench 增三档后处理**。今天 `main.ts:328-335` 已经在量 composed/direct 两档，但只
-     `console.info`，不产出 `BenchRow`。
+  3. **`e2e/tests/postfx.spec.ts`**。⚠ 既有的 `section-outline.spec.ts` 已经覆盖了卡面 postfx 的
 
 - **本卡最值钱的一条**：变异 ② 是 ADR-0019 那句「双向比较看不见对称的错误」的**机器证明**
   ——两侧同时让 sprite 层不画东西，`toEqual` 全绿，抓住它的是那条断绝对量的自检。

@@ -510,6 +510,30 @@ export function gradeSection(measurement: SectionMeasurement): BenchRow[] {
 }
 
 /** 爆炸动画进行中的稳态读数。**不是终态**——终态与没爆炸时是同一种画面。 */
+/**
+ * T-294 · 后处理链的三档。
+ *
+ * 在此之前 bench 已经在量「开 / 关后处理」两档了（T-235），但结果只 `console.info`——
+ * **不进表就等于没量**：报告导出的是 `rows`，回填脚本读的也是 `rows`，一个只在控制台
+ * 出现过的数字，第二天就没人找得到。
+ *
+ * 三档而不是两档，是因为 `MAX_ACTIVE_OUTLINE_PRESETS = 2` —— 一个预设一条 pass，
+ * 而「第二条 pass 贵不贵」正是描边预设上限那个默认值今天唯一说不清的地方
+ * （它是**拍的，不是测的**，见 CLAUDE.md 开头那句警告）。
+ */
+export interface PostFxCost {
+  /** 关掉后处理链，直接渲染。 */
+  readonly offFps: number
+  /** 开链，且只有一种描边预设是激活的（1 条 outline pass）。 */
+  readonly onePassFps: number
+  /** 开链，两种预设同时激活（2 条 pass，这是上限）。 */
+  readonly twoPassFps: number
+  /** 当前管线模式，`composed` / `direct`。 */
+  readonly mode: string
+  /** ADR-0042 · 三档里最少的那一档收到几个有效采样帧。 */
+  readonly frames: number
+}
+
 export interface ExplodeCost {
   readonly groupName: string
   /** 这个分组下有几个直接成员在动。 */
@@ -526,6 +550,62 @@ export interface ExplodeCost {
  * 量的是**动画进行中**：那时每一帧都要重算成员的世界矩阵并重传，而终态与静止画面
  * 没有区别。把终态当成「爆炸的性能」量，会量出一个和没爆炸时一模一样的数。
  */
+/**
+ * T-294 · 后处理三档进表。
+ *
+ * 报的是**相对代价**（掉了百分之多少）而不是绝对帧率：绝对值只在这一台机器上有意义，
+ * 而「开一条描边掉 8%」是可以跨机器比的那个数。
+ *
+ * 判据用 `notMeasured` 而不是「没测到就不出这一行」——ADR-0042 决策 3 的同一条纪律：
+ * 整行消失读起来像「这一档不存在」，而实际是「这一档没量到」。
+ */
+export function gradePostFx(cost: PostFxCost | null): BenchRow[] {
+  if (!cost) {
+    return [
+      {
+        metric: '后处理链代价',
+        value: '未测到（本轮没有跑到后处理档）',
+        limit: '—',
+        verdict: 'warn',
+        note: '这一档只在无阴影那一轮量。上面那份灯光扫描如果提前收敛，就走不到这里。',
+      },
+    ]
+  }
+  if (!isMeasured(cost.frames)) {
+    return [
+      {
+        metric: '后处理链代价',
+        value: notMeasured(cost.frames),
+        limit: `≥ ${MIN_SAMPLES} 帧`,
+        verdict: 'warn',
+        note: '采样不足。**这不是「代价为 0」**，是没量到 —— 换一台机器或把测量时长调长再来一次。',
+      },
+    ]
+  }
+
+  const drop = (fps: number) => (cost.offFps <= 0 ? 0 : ((cost.offFps - fps) / cost.offFps) * 100)
+  const onePass = drop(cost.onePassFps)
+  const twoPass = drop(cost.twoPassFps)
+
+  return [
+    {
+      metric: '后处理链代价（1 条描边 pass）',
+      value: `${onePass.toFixed(1)}%（${cost.offFps.toFixed(1)} → ${cost.onePassFps.toFixed(1)} fps）`,
+      limit: '≤ 20%',
+      verdict: onePass <= 20 ? 'pass' : onePass <= 35 ? 'warn' : 'fail',
+      note: `管线 mode=${cost.mode}。开一条描边 pass 相对直接渲染掉了多少。`,
+    },
+    {
+      metric: '后处理链代价（2 条描边 pass · 上限）',
+      value: `${twoPass.toFixed(1)}%（${cost.offFps.toFixed(1)} → ${cost.twoPassFps.toFixed(1)} fps）`,
+      limit: '≤ 35%',
+      verdict: twoPass <= 35 ? 'pass' : twoPass <= 50 ? 'warn' : 'fail',
+      note:
+        '两条是 `MAX_ACTIVE_OUTLINE_PRESETS` 的上限。**这个默认值今天是拍的不是测的**，这一行就是把它变成实测的第一步。',
+    },
+  ]
+}
+
 export function gradeExplode(cost: ExplodeCost | null): BenchRow[] {
   if (cost === null) {
     return [
